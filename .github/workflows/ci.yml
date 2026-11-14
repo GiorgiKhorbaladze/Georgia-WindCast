@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 22.21.1
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --no-audit --no-fund
@@ -48,7 +48,7 @@ jobs:
         working-directory: backend
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:17.7-alpine3.22
         env:
           POSTGRES_USER: windcast
           POSTGRES_PASSWORD: ci-only-password
@@ -87,9 +87,12 @@ jobs:
     needs: [frontend, backend]
     steps:
       - uses: actions/checkout@v6
-      - name: Prepare CI-only environment file
-        run: sed 's/^POSTGRES_PASSWORD=change-me/POSTGRES_PASSWORD=ci-only-password/' .env.example > .env
-      - name: Validate Compose configuration
-        run: docker compose config --quiet
-      - name: Run smoke test
-        run: scripts/compose-smoke.sh
+      - name: Run smoke test (isolated project, random password)
+        shell: bash
+        run: scripts/compose-smoke.sh 2>&1 | tee compose-smoke.txt
+      - name: Upload smoke transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-smoke-transcript
+          path: compose-smoke.txt

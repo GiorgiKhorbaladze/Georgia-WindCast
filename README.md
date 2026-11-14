@@ -29,7 +29,7 @@ docker compose up --build -d --wait
 
 Ports bind to loopback by default. Data persists in the `db-data` volume; `docker compose down` keeps it, `docker compose down -v` deletes it.
 
-Run the smoke test (clean start, health, unavailable UI state, worker heartbeat, persistence across restart):
+Run the smoke test (clean start, health, unavailable UI state, worker heartbeat, persistence across restart, migration round trip). It uses its own Compose project (`windcast-smoke`), a random password and ports 18000/13000, so it never touches your stack:
 
 ```bash
 scripts/compose-smoke.sh
