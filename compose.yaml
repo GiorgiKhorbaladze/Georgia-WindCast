@@ -1,0 +1,84 @@
+# Georgia WindCast - local and private-pilot stack.
+# Usage: cp .env.example .env, replace secrets, then: docker compose up --build -d
+name: windcast
+
+x-backend-env: &backend-env
+  WINDCAST_APP_ENV: ${WINDCAST_APP_ENV:-production}
+  WINDCAST_ALLOW_FIXTURES: "false"
+  WINDCAST_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-windcast}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-windcast}
+  WINDCAST_WORKER_HEARTBEAT_SECONDS: ${WINDCAST_WORKER_HEARTBEAT_SECONDS:-30}
+  WINDCAST_WORKER_STALE_AFTER_SECONDS: ${WINDCAST_WORKER_STALE_AFTER_SECONDS:-120}
+
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-windcast}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-windcast}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: ./backend
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+    image: windcast-backend:local
+    command: ["alembic", "upgrade", "head"]
+    environment: *backend-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: windcast-backend:local
+    pull_policy: never  # built by the migrate service
+    restart: unless-stopped
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000"
+
+  worker:
+    image: windcast-backend:local
+    pull_policy: never  # built by the migrate service
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    environment: *backend-env
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+    image: windcast-frontend:local
+    restart: unless-stopped
+    environment:
+      WINDCAST_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
+
+volumes:
+  db-data:
