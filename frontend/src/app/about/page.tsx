@@ -18,7 +18,7 @@ export default async function AboutPage() {
         <div className="mt-5 space-y-4 leading-relaxed text-slate-300">
           {t.about.paragraphs.map((p) => <p key={p}>{p}</p>)}
         </div>
-        <p className="mt-6 text-sm text-slate-500">{t.timezoneNote}</p>
+        <p className="mt-6 text-sm text-slate-400">{t.timezoneNote}</p>
       </section>
       <section className="wc-panel p-6 sm:p-8" aria-labelledby="sources-title">
         <h2 id="sources-title" className="wc-label">{t.about.sources}</h2>
@@ -37,7 +37,7 @@ export default async function AboutPage() {
                 <div className="font-medium text-slate-100">{locale === "ka" ? s.name_ka : s.name_en}</div>
                 <div className="font-mono text-xs text-slate-300">{s.latitude?.toFixed(5)}°N, {s.longitude?.toFixed(5)}°E · ±{s.coordinate_uncertainty_km} km</div>
                 <div className="text-xs text-slate-400">{t.sites.coordinateSource}: {s.coordinate_source}</div>
-                {s.coordinate_note && <div className="text-xs text-slate-500">{s.coordinate_note}</div>}
+                {s.coordinate_note && <div className="text-xs text-slate-400">{s.coordinate_note}</div>}
               </li>
             ))}
           </ul>

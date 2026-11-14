@@ -135,10 +135,10 @@ function SiteChart({ data, locale }: { data: SiteWeather; locale: Locale }) {
         <EChart option={option} height={300} ariaLabel={`${t.weather.title}: ${data.site.name_en}`} className="mt-2" />
       )}
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 sm:grid-cols-4">
-        <div><dt className="text-slate-500">{t.weather.model}</dt><dd>{data.forecast.supported ? data.forecast.model_label : data.reanalysis.model_label}</dd></div>
-        <div><dt className="text-slate-500">{t.weather.run}</dt><dd>{data.forecast.run_at ? formatTbilisiMinute(data.forecast.run_at) : "-"}</dd></div>
-        <div><dt className="text-slate-500">{t.weather.retrieved}</dt><dd>{data.forecast.retrieved_at ? formatTbilisiMinute(data.forecast.retrieved_at) : "-"}</dd></div>
-        <div><dt className="text-slate-500">{t.weather.gridPoint}</dt><dd>{data.forecast.grid_latitude !== null ? `${data.forecast.grid_latitude?.toFixed(3)}, ${data.forecast.grid_longitude?.toFixed(3)}` : "-"}</dd></div>
+        <div><dt className="text-slate-400">{t.weather.model}</dt><dd>{data.forecast.supported ? data.forecast.model_label : data.reanalysis.model_label}</dd></div>
+        <div><dt className="text-slate-400">{t.weather.run}</dt><dd>{data.forecast.run_at ? formatTbilisiMinute(data.forecast.run_at) : "-"}</dd></div>
+        <div><dt className="text-slate-400">{t.weather.retrieved}</dt><dd>{data.forecast.retrieved_at ? formatTbilisiMinute(data.forecast.retrieved_at) : "-"}</dd></div>
+        <div><dt className="text-slate-400">{t.weather.gridPoint}</dt><dd>{data.forecast.grid_latitude !== null ? `${data.forecast.grid_latitude?.toFixed(3)}, ${data.forecast.grid_longitude?.toFixed(3)}` : "-"}</dd></div>
       </dl>
       {!data.forecast.supported && data.reanalysis.supported && (
         <p className="mt-2 text-xs text-amber-warn">{t.weather.forecast}: {t.weather.heightUnsupported}</p>
@@ -207,7 +207,7 @@ export function ForecastExplorer({
           ),
         )}
       </div>
-      <p className="mt-3 text-xs text-slate-500">{t.weather.reanalysisNote}</p>
+      <p className="mt-3 text-xs text-slate-400">{t.weather.reanalysisNote}</p>
     </div>
   );
 }

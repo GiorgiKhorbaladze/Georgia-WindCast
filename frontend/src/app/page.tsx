@@ -61,7 +61,7 @@ export default async function DashboardPage() {
           <Meta label={t.kpi.retrievedAt}>{formatTbilisi(kpi.retrievedAt, locale) ?? t.kpi.notReported}</Meta>
           <Meta label={t.kpi.quality}>{kpi.quality ?? t.kpi.notReported}</Meta>
         </dl>
-        <p className="mt-4 text-xs text-slate-500">{t.kpi.scopeNote}</p>
+        <p className="mt-4 text-xs text-slate-400">{t.kpi.scopeNote}</p>
       </section>
 
       <div className="grid gap-5 sm:grid-cols-3 lg:col-span-4 lg:grid-cols-1">
@@ -127,7 +127,7 @@ export default async function DashboardPage() {
                       const n = rows.find((r) => r.height_m === h);
                       return (
                         <div key={h} className="rounded bg-ink-950/60 px-1 py-1">
-                          <div className="text-[10px] text-slate-500">{h} m</div>
+                          <div className="text-[10px] text-slate-400">{h} m</div>
                           <div className="font-mono text-sm text-teal-glow">{formatSpeed(n?.speed_ms) ?? "-"}</div>
                         </div>
                       );
@@ -140,7 +140,7 @@ export default async function DashboardPage() {
         ) : (
           <p className="mt-4 text-sm text-slate-400">{t.apiUnreachable}</p>
         )}
-        <p className="mt-3 text-xs text-slate-500">m/s · {t.weather.notMeasured}. {t.sites.noMw}</p>
+        <p className="mt-3 text-xs text-slate-400">m/s · {t.weather.notMeasured}. {t.sites.noMw}</p>
       </section>
 
       <section aria-labelledby="types-title" className="wc-panel p-5 lg:col-span-12">
@@ -176,7 +176,7 @@ function ForecastHorizon({ w, locale, t }: { w: WeatherOverview | null; locale: 
 function Meta({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-xs text-slate-500">{label}</dt>
+      <dt className="text-xs text-slate-400">{label}</dt>
       <dd className="mt-0.5 tabular-nums text-slate-200">{children}</dd>
     </div>
   );
@@ -187,7 +187,7 @@ function SmallKpi({ label, note, children }: { label: string; note?: string | nu
     <section className="wc-panel flex flex-col justify-between gap-3 p-5">
       <h2 className="wc-label">{label}</h2>
       <div>{children}</div>
-      {note && <p className="text-xs text-slate-500">{note}</p>}
+      {note && <p className="text-xs text-slate-400">{note}</p>}
     </section>
   );
 }

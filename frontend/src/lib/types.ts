@@ -43,7 +43,9 @@ export interface SiteSummary {
   latitude: number | null;
   longitude: number | null;
   municipality_en: string | null;
+  municipality_ka: string | null;
   status_en: string | null;
+  status_ka: string | null;
   coordinate_source: string | null;
   coordinate_uncertainty_km: number | null;
   coordinate_note: string | null;

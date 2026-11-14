@@ -61,7 +61,9 @@ def main() -> int:
         return 0
     now = utcnow().replace(second=0, microsecond=0)
     latest = now - timedelta(minutes=3 + now.minute % 3)
-    archive = json.loads(ARCHIVE.read_text())
+    archive = json.loads(ARCHIVE.read_text()) if ARCHIVE.exists() else None
+    if archive is None:
+        print(f"WARNING: {ARCHIVE.name} missing; weather not seeded", file=sys.stderr)
     hour = now.replace(minute=0)
     run_at = hour - timedelta(hours=3)
 
@@ -88,7 +90,7 @@ def main() -> int:
                     retrieved_at=t + timedelta(seconds=80),
                 )
             )
-        for site, loc in zip(SITES, archive, strict=True):
+        for site, loc in zip(SITES, archive or [], strict=archive is not None):
             speeds, dirs10 = loc["hourly"]["wind_speed_100m"], loc["hourly"]["wind_direction_100m"]
             sp10 = loc["hourly"]["wind_speed_10m"]
             for k in range(48):

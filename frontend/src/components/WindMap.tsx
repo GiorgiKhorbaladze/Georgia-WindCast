@@ -141,6 +141,8 @@ export function WindMap({
         el.type = "button";
         el.className = "wc-marker";
         el.dataset.site = s.site.id;
+        el.setAttribute("aria-label", locale === "ka" ? s.site.name_ka : s.site.name_en);
+        el.textContent = "-";
         el.addEventListener("click", () => setSelected(s.site.id));
         const marker = new maplibregl.Marker({ element: el, anchor: "center" })
           .setLngLat([s.site.longitude, s.site.latitude])
@@ -156,6 +158,7 @@ export function WindMap({
       map.current = null;
       markers.current = {};
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the map is created once per data set
   }, [webgl, initial]);
 
   // Marker contents follow time/height/selection
@@ -298,7 +301,7 @@ export function WindMap({
                 </button>
               ))}
             </div>
-            <span className="text-xs text-slate-500">100 / 200 m: {t.weather.heightUnsupported}</span>
+            <span className="text-xs text-slate-400">100 / 200 m: {t.weather.heightUnsupported}</span>
             <button type="button" aria-pressed={animate} onClick={() => setAnimate(!animate)}
               className="ml-auto rounded-md border border-line px-3 py-1.5 text-sm text-slate-300 hover:text-white">
               {t.map.animation}: {animate ? t.map.animationOn : t.map.animationOff}
@@ -338,7 +341,7 @@ export function WindMap({
                   <span className="text-sm text-slate-100">{locale === "ka" ? c.site.name_ka : c.site.name_en}</span>
                   <span className="flex items-center gap-2 font-mono text-sm" style={{ color: speedColor(c.value?.speed_ms ?? null) }}>
                     <span dangerouslySetInnerHTML={{ __html: arrowSvg(c.value?.direction_deg ?? null) }} />
-                    {formatSpeed(c.value?.speed_ms) ?? "-"} <span className="text-xs text-slate-500">m/s</span>
+                    {formatSpeed(c.value?.speed_ms) ?? "-"} <span className="text-xs text-slate-400">m/s</span>
                   </span>
                 </button>
               </li>
@@ -356,15 +359,18 @@ function SiteDetail({ data, locale, height }: { data: SiteData & { value: Weathe
   return (
     <section className="wc-panel p-4" aria-live="polite" data-testid="map-detail">
       <h2 className="text-base font-semibold text-white">{locale === "ka" ? data.site.name_ka : data.site.name_en}</h2>
-      <p className="text-xs text-slate-400">{data.site.municipality_en} · {data.site.status_en}</p>
+      <p className="text-xs text-slate-400">
+        {locale === "ka" ? (data.site.municipality_ka ?? data.site.municipality_en) : data.site.municipality_en} ·{" "}
+        {locale === "ka" ? (data.site.status_ka ?? data.site.status_en) : data.site.status_en}
+      </p>
       <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
-        <div><dt className="text-xs text-slate-500">{t.weather.speed} ({height} m)</dt><dd className="font-mono text-2xl text-white">{formatSpeed(v?.speed_ms) ?? "-"} <span className="text-sm text-cyan-glow">m/s</span></dd></div>
-        <div><dt className="text-xs text-slate-500">{t.weather.direction}</dt><dd className="font-mono text-slate-100">{v?.direction_deg != null ? `${t.weather.from} ${compass(v.direction_deg, locale)} · ${Math.round(v.direction_deg)}°` : "-"}</dd></div>
-        <div><dt className="text-xs text-slate-500">{t.weather.validTime}</dt><dd className="text-slate-200">{v ? formatTbilisiMinute(v.t) : "-"}</dd></div>
-        <div><dt className="text-xs text-slate-500">{t.weather.model}</dt><dd className="text-slate-200">{data.weather?.forecast.model_label ?? "-"}</dd></div>
+        <div><dt className="text-xs text-slate-400">{t.weather.speed} ({height} m)</dt><dd className="font-mono text-2xl text-white">{formatSpeed(v?.speed_ms) ?? "-"} <span className="text-sm text-cyan-glow">m/s</span></dd></div>
+        <div><dt className="text-xs text-slate-400">{t.weather.direction}</dt><dd className="font-mono text-slate-100">{v?.direction_deg != null ? `${t.weather.from} ${compass(v.direction_deg, locale)} · ${Math.round(v.direction_deg)}°` : "-"}</dd></div>
+        <div><dt className="text-xs text-slate-400">{t.weather.validTime}</dt><dd className="text-slate-200">{v ? formatTbilisiMinute(v.t) : "-"}</dd></div>
+        <div><dt className="text-xs text-slate-400">{t.weather.model}</dt><dd className="text-slate-200">{data.weather?.forecast.model_label ?? "-"}</dd></div>
       </dl>
-      <p className="mt-3 text-xs text-slate-500">{t.weather.notMeasured}.</p>
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-3 text-xs text-slate-400">{t.weather.notMeasured}.</p>
+      <p className="mt-2 text-xs text-slate-400">
         {t.sites.coordinateSource}: {data.site.coordinate_source}
         {data.site.coordinate_uncertainty_km != null && ` · ${t.sites.uncertainty} ≈ ${data.site.coordinate_uncertainty_km} km`}
       </p>

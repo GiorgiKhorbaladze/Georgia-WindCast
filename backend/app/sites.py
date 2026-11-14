@@ -21,7 +21,9 @@ SITES: tuple[SiteSummary, ...] = (
         latitude=42.055596,
         longitude=43.985914,
         municipality_en="Gori and Kareli municipalities",
+        municipality_ka="გორისა და ქარელის მუნიციპალიტეტები",
         status_en="Under construction (206 MW, 33 turbines) per the latest sources",
+        status_ka="მშენებარე (206 მგვტ, 33 ტურბინა) უახლესი წყაროების მიხედვით",
         coordinate_source=(
             "Wikidata Q141155401, citing the developer's wind farm layout document (windpower.ge)"
         ),
@@ -39,7 +41,9 @@ SITES: tuple[SiteSummary, ...] = (
         latitude=41.895560,
         longitude=44.370612,
         municipality_en="Kaspi Municipality (Niabi)",
+        municipality_ka="კასპის მუნიციპალიტეტი (ნიაბი)",
         status_en="Test operation reported from 2026 (18.75 MW, 3 turbines)",
+        status_ka="2026 წლიდან საცდელ ექსპლუატაციაშია (18,75 მგვტ, 3 ტურბინა)",
         coordinate_source=(
             "Wikidata Q141149692, citing the Ministry of Environmental Protection and "
             "Agriculture screening decision for Zemo Wind LLC (ei.gov.ge)"
@@ -55,7 +59,9 @@ SITES: tuple[SiteSummary, ...] = (
         latitude=42.022423,
         longitude=44.047890,
         municipality_en="Gori and Kareli municipalities",
+        municipality_ka="გორისა და ქარელის მუნიციპალიტეტები",
         status_en="Operating since 2016 (20.7 MW, 6 turbines)",
+        status_ka="ექსპლუატაციაშია 2016 წლიდან (20,7 მგვტ, 6 ტურბინა)",
         coordinate_source=(
             "Wikidata Q141149685, from OpenStreetMap relation 8371089 (Qartli Wind Farm)"
         ),

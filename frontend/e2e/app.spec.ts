@@ -37,9 +37,10 @@ test("dashboard shows the national MW KPI with source time and quality, no per-s
   await expect(page.getByText("Fresh", { exact: true }).first()).toBeVisible();
   // MW appears only in the national KPI/history, never next to a site
   const sitesPanel = page.getByTestId("weather-now");
-  await expect(sitesPanel).not.toContainText("MW ");
+  await expect(sitesPanel).not.toContainText(/\d+(\.\d+)?\s*MW/);
   await expect(sitesPanel).toContainText("m/s");
-  await expect(page.getByTestId("history-summary")).toContainText("Missing intervals: 1");
+  // the seeded 15-minute gap, plus a trailing gap if the seed has aged past the publication allowance
+  await expect(page.getByTestId("history-summary")).toContainText(/Missing intervals: [12]/);
 });
 
 test("language switch works with the keyboard and persists", async ({ page }) => {
@@ -50,7 +51,7 @@ test("language switch works with the keyboard and persists", async ({ page }) =>
   await en.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
-  await expect(page.getByRole("link", { name: "History" })).toBeVisible();
+  await expect(page.getByRole("navigation").getByRole("link", { name: "History" })).toBeVisible();
   await page.goto("/about");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
 });
@@ -70,10 +71,10 @@ test("history range filters reload data and reject invalid custom ranges", async
   await page.getByRole("button", { name: "7 days" }).click();
   await expect(page.getByRole("button", { name: "7 days" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("history-summary")).toContainText("14 actual readings");
-  await page.getByLabel("From").fill("2026-01-01T00:00");
-  await page.getByLabel("To").fill("2026-03-01T00:00");
+  await page.getByLabel("From", { exact: true }).fill("2026-01-01T00:00");
+  await page.getByLabel("To", { exact: true }).fill("2026-03-01T00:00");
   await page.getByRole("button", { name: "Show" }).click();
-  await expect(page.getByRole("alert")).toContainText("max. 31 days");
+  await expect(page.getByText("Enter a valid range (max. 31 days).")).toBeVisible();
 });
 
 test("forecast page shows three model charts and honest unsupported heights", async ({ page }) => {

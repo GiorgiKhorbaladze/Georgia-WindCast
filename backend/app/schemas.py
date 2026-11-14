@@ -123,7 +123,9 @@ class SiteSummary(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     municipality_en: str | None = None
+    municipality_ka: str | None = None
     status_en: str | None = None
+    status_ka: str | None = None
     coordinate_source: str | None = None
     coordinate_uncertainty_km: float | None = None
     coordinate_note: str | None = None
