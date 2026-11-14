@@ -1,0 +1,190 @@
+ Network windcast-smoke_default  Creating
+ Network windcast-smoke_default  Created
+ Volume windcast-smoke_postgres_data  Creating
+ Volume windcast-smoke_postgres_data  Created
+ Container windcast-smoke-db-1  Creating
+ Container windcast-smoke-frontend-1  Creating
+ Container windcast-smoke-db-1  Created
+ Container windcast-smoke-migrate-1  Creating
+ Container windcast-smoke-frontend-1  Created
+ Container windcast-smoke-migrate-1  Created
+ Container windcast-smoke-worker-1  Creating
+ Container windcast-smoke-api-1  Creating
+ Container windcast-smoke-worker-1  Created
+ Container windcast-smoke-api-1  Created
+ Container windcast-smoke-db-1  Starting
+ Container windcast-smoke-frontend-1  Starting
+ Container windcast-smoke-db-1  Started
+ Container windcast-smoke-db-1  Waiting
+ Container windcast-smoke-frontend-1  Started
+ Container windcast-smoke-db-1  Healthy
+ Container windcast-smoke-migrate-1  Starting
+ Container windcast-smoke-migrate-1  Started
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-worker-1  Starting
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-api-1  Starting
+ Container windcast-smoke-worker-1  Started
+ Container windcast-smoke-api-1  Started
+ Container windcast-smoke-worker-1  Waiting
+ Container windcast-smoke-frontend-1  Waiting
+ Container windcast-smoke-db-1  Waiting
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-api-1  Waiting
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-db-1  Healthy
+ Container windcast-smoke-frontend-1  Healthy
+ Container windcast-smoke-api-1  Healthy
+ Container windcast-smoke-worker-1  Healthy
+{"status":"ok"}{"status":"ok"}API unavailable states: PASS
+Frontend production startup: PASS
+CREATE TABLE
+INSERT 0 1
+ Container windcast-smoke-worker-1  Stopping
+ Container windcast-smoke-api-1  Stopping
+ Container windcast-smoke-frontend-1  Stopping
+ Container windcast-smoke-frontend-1  Stopped
+ Container windcast-smoke-frontend-1  Removing
+ Container windcast-smoke-frontend-1  Removed
+ Container windcast-smoke-api-1  Stopped
+ Container windcast-smoke-api-1  Removing
+ Container windcast-smoke-api-1  Removed
+ Container windcast-smoke-worker-1  Stopped
+ Container windcast-smoke-worker-1  Removing
+ Container windcast-smoke-worker-1  Removed
+ Container windcast-smoke-migrate-1  Stopping
+ Container windcast-smoke-migrate-1  Stopped
+ Container windcast-smoke-migrate-1  Removing
+ Container windcast-smoke-migrate-1  Removed
+ Container windcast-smoke-db-1  Stopping
+ Container windcast-smoke-db-1  Stopped
+ Container windcast-smoke-db-1  Removing
+ Container windcast-smoke-db-1  Removed
+ Network windcast-smoke_default  Removing
+ Network windcast-smoke_default  Removed
+ Network windcast-smoke_default  Creating
+ Network windcast-smoke_default  Created
+ Container windcast-smoke-frontend-1  Creating
+ Container windcast-smoke-db-1  Creating
+ Container windcast-smoke-db-1  Created
+ Container windcast-smoke-migrate-1  Creating
+ Container windcast-smoke-frontend-1  Created
+ Container windcast-smoke-migrate-1  Created
+ Container windcast-smoke-worker-1  Creating
+ Container windcast-smoke-api-1  Creating
+ Container windcast-smoke-worker-1  Created
+ Container windcast-smoke-api-1  Created
+ Container windcast-smoke-frontend-1  Starting
+ Container windcast-smoke-db-1  Starting
+ Container windcast-smoke-db-1  Started
+ Container windcast-smoke-db-1  Waiting
+ Container windcast-smoke-frontend-1  Started
+ Container windcast-smoke-db-1  Healthy
+ Container windcast-smoke-migrate-1  Starting
+ Container windcast-smoke-migrate-1  Started
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-api-1  Starting
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-worker-1  Starting
+ Container windcast-smoke-api-1  Started
+ Container windcast-smoke-worker-1  Started
+ Container windcast-smoke-worker-1  Waiting
+ Container windcast-smoke-frontend-1  Waiting
+ Container windcast-smoke-db-1  Waiting
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-api-1  Waiting
+ Container windcast-smoke-frontend-1  Healthy
+ Container windcast-smoke-db-1  Healthy
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-api-1  Healthy
+ Container windcast-smoke-worker-1  Healthy
+Database persistence across stack recreation: PASS
+ Container windcast-smoke-worker-1  Stopping
+ Container windcast-smoke-api-1  Stopping
+ Container windcast-smoke-api-1  Stopped
+ Container windcast-smoke-worker-1  Stopped
+ Container windcast-smoke-db-1  Running
+ Container windcast-smoke-db-1  Running
+ Container windcast-smoke-frontend-1  Running
+ Container windcast-smoke-db-1  Running
+ Container windcast-smoke-db-1  Waiting
+ Container windcast-smoke-db-1  Healthy
+ Container windcast-smoke-migrate-1  Starting
+ Container windcast-smoke-migrate-1  Started
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-worker-1  Starting
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-api-1  Starting
+ Container windcast-smoke-worker-1  Started
+ Container windcast-smoke-api-1  Started
+ Container windcast-smoke-worker-1  Waiting
+ Container windcast-smoke-frontend-1  Waiting
+ Container windcast-smoke-db-1  Waiting
+ Container windcast-smoke-migrate-1  Waiting
+ Container windcast-smoke-api-1  Waiting
+ Container windcast-smoke-migrate-1  Exited
+ Container windcast-smoke-frontend-1  Healthy
+ Container windcast-smoke-db-1  Healthy
+ Container windcast-smoke-api-1  Healthy
+ Container windcast-smoke-worker-1  Healthy
+Migration downgrade/upgrade: PASS
+COMPOSE SMOKE: PASS
+frontend-1  | ▲ Next.js 16.4.6
+frontend-1  | - Local:         http://localhost:3000
+frontend-1  | - Network:       http://0.0.0.0:3000
+frontend-1  | ✓ Ready in 0ms
+frontend-1  | ✓ Running next.config took 1.2ms
+api-1       | INFO:     Started server process [1]
+api-1       | INFO:     Waiting for application startup.
+api-1       | INFO:     Application startup complete.
+api-1       | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+api-1       | INFO:     127.0.0.1:39566 - "GET /health/ready HTTP/1.1" 200 OK
+api-1       | INFO:     Shutting down
+api-1       | INFO:     Waiting for application shutdown.
+api-1       | INFO:     Application shutdown complete.
+api-1       | INFO:     Finished server process [1]
+api-1       | INFO:     Started server process [1]
+api-1       | INFO:     Waiting for application startup.
+api-1       | INFO:     Application startup complete.
+api-1       | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+api-1       | INFO:     127.0.0.1:35158 - "GET /health/ready HTTP/1.1" 200 OK
+api-1       | INFO:     127.0.0.1:48288 - "GET /health/ready HTTP/1.1" 200 OK
+db-1        |
+db-1        | PostgreSQL Database directory appears to contain a database; Skipping initialization
+db-1        |
+db-1        | 2026-11-14 20:23:06.480 UTC [1] LOG:  starting PostgreSQL 17.7 on x86_64-pc-linux-musl, compiled by gcc (Alpine 14.2.0) 14.2.0, 64-bit
+db-1        | 2026-11-14 20:23:06.481 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+db-1        | 2026-11-14 20:23:06.481 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+db-1        | 2026-11-14 20:23:06.483 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+db-1        | 2026-11-14 20:23:06.486 UTC [31] LOG:  database system was shut down at 2026-11-14 20:22:47 UTC
+db-1        | 2026-11-14 20:23:06.497 UTC [1] LOG:  database system is ready to accept connections
+ Container windcast-smoke-worker-1  Stopping
+ Container windcast-smoke-frontend-1  Stopping
+ Container windcast-smoke-api-1  Stopping
+ Container windcast-smoke-frontend-1  Stopped
+ Container windcast-smoke-frontend-1  Removing
+ Container windcast-smoke-frontend-1  Removed
+ Container windcast-smoke-api-1  Stopped
+ Container windcast-smoke-api-1  Removing
+ Container windcast-smoke-api-1  Removed
+ Container windcast-smoke-worker-1  Stopped
+ Container windcast-smoke-worker-1  Removing
+ Container windcast-smoke-worker-1  Removed
+ Container windcast-smoke-migrate-1  Stopping
+ Container windcast-smoke-migrate-1  Stopped
+ Container windcast-smoke-migrate-1  Removing
+ Container windcast-smoke-migrate-1  Removed
+ Container windcast-smoke-db-1  Stopping
+ Container windcast-smoke-db-1  Stopped
+ Container windcast-smoke-db-1  Removing
+ Container windcast-smoke-db-1  Removed
+ Network windcast-smoke_default  Removing
+ Volume windcast-smoke_postgres_data  Removing
+ Volume windcast-smoke_postgres_data  Removed
+ Network windcast-smoke_default  Removed
