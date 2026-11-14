@@ -10,7 +10,11 @@ Content, so the UI can be exercised in populated states:
 - Weather: values from the recorded ERA5 archive fixture (real numbers), re-timestamped and used as
   a forecast run (heights 10/80/120/180) and as reanalysis (10/100), so all chart series appear.
 
-Usage: WINDCAST_APP_ENV=test WINDCAST_DATABASE_URL=... python -m tests.e2e_seed [--clear]
+Scenarios (UI states for issue #5): default = fresh; --stale = all readings shifted 2 h into the
+past; --zero = the latest reading is a real 0.0 MW value (calm); --clear = empty database.
+
+Usage:
+  WINDCAST_APP_ENV=test WINDCAST_DATABASE_URL=... python -m tests.e2e_seed [--clear|--stale|--zero]
 """
 
 from __future__ import annotations
@@ -61,6 +65,11 @@ def main() -> int:
         return 0
     now = utcnow().replace(second=0, microsecond=0)
     latest = now - timedelta(minutes=3 + now.minute % 3)
+    if "--stale" in sys.argv:
+        latest -= timedelta(hours=2)
+    readings = list(REAL_GSE)
+    if "--zero" in sys.argv:
+        readings[-1] = (0.0, "ACT")  # synthetic calm value for the zero-state test only
     archive = json.loads(ARCHIVE.read_text()) if ARCHIVE.exists() else None
     if archive is None:
         print(f"WARNING: {ARCHIVE.name} missing; weather not seeded", file=sys.stderr)
@@ -71,8 +80,8 @@ def main() -> int:
         s.execute(delete(GenerationReading))
         s.execute(delete(WeatherValue))
         s.execute(delete(SourceStatusRecord))
-        n = len(REAL_GSE)
-        for i, (value, quality) in enumerate(REAL_GSE):
+        n = len(readings)
+        for i, (value, quality) in enumerate(readings):
             t = latest - timedelta(minutes=3 * (n - 1 - i))
             if i < 5:
                 t -= timedelta(minutes=15)  # deliberate gap between the 5th and 6th reading

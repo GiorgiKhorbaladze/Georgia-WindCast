@@ -94,6 +94,12 @@ test("map: three markers, keyboard-selectable, time slider and pause", async ({ 
   await page.goto("/map");
   const markers = page.locator(".wc-marker");
   await expect(markers).toHaveCount(3);
+  // Geography check: Ruisi lies west of Kartli/Gori; Zemo Wind (Kaspi) lies east and south of it.
+  const box = async (id: string) => (await page.locator(`.wc-marker[data-site="${id}"]`).boundingBox())!;
+  const [ruisi, zemo, kartli] = [await box("ruisi"), await box("zemo-wind"), await box("kartli-gori")];
+  expect(ruisi.x).toBeLessThan(kartli.x);
+  expect(zemo.x).toBeGreaterThan(kartli.x);
+  expect(zemo.y).toBeGreaterThan(kartli.y);
   await markers.nth(2).focus();
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("map-detail")).toContainText("Kartli");
