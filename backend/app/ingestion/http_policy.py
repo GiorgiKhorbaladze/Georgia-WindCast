@@ -77,7 +77,8 @@ def _parse_http_date(value: str | None) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
-def fetch(client: httpx.Client, url: str) -> FetchResult:
+def fetch(client: httpx.Client, url: str, expect: str = "xml") -> FetchResult:
+    """GET ``url``; a 200 whose content type lacks ``expect`` is unexpected content."""
     try:
         resp = client.get(url)
     except httpx.TimeoutException as exc:
@@ -98,7 +99,7 @@ def fetch(client: httpx.Client, url: str) -> FetchResult:
     if status != 200:
         return FetchResult(FetchKind.CLIENT_ERROR, url, status=status)
     content_type = resp.headers.get("content-type", "")
-    if "xml" not in content_type.lower():
+    if expect not in content_type.lower():
         # GSE's SPA answers unknown paths with HTML 200; never treat that as data.
         return FetchResult(
             FetchKind.UNEXPECTED_CONTENT,

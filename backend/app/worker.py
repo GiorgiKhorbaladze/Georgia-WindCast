@@ -7,6 +7,7 @@ Each job runs in its own transaction; an exception in one job never stops the lo
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import socket
 import threading
@@ -58,10 +59,11 @@ def run(stop: threading.Event | None = None) -> None:
 
     started_at = utcnow()
     log.info(
-        "worker %s starting (env=%s, gse_ingestion=%s)",
+        "worker %s starting (env=%s, gse_ingestion=%s, weather_ingestion=%s)",
         worker_name,
         settings.app_env.value,
         settings.gse_ingestion_enabled,
+        settings.weather_ingestion_enabled,
     )
     gse_job: GseIngestionJob | None = None
     if settings.gse_ingestion_enabled:
@@ -107,5 +109,8 @@ def run_gse_tick(job: GseIngestionJob) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.basicConfig(
+        level=os.environ.get("WINDCAST_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     run()

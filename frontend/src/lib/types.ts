@@ -42,14 +42,88 @@ export interface SiteSummary {
   coordinates_verified: boolean;
   latitude: number | null;
   longitude: number | null;
+  municipality_en: string | null;
+  status_en: string | null;
+  coordinate_source: string | null;
+  coordinate_uncertainty_km: number | null;
+  coordinate_note: string | null;
 }
 
 export interface SystemStatus {
   generated_at: string;
   app_env: string;
   worker: { state: WorkerState; last_seen_at: string | null };
-  sources: { id: string; state: SourceState; detail: string | null }[];
+  sources: {
+    id: string;
+    state: SourceState;
+    detail: string | null;
+    last_attempt_at: string | null;
+    last_success_at: string | null;
+    consecutive_failures: number;
+    backoff_until: string | null;
+  }[];
   sites: SiteSummary[];
 }
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+export type WeatherProduct = "forecast" | "reanalysis";
+
+export interface WeatherPoint {
+  t: string;
+  speed_ms: number | null;
+  direction_deg: number | null;
+}
+
+export interface WeatherSeries {
+  product: WeatherProduct;
+  provider: string;
+  model: string;
+  model_label: string;
+  height_m: number;
+  run_at: string | null;
+  retrieved_at: string | null;
+  grid_latitude: number | null;
+  grid_longitude: number | null;
+  grid_elevation_m: number | null;
+  supported: boolean;
+  points: WeatherPoint[];
+}
+
+export interface SiteWeather {
+  site: SiteSummary;
+  height_m: number;
+  unit: "m/s";
+  measured: false;
+  history: WeatherSeries;
+  forecast: WeatherSeries;
+  reanalysis: WeatherSeries;
+  attribution: SourceAttribution[];
+}
+
+export interface WeatherNow {
+  site_id: string;
+  height_m: number;
+  valid_at: string | null;
+  speed_ms: number | null;
+  direction_deg: number | null;
+  model: string | null;
+  run_at: string | null;
+  measured: false;
+}
+
+export interface WeatherOverview {
+  generated_at: string;
+  unit: "m/s";
+  heights: Record<WeatherProduct, number[]>;
+  unsupported_heights: number[];
+  forecast_model: string;
+  forecast_model_label: string;
+  forecast_state: Freshness;
+  forecast_run_at: string | null;
+  forecast_retrieved_at: string | null;
+  forecast_horizon_end: string | null;
+  sites: SiteSummary[];
+  now: WeatherNow[];
+  attribution: SourceAttribution[];
+}

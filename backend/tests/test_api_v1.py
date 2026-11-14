@@ -38,10 +38,11 @@ def test_status_worker_never_seen(migrated_db, client):
     body = client.get("/api/v1/status").json()
     assert body["worker"] == {"state": "never_seen", "last_seen_at": None}
     assert len(body["sites"]) == 3
-    assert all(not s["coordinates_verified"] and s["latitude"] is None for s in body["sites"])
+    assert all(s["coordinates_verified"] and s["coordinate_source"] for s in body["sites"])
     assert {s["id"]: s["state"] for s in body["sources"]} == {
         "gse": "not_configured",
-        "open-meteo": "not_configured",
+        "open-meteo-forecast": "not_configured",
+        "open-meteo-reanalysis": "not_configured",
     }
 
 

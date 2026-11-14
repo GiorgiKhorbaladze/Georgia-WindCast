@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health, v1
+from app.api import health, v1, weather
 from app.config import get_settings
 from app.version import __version__
 
@@ -26,6 +26,7 @@ def create_app() -> FastAPI:
         )
     app.include_router(health.router)
     app.include_router(v1.router)
+    app.include_router(weather.router)
     return app
 
 

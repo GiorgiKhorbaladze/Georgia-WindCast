@@ -49,6 +49,21 @@ class Settings(BaseSettings):
     # Optional identifying User-Agent for requests to GSE. Unset: the HTTP library default.
     gse_user_agent: str | None = None
 
+    # Open-Meteo model weather for the verified sites (issue #4). Disabled by default so that no
+    # deployment (or CI run) contacts the provider without an explicit decision.
+    weather_ingestion_enabled: bool = False
+    openmeteo_base_url: str = "https://api.open-meteo.com"
+    openmeteo_archive_base_url: str = "https://archive-api.open-meteo.com"
+    # Run metadata is checked this often; the forecast itself is fetched only for a new run.
+    weather_poll_seconds: int = Field(default=900, ge=60, le=21600)
+    weather_forecast_days: int = Field(default=4, ge=3, le=7)  # 4 days covers a 72 h horizon
+    weather_reanalysis_interval_seconds: int = Field(default=86400, ge=3600)
+    weather_reanalysis_days: int = Field(default=10, ge=1, le=60)
+    weather_forecast_retention_days: int = Field(default=30, ge=1)
+    # A forecast run older than this is reported as stale.
+    weather_fresh_within_seconds: int = Field(default=43200, ge=3600)
+    weather_user_agent: str | None = None
+
     @model_validator(mode="after")
     def _forbid_fixtures_in_production(self) -> Settings:
         if self.app_env is AppEnv.PRODUCTION and self.allow_fixtures:

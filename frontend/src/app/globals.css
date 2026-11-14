@@ -86,3 +86,49 @@ body {
   letter-spacing: 0.03em;
   font-size: 0.75rem;
 }
+
+/* Map site markers: a focusable button with a downwind arrow and the model speed. */
+.wc-marker {
+  --wc-color: #22d3ee;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px 3px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--wc-color);
+  background: rgb(3 7 14 / 0.85);
+  color: var(--wc-color);
+  font: 600 12px/1 var(--font-mono);
+  box-shadow: 0 0 0 4px rgb(34 211 238 / 0.08), 0 0 18px -4px var(--wc-color);
+  cursor: pointer;
+}
+.wc-marker[aria-pressed="true"] {
+  background: rgb(14 27 47 / 0.95);
+  box-shadow: 0 0 0 3px var(--wc-color);
+}
+.wc-marker svg {
+  transition: transform 0.4s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wc-marker svg {
+    transition: none;
+  }
+}
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-attrib.maplibregl-compact {
+  background: rgb(3 7 14 / 0.85) !important;
+  color: #cbd5e1 !important;
+  font-size: 11px;
+}
+.maplibregl-ctrl-attrib a,
+.maplibregl-ctrl-attrib-inner a {
+  color: #67e8f9 !important;
+}
+.maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
+.maplibregl-ctrl-scale {
+  background: rgb(3 7 14 / 0.7) !important;
+  color: #cbd5e1 !important;
+  border-color: #64748b !important;
+}
