@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 # Compose smoke test: clean start, health, readiness, UI unavailable state, worker heartbeat,
-# and database persistence across a full stack restart.
+# database persistence across a full stack recreation, and a migration round trip.
 #
-# Usage: scripts/compose-smoke.sh   (expects a .env file; CI copies .env.example)
+# Runs in an isolated Compose project ("windcast-smoke") with a random database password and
+# non-default ports, so it can never touch or delete a developer's own stack or data.
+#
+# Usage: scripts/compose-smoke.sh
 # Set KEEP_STACK=1 to leave the stack running afterwards.
 # Set SMOKE_SKIP_BUILD=1 to test already-built windcast-backend/frontend:local images.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-API="http://127.0.0.1:${API_PORT:-8000}"
-WEB="http://127.0.0.1:${FRONTEND_PORT:-3000}"
+export COMPOSE_PROJECT_NAME="${SMOKE_PROJECT_NAME:-windcast-smoke}"
+export POSTGRES_USER=windcast POSTGRES_DB=windcast
+POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+export POSTGRES_PASSWORD
+export API_PORT="${SMOKE_API_PORT:-18000}" FRONTEND_PORT="${SMOKE_FRONTEND_PORT:-13000}"
+export WINDCAST_WORKER_HEARTBEAT_SECONDS=2
+API="http://127.0.0.1:${API_PORT}"
+WEB="http://127.0.0.1:${FRONTEND_PORT}"
 DC=(docker compose)
 
 step() { printf '\n== %s\n' "$*"; }
@@ -43,7 +52,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-step "Building and starting a clean stack"
+step "Building and starting a clean stack (project: $COMPOSE_PROJECT_NAME)"
+"${DC[@]}" config --quiet
 "${DC[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
 build_flag=(--build)
 [[ ${SMOKE_SKIP_BUILD:-0} == 1 ]] && build_flag=()
@@ -79,5 +89,12 @@ wait_for "$API/api/health/ready" 60 '"status":"ready"' >/dev/null
 after=$(psql_scalar "SELECT installed_at FROM instance_metadata WHERE id = 1")
 echo "installed_at after restart:  $after"
 [[ -n $before && $before == "$after" ]]
+
+step "Migration round trip (downgrade to base, upgrade to head) against the Compose database"
+"${DC[@]}" stop api worker
+"${DC[@]}" run --rm migrate alembic downgrade base
+"${DC[@]}" run --rm migrate alembic upgrade head
+"${DC[@]}" up -d --wait --wait-timeout 180
+wait_for "$API/api/health/ready" 60 '"status":"ready"'
 
 step "SMOKE PASSED"
