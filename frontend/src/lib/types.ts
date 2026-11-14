@@ -17,6 +17,21 @@ export interface GenerationLatest {
   source_observed_at: string | null;
   retrieved_at: string | null;
   reason: string | null;
+  quality: string | null;
+  quality_flagged: boolean;
+  period_seconds: number | null;
+  source: SourceAttribution;
+}
+
+export interface GenerationHistory {
+  scope: "national_aggregate";
+  unit: "MW";
+  start: string;
+  end: string;
+  cadence_seconds: number;
+  collection_started_at: string | null;
+  points: { t: string; value_mw: number; quality: string }[];
+  gaps: { start: string; end: string }[];
   source: SourceAttribution;
 }
 

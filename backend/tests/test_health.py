@@ -28,7 +28,8 @@ def test_readiness_ok_when_migrated(migrated_db, client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "ready"
-    assert body["migration_revision"] == body["migration_head"] == "0001_foundation"
+    assert body["migration_revision"] == body["migration_head"]
+    assert body["migration_head"] is not None
 
 
 @pytest.mark.db

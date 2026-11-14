@@ -2,7 +2,7 @@
 
 Private project for monitoring Georgia's aggregate wind generation and site-level model wind. See the [technical specification and roadmap](docs/PROJECT.md), the [project Epic](../../issues/2) and the [foundation ADR](docs/adr/0001-foundation-stack.md).
 
-Current stage: **foundation (#1)**. No external data feed is connected yet; the dashboard shows explicit "data unavailable" states rather than any placeholder value.
+Current stage: **foundation (#1) and GSE integration (#3)**. National wind generation comes from GSE's public 3-minute exports (verification: [docs/sources/gse.md](docs/sources/gse.md)). Ingestion ships **disabled** until reuse terms are confirmed. While it is off, the dashboard shows explicit "data unavailable" states, never placeholder values.
 
 ## Repository layout
 
@@ -75,6 +75,21 @@ All configuration comes from environment variables; nothing secret is tracked. S
 | `WINDCAST_WORKER_HEARTBEAT_SECONDS` | worker | Heartbeat interval |
 | `WINDCAST_WORKER_STALE_AFTER_SECONDS` | api, worker healthcheck | Worker considered not reporting after this |
 | `WINDCAST_API_URL` | frontend (server side only) | Backend base URL |
+| `WINDCAST_GSE_INGESTION_ENABLED` | worker, api | Enable GSE polling (default `false`) |
+| `WINDCAST_GSE_POLL_SECONDS` | worker | Poll interval, default 60 s (only due, unstored periods are requested) |
+| `WINDCAST_GSE_FRESH_WITHIN_SECONDS` | api | Reading older than this, by its GSE label, is stale (default 600 s) |
+| `WINDCAST_GSE_USER_AGENT` | worker | Optional identifying User-Agent for GSE requests |
+
+Verify the live GSE source at any time (read only, no database writes): `cd backend && uv run python -m app.ingestion.live_check`, or run the manual **Live source check** workflow.
+
+## API
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/health`, `/api/health/ready` | Liveness; readiness (DB reachable and migrated) |
+| `GET /api/v1/generation/latest` | National wind MW with freshness (`fresh`/`stale`/`unavailable`), source label time, retrieval time and quality code |
+| `GET /api/v1/generation/history?start=&end=` | Collected readings (max 31 days), `collection_started_at`, and explicit `gaps` (never interpolated) |
+| `GET /api/v1/status` | Worker liveness, source availability and backoff state, tracked sites |
 
 ## Data principles
 

@@ -6,7 +6,8 @@ from app.timeutil import utcnow
 from app.worker import record_heartbeat
 
 
-def test_generation_latest_reports_unavailable_without_value(client):
+@pytest.mark.db
+def test_generation_latest_reports_unavailable_without_value(migrated_db, client):
     r = client.get("/api/v1/generation/latest")
     assert r.status_code == 200
     body = r.json()
@@ -15,14 +16,21 @@ def test_generation_latest_reports_unavailable_without_value(client):
     assert body["scope"] == "national_aggregate"
     assert body["unit"] == "MW"
     assert body["source"]["url"] == "https://www.gse.com.ge"
+    assert body["reason"] == "ingestion_disabled"
+
+
+NATIONAL_AGGREGATE_SCHEMAS = {"GenerationLatest", "GenerationPoint"}
 
 
 def test_no_per_site_generation_in_contract(client):
+    """MW appears only in national-aggregate schemas, never next to a site."""
     schema = client.get("/api/openapi.json").json()["components"]["schemas"]
     assert "value_mw" not in schema["SiteSummary"]["properties"]
     for name, definition in schema.items():
-        if name != "GenerationLatest":
+        if name not in NATIONAL_AGGREGATE_SCHEMAS:
             assert "value_mw" not in definition.get("properties", {}), name
+    for name in ("GenerationLatest", "GenerationHistory"):
+        assert schema[name]["properties"]["scope"]["const"] == "national_aggregate"
 
 
 @pytest.mark.db

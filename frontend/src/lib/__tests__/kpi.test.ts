@@ -11,6 +11,9 @@ const base: GenerationLatest = {
   source_observed_at: "2026-11-14T10:00:00Z",
   retrieved_at: "2026-11-14T10:00:30Z",
   reason: null,
+  quality: "ACT",
+  quality_flagged: false,
+  period_seconds: 180,
   source: { name: "GSE", url: "https://www.gse.com.ge" },
 };
 
@@ -37,6 +40,16 @@ describe("generationKpiView", () => {
     expect(v.freshness).toBe("unavailable");
   });
 
+  it("surfaces a non-ACT quality flag with the value", () => {
+    const v = generationKpiView({ ok: true, data: { ...base, quality: "NRE", quality_flagged: true } });
+    expect(v).toMatchObject({ value: "12.3", quality: "NRE", qualityFlagged: true });
+  });
+
+  it("drops quality when no value may be shown", () => {
+    const v = generationKpiView({ ok: true, data: { ...base, freshness: "unavailable", quality_flagged: true } });
+    expect(v).toMatchObject({ value: null, quality: null, qualityFlagged: false });
+  });
+
   it("treats a missing or non-finite value as unavailable", () => {
     expect(generationKpiView({ ok: true, data: { ...base, value_mw: null } }).freshness).toBe("unavailable");
     expect(generationKpiView({ ok: true, data: { ...base, value_mw: Number.NaN } }).value).toBeNull();
@@ -50,6 +63,8 @@ describe("generationKpiView", () => {
       observedAt: null,
       retrievedAt: null,
       reason: "unreachable",
+      quality: null,
+      qualityFlagged: false,
       apiReachable: false,
     });
   });

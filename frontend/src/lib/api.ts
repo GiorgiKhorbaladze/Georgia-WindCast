@@ -1,4 +1,4 @@
-import type { ApiResult, GenerationLatest, SystemStatus } from "./types";
+import type { ApiResult, GenerationHistory, GenerationLatest, SystemStatus } from "./types";
 
 // Server-side only. The browser never talks to the backend directly in this stage, so no
 // backend address or credential is shipped to the client bundle.
@@ -25,3 +25,4 @@ export async function getJson<T>(path: string, timeoutMs = DEFAULT_TIMEOUT_MS): 
 
 export const getGenerationLatest = () => getJson<GenerationLatest>("/api/v1/generation/latest");
 export const getSystemStatus = () => getJson<SystemStatus>("/api/v1/status");
+export const getGenerationHistory = () => getJson<GenerationHistory>("/api/v1/generation/history");

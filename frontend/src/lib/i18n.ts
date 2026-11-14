@@ -21,6 +21,9 @@ export interface Dictionary {
     observedAt: string;
     retrievedAt: string;
     notReported: string;
+    quality: string;
+    qualityFlagged: string;
+    periodAverage: string;
     trackedLocations: string;
     trackedLocationsNote: string;
     ingestionStatus: string;
@@ -40,7 +43,14 @@ export interface Dictionary {
     forecast: [string, string];
     missing: [string, string];
   };
-  history: { title: string; empty: string };
+  history: {
+    title: string;
+    empty: string;
+    collected: (n: number) => string;
+    since: string;
+    gaps: (n: number) => string;
+    chartPending: string;
+  };
   planned: { title: string; body: string; issue: string };
   about: { title: string; paragraphs: string[] };
   timezoneNote: string;
@@ -65,6 +75,9 @@ const ka: Dictionary = {
     observedAt: "წყაროს დროის ნიშნული",
     retrievedAt: "მიღების დრო",
     notReported: "არ არის მითითებული",
+    quality: "ხარისხის კოდი",
+    qualityFlagged: "წყაროს ხარისხის კოდი განსხვავდება ACT-ისგან. კოდის მნიშვნელობა GSE-სთან დასაზუსტებელია.",
+    periodAverage: "3-წუთიანი საშუალო",
     trackedLocations: "მონიტორინგის ლოკაციები",
     trackedLocationsNote: "მეტეოროლოგიური მოდელის მონაცემები, არა გენერაცია",
     ingestionStatus: "მონაცემთა მიღების სტატუსი",
@@ -83,7 +96,10 @@ const ka: Dictionary = {
     never_seen: "ჯერ არ გაშვებულა",
   },
   reasons: {
-    ingestion_not_configured: "GSE-დან მონაცემთა მიღება ჯერ არ არის ჩართული. წყაროს ვალიდაცია მიმდინარეობს.",
+    ingestion_disabled: "GSE-დან მონაცემთა მიღება გამორთულია, სანამ არ დადასტურდება მათი გამოყენების პირობები.",
+    no_data_yet: "მონაცემთა მიღება ჩართულია, ვალიდური ჩანაწერი ჯერ არ არის მიღებული.",
+    source_unreachable: "GSE წყარო დროებით მიუწვდომელია. ნაჩვენებია ბოლო ვალიდური მნიშვნელობა.",
+    source_not_updated: "GSE-მ ახალი მონაცემი არ გამოაქვეყნა. ნაჩვენებია ბოლო ვალიდური მნიშვნელობა.",
   },
   unavailable: "მონაცემები მიუწვდომელია",
   apiUnreachable: "სერვერთან კავშირი ვერ დამყარდა",
@@ -102,6 +118,10 @@ const ka: Dictionary = {
   history: {
     title: "ჯამური გენერაციის ისტორია",
     empty: "ისტორია იწყება მონაცემთა ვალიდური მიღების დაწყებიდან. ჩანაწერები ჯერ არ არის.",
+    collected: (n) => `ბოლო 24 საათში შეგროვებულია ${n} ფაქტობრივი ჩანაწერი`,
+    since: "შეგროვება დაიწყო",
+    gaps: (n) => (n === 0 ? "გამოტოვებული ინტერვალები არ ფიქსირდება" : `გამოტოვებული ინტერვალები: ${n}`),
+    chartPending: "ინტერაქტიული გრაფიკი მომდევნო ეტაპზე დაემატება (#5).",
   },
   planned: {
     title: "განვითარების პროცესშია",
@@ -133,6 +153,9 @@ const en: Dictionary = {
     observedAt: "Source timestamp",
     retrievedAt: "Retrieved",
     notReported: "not reported",
+    quality: "Quality code",
+    qualityFlagged: "The source quality code is not ACT. Its meaning is to be confirmed with GSE.",
+    periodAverage: "3-minute average",
     trackedLocations: "Tracked locations",
     trackedLocationsNote: "Meteorological model data, not generation",
     ingestionStatus: "Ingestion status",
@@ -147,7 +170,10 @@ const en: Dictionary = {
   },
   worker: { running: "Running", stale: "Not reporting", never_seen: "Not started yet" },
   reasons: {
-    ingestion_not_configured: "GSE ingestion is not enabled yet. Source validation is in progress.",
+    ingestion_disabled: "GSE ingestion is disabled until reuse terms are confirmed.",
+    no_data_yet: "Ingestion is enabled; no valid reading has been received yet.",
+    source_unreachable: "The GSE source is temporarily unreachable. Showing the last valid value.",
+    source_not_updated: "GSE has not published new data. Showing the last valid value.",
   },
   unavailable: "Data unavailable",
   apiUnreachable: "Cannot reach the server",
@@ -166,6 +192,10 @@ const en: Dictionary = {
   history: {
     title: "Aggregate generation history",
     empty: "History starts when valid ingestion begins. No records yet.",
+    collected: (n) => `${n} actual readings collected in the last 24 hours`,
+    since: "Collection started",
+    gaps: (n) => (n === 0 ? "No missing intervals" : `Missing intervals: ${n}`),
+    chartPending: "The interactive chart arrives in the next stage (#5).",
   },
   planned: {
     title: "In development",

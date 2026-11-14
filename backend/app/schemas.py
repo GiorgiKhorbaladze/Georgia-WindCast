@@ -61,6 +61,42 @@ class GenerationLatest(BaseModel):
         default=None, description="Time this service last fetched the reading, UTC."
     )
     reason: str | None = Field(default=None, description="Why the value is not fresh.")
+    quality: str | None = Field(
+        default=None, description="Raw source quality code, e.g. ACT. Meanings unconfirmed."
+    )
+    quality_flagged: bool = Field(
+        default=False, description="True when the source quality code is not ACT."
+    )
+    period_seconds: int | None = Field(
+        default=None, description="Length of the averaging period behind the value."
+    )
+    source: SourceAttribution
+
+
+class GenerationPoint(BaseModel):
+    t: datetime = Field(description="Source period label, UTC.")
+    value_mw: float
+    quality: str
+
+
+class TimeRange(BaseModel):
+    start: datetime
+    end: datetime
+
+
+class GenerationHistory(BaseModel):
+    scope: Literal["national_aggregate"] = "national_aggregate"
+    unit: Literal["MW"] = "MW"
+    start: datetime
+    end: datetime
+    cadence_seconds: int
+    collection_started_at: datetime | None = Field(
+        description="Earliest reading ever stored. Nothing before this was collected."
+    )
+    points: list[GenerationPoint]
+    gaps: list[TimeRange] = Field(
+        description="Intervals inside the range with no reading. Never interpolated."
+    )
     source: SourceAttribution
 
 
@@ -73,6 +109,10 @@ class SourceStatus(BaseModel):
     id: str
     state: SourceState
     detail: str | None = None
+    last_attempt_at: datetime | None = None
+    last_success_at: datetime | None = None
+    consecutive_failures: int = 0
+    backoff_until: datetime | None = None
 
 
 class SiteSummary(BaseModel):

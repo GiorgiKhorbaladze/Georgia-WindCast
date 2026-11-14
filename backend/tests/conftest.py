@@ -97,3 +97,11 @@ def client() -> Iterator[TestClient]:
 
     with TestClient(create_app()) as c:
         yield c
+
+
+@pytest.fixture
+def gse_enabled(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("WINDCAST_GSE_INGESTION_ENABLED", "true")
+    _clear_caches()
+    yield
+    _clear_caches()

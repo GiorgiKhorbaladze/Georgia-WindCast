@@ -8,6 +8,8 @@ export interface GenerationKpiView {
   observedAt: string | null;
   retrievedAt: string | null;
   reason: string | null;
+  quality: string | null;
+  qualityFlagged: boolean;
   apiReachable: boolean;
 }
 
@@ -23,6 +25,8 @@ export function generationKpiView(result: ApiResult<GenerationLatest>): Generati
       observedAt: null,
       retrievedAt: null,
       reason: result.error,
+      quality: null,
+      qualityFlagged: false,
       apiReachable: false,
     };
   }
@@ -35,6 +39,8 @@ export function generationKpiView(result: ApiResult<GenerationLatest>): Generati
     observedAt: d.source_observed_at,
     retrievedAt: d.retrieved_at,
     reason: d.reason,
+    quality: value === null ? null : d.quality,
+    qualityFlagged: value !== null && d.quality_flagged,
     apiReachable: true,
   };
 }

@@ -1,0 +1,30 @@
+# Live end-to-end run, 2026-11-14T20:24:50Z. Stack from compose.yaml with WINDCAST_GSE_INGESTION_ENABLED=true;
+# sandbox-only override let the worker reach GSE via the session proxy (not part of the product).
+
+== worker log (gse ticks)
+2026-11-14 20:23:18,499 INFO windcast.worker worker worker@vm starting (env=production, gse_ingestion=True)
+2026-11-14 20:23:20,332 INFO windcast.worker gse tick: requested=4 stored=3 duplicates=0 not_published=1 failure=None
+2026-11-14 20:24:19,884 INFO windcast.worker gse tick: requested=4 stored=4 duplicates=0 not_published=0 failure=None
+
+== GET /api/v1/generation/latest
+{"scope":"national_aggregate","unit":"MW","freshness":"fresh","value_mw":79.686813,"source_observed_at":"2026-11-14T20:21:00Z","retrieved_at":"2026-11-14T20:24:19.323065Z","reason":null,"quality":"ACT","quality_flagged":false,"period_seconds":180,"source":{"name":"Georgian State Electrosystem (GSE)","url":"https://www.gse.com.ge"}}
+
+== GET /api/v1/generation/history (default 24 h)
+collection_started_at 2026-11-14T19:42:00Z | points 14 | gaps []
+  2026-11-14T19:42:00Z 101.837883 NRE
+  2026-11-14T19:45:00Z 103.058807 ACT
+  2026-11-14T19:48:00Z 103.115593 NRE
+  2026-11-14T19:51:00Z 97.372612 ACT
+  2026-11-14T19:54:00Z 92.778778 ACT
+  2026-11-14T19:57:00Z 93.40934 ACT
+  2026-11-14T20:00:00Z 92.930557 ACT
+  2026-11-14T20:03:00Z 91.333824 NRE
+  2026-11-14T20:06:00Z 85.93499 ACT
+  2026-11-14T20:09:00Z 73.599297 ACT
+  2026-11-14T20:12:00Z 73.599297 ACT
+  2026-11-14T20:15:00Z 72.440331 NRE
+  2026-11-14T20:18:00Z 74.529854 ACT
+  2026-11-14T20:21:00Z 79.686813 ACT
+
+== GET /api/v1/status (gse)
+{'id': 'gse', 'state': 'ok', 'detail': None, 'last_attempt_at': '2026-11-14T20:24:18.540389Z', 'last_success_at': '2026-11-14T20:24:18.540389Z', 'consecutive_failures': 0, 'backoff_until': None}
