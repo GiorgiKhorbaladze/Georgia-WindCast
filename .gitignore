@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# WindCast frontend and local configuration
+node_modules/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+.env.*
+!.env.example
