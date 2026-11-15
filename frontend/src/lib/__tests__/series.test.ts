@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { breakOnStep, labelFlags, withGapBreaks } from "../series";
+import { breakOnStep, withGapBreaks } from "../series";
 
 const pts = [
   { t: "2026-11-14T20:00:00Z", v: 1 },
@@ -29,27 +29,3 @@ describe("breakOnStep", () => {
   });
 });
 
-describe("labelFlags", () => {
-  const H = 3600e3;
-  const span = 24 * H;
-
-  it("labels a wide interval", () => {
-    expect(labelFlags([{ start: 0, end: 3 * H }], span)).toEqual([true]);
-  });
-
-  it("does not label narrow intervals (they stay shaded)", () => {
-    expect(labelFlags([{ start: 0, end: 0.5 * H }], span)).toEqual([false]);
-  });
-
-  it("never labels two intervals closer than the spacing", () => {
-    const flags = labelFlags(
-      [
-        { start: 0, end: 2 * H },
-        { start: 2.5 * H, end: 5 * H },
-        { start: 10 * H, end: 12 * H },
-      ],
-      span,
-    );
-    expect(flags).toEqual([true, false, true]);
-  });
-});

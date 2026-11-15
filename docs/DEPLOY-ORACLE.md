@@ -111,10 +111,47 @@ scripts/deploy.sh <approved-commit-sha>
 ```bash
 cd /opt/windcast
 scripts/deploy.sh <new-approved-sha>      # backup, build, migrate, start, verify
-scripts/deploy.sh --rollback              # previous revision from deploy/history.log
+scripts/rollback.sh                       # undo the last deployment attempt: old code + its database
 ```
 
-If the new revision included a database migration, rolling back the code is not enough. Restore the pre-deploy backup that `deploy.sh` printed: `scripts/restore.sh backups/<file>`. Then run `scripts/deploy.sh --rollback`.
+**How a deployment is paired with its backup.** Before starting a new revision, `deploy.sh` takes a backup of the running database. That backup carries the schema of the revision being replaced. It records `<new sha> <previous sha> <backup>` in `deploy/last-attempt` before anything starts. Each successful deployment is also logged in `deploy/history.log`.
+
+**What `rollback.sh` does.** It takes no arguments when undoing the last attempt, whether that attempt succeeded or failed. The order of steps is deliberate:
+
+1. Resolves the previous revision and checks that its images are still on the host. It stops if they are missing and prints the rebuild command.
+2. **Pairing check:** the backup's Alembic revision must equal the previous code's migration head. If not, it stops and **nothing is changed**; the newer stack keeps running.
+3. Stops frontend, API and worker. The newer code's migrate, API and worker are **not started again**.
+4. **Exact restore:** the backup is loaded into a fresh database. Only when that succeeds is it swapped in by renaming, in one transaction. Tables or columns created by the newer migration therefore cannot survive. The replaced database is kept as `windcast_before_restore_<UTC>` for salvage.
+5. Checks out the previous revision, selects its image tag, and verifies that the database is at that code's head, so its migrate step has nothing to apply.
+6. Starts the old stack and checks the following:
+   - all services are healthy;
+   - no migration ran (from the migrate log);
+   - the API is still unpublished.
+
+| Failure during rollback | State | What to do |
+| --- | --- | --- |
+| Pairing check or archive invalid | Nothing changed | Choose the right backup: `scripts/rollback.sh --to <sha> --backup <file>` |
+| Restore into the fresh database fails | Live database unchanged; frontend, API and worker stopped | Fix the archive, or restart the newer stack with `docker compose up -d --wait` |
+| Old stack does not start after the swap | Database = backup; previous database kept | Inspect `docker compose logs`; the kept database still holds the newer data |
+
+**Data written after the backup** is not in the restored database. That includes GSE readings collected by the newer revision, and the content of any failed deployment. That data stays in the kept `windcast_before_restore_*` database. Drop kept databases when they are no longer needed: `docker compose exec db dropdb -U windcast <name>`.
+
+**Failed deployment** (for example a broken migration): PostgreSQL runs the migration in one transaction, so a failure leaves the schema unchanged and `deploy.sh` stops, pointing to `scripts/rollback.sh`. It still records the attempt, so `rollback.sh` returns to the previous revision.
+
+**Verified by** `scripts/rollback-rehearsal.sh`, locally and in the CI job *Rollback rehearsal*. The rehearsal works in a throwaway clone:
+
+1. Deploys A (0003 schema) and writes a sentinel row.
+2. Deploys B, an incompatible migration that adds a table and a column, and writes data.
+3. Checks that a mismatched backup is refused with nothing changed.
+4. Rolls back to A and checks:
+   - the schema fingerprint is identical to A's;
+   - Alembic is at 0003, the sentinel row is present and B's objects are gone;
+   - A's images are running and healthy;
+   - no migration ran and the database and API are unpublished.
+5. Deploys C, a deliberately broken migration, which must fail.
+6. Rolls back again with the same checks.
+
+`scripts/restore.sh` on its own is for recovering data **within the same code version**. It restarts the current version, which applies that version's migrations.
 
 **Disable a data feed immediately:** set `WINDCAST_GSE_INGESTION_ENABLED=false` (or the weather flag) in `.env`, then `docker compose up -d worker api`. The UI then reports the source as disabled. Stored history stays, and nothing is invented.
 

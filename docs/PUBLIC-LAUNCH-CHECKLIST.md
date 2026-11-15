@@ -23,7 +23,8 @@ Issue #18. The site is **not** public. This list keeps engineering status separa
 | Restart policies, memory limits, log rotation | Done | `compose.prod.yaml`, `compose.public.yaml` |
 | linux/arm64 images and a full-stack smoke on arm64 (emulated) | Done | CI job **ARM64 images** |
 | Anonymous-traffic load check | Done locally | [evidence/public/load-test.md](evidence/public/load-test.md) |
-| Host setup, deploy/rollback and backup-rotation scripts; runbook | Done | `scripts/host-setup.sh`, `scripts/deploy.sh`, `scripts/backup-rotate.sh`, [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) |
+| Host setup, deploy and backup-rotation scripts; runbook | Done | `scripts/host-setup.sh`, `scripts/deploy.sh`, `scripts/backup-rotate.sh`, [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) |
+| Coordinated cross-schema rollback (paired backup, exact restore, no newer migration on recovery) | Done | `scripts/rollback.sh`; `scripts/rollback-rehearsal.sh` + CI job (incompatible and broken migrations) |
 | Real deployment, real certificate, external-device test, TLS scan, LinkedIn unfurl test | **Blocked** | needs section D item 2 |
 | Safari/iPhone and Firefox checks | **Open** | CI covers Chromium desktop and Pixel 7 emulation only |
 

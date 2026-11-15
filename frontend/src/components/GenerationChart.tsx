@@ -6,12 +6,13 @@ import { EChart } from "@/components/charts/EChart";
 import { baseChart, COLORS, tbilisiAxisLabel, tbilisiTooltipTime } from "@/lib/chartTheme";
 import { formatTbilisiMinute, tbilisiInputValue } from "@/lib/format";
 import { getDictionary, type Locale } from "@/lib/i18n";
-import { labelFlags, withGapBreaks } from "@/lib/series";
+import { withGapBreaks } from "@/lib/series";
 import type { GenerationHistory } from "@/lib/types";
 
 const RANGES = { "24h": 24, "7d": 24 * 7, "30d": 24 * 30 } as const;
 type RangeKey = keyof typeof RANGES | "custom";
 const MAX_DAYS = 31;
+const BEFORE_FILL = "rgba(148,163,184,0.10)";
 
 export function buildGenerationOption(h: GenerationHistory, locale: Locale) {
   const t = getDictionary(locale);
@@ -19,30 +20,13 @@ export function buildGenerationOption(h: GenerationHistory, locale: Locale) {
   const data = withGapBreaks(h.points, (p) => p.t, (p) => p.value_mw, h.gaps);
   const startedAt = h.collection_started_at ? Date.parse(h.collection_started_at) : null;
   const hasBefore = startedAt !== null && startedAt > Date.parse(h.start);
-  // Shaded intervals in time order; labels are thinned so they never overlap (see labelFlags).
-  const intervals = [
-    ...(hasBefore ? [{ start: Date.parse(h.start), end: startedAt! }] : []),
-    ...h.gaps.map((g) => ({ start: Date.parse(g.start), end: Date.parse(g.end) })),
-  ];
-  const flags = labelFlags(intervals, spanMs);
-  const gapFlags = hasBefore ? flags.slice(1) : flags;
-  const marks: [{ xAxis: number; name?: string }, { xAxis: number }][] = h.gaps.map((g, i) => [
-    { xAxis: Date.parse(g.start), name: gapFlags[i] ? t.history.gapLegend : undefined },
-    { xAxis: Date.parse(g.end) },
-  ]);
+  // Shaded areas carry no text: labels inside narrow areas collide at small widths whatever the
+  // spacing rule. The legend under the chart explains both shadings (GenerationLegend).
+  const marks = h.gaps.map((g) => [{ xAxis: Date.parse(g.start) }, { xAxis: Date.parse(g.end) }]);
   // Time before collection began is not a source gap: shown faintly, without the amber gap style.
-  const before =
-    hasBefore
-      ? [[
-          {
-            xAxis: Date.parse(h.start),
-            name: flags[0] ? t.history.beforeCollection : undefined,
-            itemStyle: { color: "rgba(148,163,184,0.04)", borderWidth: 0 },
-            label: { color: "#64748b" },
-          },
-          { xAxis: startedAt! },
-        ]]
-      : [];
+  const before = hasBefore
+    ? [[{ xAxis: Date.parse(h.start), itemStyle: { color: BEFORE_FILL, borderWidth: 0 } }, { xAxis: startedAt }]]
+    : [];
   const tip = tbilisiTooltipTime();
   return {
     ...baseChart,
@@ -87,7 +71,7 @@ export function buildGenerationOption(h: GenerationHistory, locale: Locale) {
         },
         markArea: {
           silent: true,
-          label: { color: "#fbbf24", fontSize: 10, position: "insideTop" },
+          label: { show: false },
           itemStyle: { color: COLORS.gap, borderColor: COLORS.gapBorder, borderWidth: 1, borderType: "dashed" },
           data: [...marks, ...before],
         },
@@ -205,13 +189,24 @@ export function GenerationExplorer({
           {history.collection_started_at && (
             <span>{t.history.since}: {formatTbilisiMinute(history.collection_started_at)}</span>
           )}
-          <span className="inline-flex items-center gap-1.5">
-            {history.gaps.length > 0 && (
-              <span aria-hidden="true" className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-amber-warn/70 bg-amber-warn/10" />
-            )}
-            {t.history.gaps(history.gaps.length)}
-          </span>
+          <span>{t.history.gaps(history.gaps.length)}</span>
         </p>
+      )}
+      {history && history.points.length > 0 && (
+        <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400" data-testid="history-legend">
+          {history.gaps.length > 0 && (
+            <li className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-amber-warn/70 bg-amber-warn/10" />
+              {t.history.gapLegend}
+            </li>
+          )}
+          {history.collection_started_at && Date.parse(history.collection_started_at) > Date.parse(history.start) && (
+            <li className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="inline-block h-2.5 w-4 rounded-sm" style={{ background: BEFORE_FILL }} />
+              {t.history.beforeCollection}
+            </li>
+          )}
+        </ul>
       )}
     </div>
   );

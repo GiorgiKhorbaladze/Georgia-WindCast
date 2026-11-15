@@ -54,6 +54,9 @@ scripts/restore.sh /srv/windcast-backups/windcast-<UTC>.dump
 
 ## 5. Upgrade and rollback
 
+For hosts deployed with `scripts/deploy.sh`, use `scripts/rollback.sh` to return to an earlier revision. It restores the paired pre-deploy backup exactly and never restarts the newer code (see [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) §7). The manual steps below apply to a same-schema rollback only.
+
+
 Upgrade:
 1. `scripts/backup.sh`.
 2. `git fetch && git checkout <new SHA>`; set `WINDCAST_IMAGE_TAG=<new SHA>`.

@@ -38,26 +38,3 @@ export function breakOnStep(data: ChartDatum[], maxStepMs: number): ChartDatum[]
   return out;
 }
 
-/**
- * Which shaded intervals get a text label on a time chart. Every interval is still drawn; only
- * labels are thinned so they never overlap: an interval is labelled when it covers at least
- * `minShare` of the visible span and starts at least `minSpacing` of the span after the previous
- * labelled one. The legend under the chart explains the unlabelled shading.
- */
-export function labelFlags(
-  intervals: { start: number; end: number }[],
-  spanMs: number,
-  minShare = 0.08,
-  minSpacing = 0.14,
-): boolean[] {
-  let lastLabelled = -Infinity;
-  return intervals.map(({ start, end }) => {
-    const wide = end - start >= spanMs * minShare;
-    const spaced = start - lastLabelled >= spanMs * minSpacing;
-    if (wide && spaced) {
-      lastLabelled = start;
-      return true;
-    }
-    return false;
-  });
-}

@@ -236,3 +236,22 @@ jobs:
         with:
           name: arm64-transcripts
           path: arm64-*.txt
+
+  rollback-rehearsal:
+    name: Rollback rehearsal (cross-schema, broken migration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # the rehearsal clones this checkout and commits test revisions on top
+      - name: Deploy A, deploy B (incompatible schema), rollback; deploy C (broken), rollback
+        shell: bash
+        run: scripts/rollback-rehearsal.sh 2>&1 | tee rollback-rehearsal.txt
+      - name: Upload transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-rehearsal-transcript
+          path: rollback-rehearsal.txt

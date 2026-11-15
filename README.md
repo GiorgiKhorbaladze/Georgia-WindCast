@@ -23,7 +23,8 @@ Both data sources ship **disabled** (`WINDCAST_GSE_INGESTION_ENABLED`, `WINDCAST
 | `compose.prod.yaml` | Production overlay (API unpublished, log rotation, limits) |
 | `compose.public.yaml`, `deploy/caddy/` | Public edge overlay: Caddy with automatic HTTPS and per-IP rate limits |
 | `scripts/edge-smoke.sh` | Public-edge smoke test (HTTPS, exposure, rate limits, status contract) |
-| `scripts/host-setup.sh`, `scripts/deploy.sh`, `scripts/backup-rotate.sh` | Host preparation, exact-SHA deploy/rollback, daily backups |
+| `scripts/host-setup.sh`, `scripts/deploy.sh`, `scripts/rollback.sh`, `scripts/backup-rotate.sh` | Host preparation, exact-SHA deploy, coordinated rollback (code + paired backup), daily backups |
+| `scripts/rollback-rehearsal.sh` | Cross-schema rollback rehearsal (CI job) |
 | `frontend/e2e/` | Playwright browser tests (desktop + mobile, axe accessibility) |
 | `docs/` | Specification, ADRs, evidence |
 

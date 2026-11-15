@@ -52,17 +52,22 @@ export function cachedJson<T>(path: string, now: () => number = Date.now): Promi
   if (ttl === 0) return getJson<T>(path);
   const hit = cache.get(path);
   if (hit && hit.expires > now()) return hit.value as Promise<ApiResult<T>>;
+  // In flight: concurrent callers share this promise until it settles.
+  const entry: { expires: number; value: Promise<ApiResult<unknown>> } = {
+    expires: Number.POSITIVE_INFINITY,
+    value: Promise.resolve({ ok: false, error: "pending" }),
+  };
   const value = getJson<T>(path).then((result) => {
-    if (result.ok) {
-      const entry = cache.get(path);
-      if (entry) entry.expires = now() + ttl;
-    } else {
-      cache.delete(path); // never keep failures
+    // Only touch the entry this request created: it may have been evicted and replaced by a
+    // newer request for the same path, which must keep its own lifecycle (review R2).
+    if (cache.get(path) === entry) {
+      if (result.ok) entry.expires = now() + ttl;
+      else cache.delete(path); // never keep failures
     }
     return result;
   });
-  // In flight: concurrent callers share this promise until it settles.
-  cache.set(path, { expires: Number.POSITIVE_INFINITY, value });
+  entry.value = value;
+  cache.set(path, entry);
   if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value!);
   return value;
 }

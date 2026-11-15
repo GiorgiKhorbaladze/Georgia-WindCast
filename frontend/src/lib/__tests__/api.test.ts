@@ -85,3 +85,41 @@ describe("cachedJson (coalescing, short TTL)", () => {
     expect(a.ok && b.ok && a.data.url !== b.data.url).toBe(true);
   });
 });
+
+describe("cachedJson ownership after eviction (review R2)", () => {
+  function controlledFetch() {
+    const pending = new Map<string, ((r: Response) => void)[]>();
+    const fn = vi.fn().mockImplementation((url: string) => {
+      const path = new URL(url).pathname;
+      return new Promise<Response>((resolve) => pending.set(path, [...(pending.get(path) ?? []), resolve]));
+    });
+    const settle = (path: string, res: Response) => pending.get(path)!.shift()!(res);
+    return { fn, settle };
+  }
+
+  async function evictThenReinsert(lateResponse: Response) {
+    const { fn, settle } = controlledFetch();
+    vi.stubGlobal("fetch", fn);
+    let t = 1_000_000;
+    const now = () => t;
+    const a = cachedJson("/race", now); // entry A, in flight
+    for (let i = 0; i < 256; i++) void cachedJson(`/fill-${i}`, now); // evicts A
+    const b = cachedJson("/race", now); // replacement entry B, in flight
+    settle("/race", lateResponse); // A completes late
+    await a;
+    t += 60_000; // well past any TTL: B is still in flight, so it must still be shared
+    const c = cachedJson("/race", now); // must coalesce with B
+    expect(c).toBe(b);
+    expect(fn.mock.calls.filter(([u]) => String(u).endsWith("/race"))).toHaveLength(2);
+    settle("/race", Response.json({ v: "b" }));
+    expect(await c).toEqual({ ok: true, data: { v: "b" } });
+  }
+
+  it("a late failure of an evicted request does not delete its replacement", async () => {
+    await evictThenReinsert(new Response("", { status: 503 }));
+  });
+
+  it("a late success of an evicted request does not change its replacement", async () => {
+    await evictThenReinsert(Response.json({ v: "a" }));
+  });
+});
