@@ -6,13 +6,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import lru_cache
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 
-# Fail fast instead of queueing for 30 s when the pool is busy, and let PostgreSQL end any
-# transaction left idle (defence in depth against a leaked session) or any runaway statement.
+# Fail fast instead of queueing for 30 s when the pool is busy. For API requests only (see
+# session_scope), PostgreSQL also ends a transaction left idle (defence in depth against a leaked
+# session) and any runaway statement. The worker is deliberately exempt: its tick transaction
+# holds the source-status row lock across upstream HTTP calls of up to 20 s each.
 POOL_TIMEOUT_SECONDS = 5
 IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000
 STATEMENT_TIMEOUT_MS = 15_000
@@ -24,12 +26,6 @@ def get_engine() -> Engine:
         get_settings().database_url,
         pool_pre_ping=True,
         pool_timeout=POOL_TIMEOUT_SECONDS,
-        connect_args={
-            "options": (
-                f"-c idle_in_transaction_session_timeout={IDLE_IN_TRANSACTION_TIMEOUT_MS}"
-                f" -c statement_timeout={STATEMENT_TIMEOUT_MS}"
-            )
-        },
         future=True,
     )
 
@@ -51,6 +47,15 @@ def session_scope() -> Iterator[Session]:
     """
     session = get_sessionmaker()()
     try:
+        # Transaction-local (is_local=true): the settings end with this request's transaction and
+        # never leak to the worker through the shared connection pool.
+        session.execute(
+            text(
+                "SELECT set_config('idle_in_transaction_session_timeout', :idle, true),"
+                " set_config('statement_timeout', :stmt, true)"
+            ),
+            {"idle": str(IDLE_IN_TRANSACTION_TIMEOUT_MS), "stmt": str(STATEMENT_TIMEOUT_MS)},
+        )
         yield session
     finally:
         session.close()

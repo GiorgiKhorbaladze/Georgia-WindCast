@@ -18,13 +18,14 @@ Issue #18. The site is **not** public. This list keeps engineering status separa
 | Generic public error codes; long query parameters rejected | Done | `publicStatus.test.ts`, E2E |
 | HTTPS with automatic certificates and renewal; HTTP→HTTPS redirect; HSTS | Done (Caddy) | edge smoke with Caddy's internal CA; Let's Encrypt itself is untested until a public host exists |
 | Only 80/443 published; API, PostgreSQL and frontend unpublished; internal paths 404 at the edge | Done | edge smoke |
-| Per-IP rate limits (data 60/min, pages 240/min; static assets exempt), 429 with `Retry-After` | Done | edge smoke |
+| Per-IP rate limits (defaults: data 600/min, pages 1200/min, so an office behind one NAT address is not blocked; static assets exempt), 429 with `Retry-After`; configurable | Done | edge smoke (run with low limits) |
 | Security headers (CSP, nosniff, frame-ancestors, referrer, permissions; no server banner) | Done | E2E + edge smoke |
 | Restart policies, memory limits, log rotation | Done | `compose.prod.yaml`, `compose.public.yaml` |
 | linux/arm64 images and a full-stack smoke on arm64 (emulated) | Done | CI job **ARM64 images** |
 | Anonymous-traffic load check | Done locally | [evidence/public/load-test.md](evidence/public/load-test.md) |
 | Host setup, deploy/rollback and backup-rotation scripts; runbook | Done | `scripts/host-setup.sh`, `scripts/deploy.sh`, `scripts/backup-rotate.sh`, [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) |
-| Real deployment, real certificate, external-device test, TLS scan, LinkedIn unfurl test | **Blocked** | needs section C items 1–3 |
+| Real deployment, real certificate, external-device test, TLS scan, LinkedIn unfurl test | **Blocked** | needs section D item 2 |
+| Safari/iPhone and Firefox checks | **Open** | CI covers Chromium desktop and Pixel 7 emulation only |
 
 ## B. Provider restrictions
 

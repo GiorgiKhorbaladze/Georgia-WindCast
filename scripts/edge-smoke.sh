@@ -22,6 +22,8 @@ export POSTGRES_PASSWORD
 export WINDCAST_SITE_ADDRESS=localhost ACME_EMAIL=smoke@example.invalid
 export WINDCAST_PUBLIC_URL=https://localhost
 export WINDCAST_WORKER_HEARTBEAT_SECONDS=2
+# Low limits so the rate-limit check needs few requests (production defaults: 600 / 1200 per min).
+export WINDCAST_RATE_DATA_PER_MIN=60 WINDCAST_RATE_PAGES_PER_MIN=240
 # shellcheck source=lib/compose.sh
 source scripts/lib/compose.sh
 
@@ -108,7 +110,7 @@ for src in s["sources"]:
 print("status contract OK:", [x["id"] for x in s["sources"]])
 PY
 
-step "Rate limit on data routes (60/min per IP)"
+step "Rate limit on data routes (configured 60/min per IP for this test)"
 codes=$(for _ in $(seq 1 75); do "${CURL[@]}" -o /dev/null -w '%{http_code}\n' "$H/api/data/generation-latest"; done | sort | uniq -c)
 echo "$codes"
 grep -q ' 429$' <<<"$codes" || fail "no 429 after 75 requests"

@@ -104,6 +104,8 @@ scripts/deploy.sh <approved-commit-sha>
 - **Logs:** container logs rotate at 10 MB × 3–5 files per service. Caddy access logs (client IP, time, path) are kept only within that size limit, which matches the privacy note on the About page.
 - **Disk:** `df -h /` and `docker system df`. Remove old images after successful upgrades with `docker image prune -a --filter until=720h`.
 
+**Rate limits and client addresses.** Caddy limits requests per client IP: by default 600/min on data routes and 1200/min on pages, set by `WINDCAST_RATE_DATA_PER_MIN` and `WINDCAST_RATE_PAGES_PER_MIN` in `.env`. Docker preserves the real client address for **IPv4** traffic to published ports. For **IPv6**, unless Docker's own IPv6 support is configured, Docker's userland proxy forwards connections and every IPv6 visitor appears as the same internal address, so they would share one limit. Keep the instance IPv4-only (the OCI default) unless Docker IPv6 is set up and verified.
+
 ## 7. Updates and rollback
 
 ```bash

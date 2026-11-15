@@ -26,6 +26,8 @@ services:
       WINDCAST_SITE_ADDRESS: ${WINDCAST_SITE_ADDRESS:?set WINDCAST_SITE_ADDRESS in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
       ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      WINDCAST_RATE_DATA_PER_MIN: ${WINDCAST_RATE_DATA_PER_MIN:-600}
+      WINDCAST_RATE_PAGES_PER_MIN: ${WINDCAST_RATE_PAGES_PER_MIN:-1200}
     ports:
       - "80:80"
       - "443:443"

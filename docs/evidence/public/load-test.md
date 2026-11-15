@@ -1,6 +1,6 @@
 # Anonymous-traffic load check (issue #18)
 
-Date: 2026-11-15. Tool: `autocannon@8.0.0`. Target: production builds (`next start`, `uvicorn`) on a 4 vCPU amd64 build machine. That machine is shared with other jobs and is **not** an Ampere A1 host, so the numbers show relative behaviour, not a capacity guarantee. Data: the E2E seed (real recorded values). Requests went to the frontend directly, because Caddy's per-IP rate limits (60/min data, 240/min pages) would stop a single-IP load generator by design.
+Date: 2026-11-15. Tool: `autocannon@8.0.0`. Target: production builds (`next start`, `uvicorn`) on a 4 vCPU amd64 build machine. That machine is shared with other jobs and is **not** an Ampere A1 host, so the numbers show relative behaviour, not a capacity guarantee. Data: the E2E seed (real recorded values). Requests went to the frontend directly, because Caddy's per-IP rate limits (default 600/min data, 1200/min pages) would stop a single-IP load generator by design.
 
 ## Defect found and fixed
 

@@ -39,6 +39,13 @@ files="$(compose_files)"
 [[ $files == *compose.prod.yaml* ]] || die "COMPOSE_FILE in .env must include compose.prod.yaml"
 public=0
 [[ $files == *compose.public.yaml* ]] && public=1
+if [[ $public == 1 ]]; then
+  site_cfg="$(env_get WINDCAST_SITE_ADDRESS)"
+  url_cfg="$(env_get WINDCAST_PUBLIC_URL)"
+  [[ -n $site_cfg ]] || die "WINDCAST_SITE_ADDRESS is empty"
+  [[ $url_cfg == "https://$site_cfg" ]] ||
+    die "WINDCAST_PUBLIC_URL must be https://$site_cfg (link previews and canonical URLs use it)"
+fi
 
 mkdir -p deploy
 history=deploy/history.log

@@ -39,13 +39,15 @@
 	respond @internal 404
 
 	# Keyed on the TCP peer address (Caddy ignores client-supplied X-Forwarded-For by default).
+	# Defaults allow an office behind one NAT address (each open dashboard polls once a minute)
+	# while still capping a single abusive client at ~10 data requests/s, far below capacity.
 	rate_limit {
 		zone data {
 			match {
 				path /api/data/*
 			}
 			key {remote_host}
-			events 60
+			events {$WINDCAST_RATE_DATA_PER_MIN:600}
 			window 1m
 		}
 		zone pages {
@@ -53,7 +55,7 @@
 				not path /_next/static/* /vendor/* /og-image.png /icon* /apple-icon* /favicon.ico
 			}
 			key {remote_host}
-			events 240
+			events {$WINDCAST_RATE_PAGES_PER_MIN:1200}
 			window 1m
 		}
 	}

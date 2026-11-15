@@ -56,7 +56,7 @@ systemctl enable --now docker >/dev/null
 step "Host firewall: allow 80/tcp, 443/tcp, 443/udp (HTTP/3)"
 open_port() {  # open_port <proto> <port>
   iptables -C INPUT -p "$1" --dport "$2" -m conntrack --ctstate NEW -j ACCEPT 2>/dev/null ||
-    iptables -I INPUT 5 -p "$1" --dport "$2" -m conntrack --ctstate NEW -j ACCEPT
+    iptables -I INPUT 1 -p "$1" --dport "$2" -m conntrack --ctstate NEW -j ACCEPT
 }
 open_port tcp 80
 open_port tcp 443

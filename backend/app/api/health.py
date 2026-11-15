@@ -27,29 +27,30 @@ def liveness() -> HealthResponse:
 @router.get("/ready", response_model=ReadinessResponse)
 def readiness(response: Response) -> ReadinessResponse:
     """Ready only when the database is reachable and fully migrated."""
-    with session_scope() as session:
-        head = _migration_head(alembic_config())
-        try:
+    head = _migration_head(alembic_config())
+    try:
+        # Opening the scope already talks to the database, so it is inside the error handling.
+        with session_scope() as session:
             session.execute(text("SELECT 1"))
             revision = session.execute(text("SELECT version_num FROM alembic_version")).scalar()
-        except SQLAlchemyError as exc:
-            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-            return ReadinessResponse(
-                status="not_ready",
-                database="error",
-                migration_revision=None,
-                migration_head=head,
-                detail=type(exc).__name__,
-            )
-        if revision != head:
-            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-            return ReadinessResponse(
-                status="not_ready",
-                database="ok",
-                migration_revision=revision,
-                migration_head=head,
-                detail="database schema is not at the migration head",
-            )
+    except SQLAlchemyError as exc:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return ReadinessResponse(
-            status="ready", database="ok", migration_revision=revision, migration_head=head
+            status="not_ready",
+            database="error",
+            migration_revision=None,
+            migration_head=head,
+            detail=type(exc).__name__,
         )
+    if revision != head:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return ReadinessResponse(
+            status="not_ready",
+            database="ok",
+            migration_revision=revision,
+            migration_head=head,
+            detail="database schema is not at the migration head",
+        )
+    return ReadinessResponse(
+        status="ready", database="ok", migration_revision=revision, migration_head=head
+    )
