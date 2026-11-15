@@ -16,8 +16,9 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=15).status==200 else 1)"]
   worker:
     healthcheck:
+      # Keeps compose.yaml's shell test (liveness-file age): no Python per probe. Before this,
+      # the probe imported the worker stack and took ~22 s under QEMU, beyond the timeout.
       <<: *relaxed
-      test: ["CMD", "python", "-m", "app.healthcheck"]
   frontend:
     healthcheck:
       <<: *relaxed

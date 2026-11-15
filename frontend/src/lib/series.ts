@@ -37,4 +37,3 @@ export function breakOnStep(data: ChartDatum[], maxStepMs: number): ChartDatum[]
   }
   return out;
 }
-

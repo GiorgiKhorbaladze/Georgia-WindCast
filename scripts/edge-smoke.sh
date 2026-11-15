@@ -30,7 +30,7 @@ source scripts/lib/compose.sh
 H="https://localhost"
 CURL=(curl -sS --max-time 10 -k)
 step() { printf '\n== %s\n' "$*"; }
-fail() { echo "FAIL: $*" >&2; "${DC[@]}" ps >&2 || true; "${DC[@]}" logs --tail=60 caddy frontend >&2 || true; exit 1; }
+fail() { echo "FAIL: $*" >&2; dump_diagnostics; exit 1; }
 
 cleanup() {
   if [[ ${KEEP_STACK:-0} != 1 ]]; then
@@ -67,7 +67,10 @@ step "Starting the public stack (project: $COMPOSE_PROJECT_NAME)"
 "${DC[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
 build_flag=(--build)
 [[ ${SMOKE_SKIP_BUILD:-0} == 1 ]] && build_flag=()
-"${DC[@]}" up "${build_flag[@]}" -d --wait --wait-timeout 300
+if ! "${DC[@]}" up "${build_flag[@]}" -d --wait --wait-timeout 300; then
+  dump_diagnostics
+  exit 1
+fi
 
 step "Only Caddy publishes host ports"
 pub=$(published_services)
@@ -125,7 +128,7 @@ step "Frontend outage: generic error, then recovery"
 body=$("${CURL[@]}" -w ' [%{http_code}]' "$H/history" || true)
 echo "$body"
 [[ $body == *"Service temporarily unavailable."*"[502]" ]] || fail "unexpected outage response"
-"${DC[@]}" up -d --wait --wait-timeout 120 frontend
+if ! "${DC[@]}" up -d --wait --wait-timeout 120 frontend; then dump_diagnostics; exit 1; fi
 wait_https /history 60 'GEORGIA WINDCAST' >/dev/null
 echo "recovered"
 

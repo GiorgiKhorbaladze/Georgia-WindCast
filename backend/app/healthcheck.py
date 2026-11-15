@@ -1,6 +1,7 @@
-"""Container healthcheck for the worker: exit 0 only if this host's heartbeat is recent.
+"""Database-level worker check: exit 0 only if this host's heartbeat row is recent.
 
-Usage: python -m app.healthcheck
+Usage: python -m app.healthcheck   (diagnostics; the container healthcheck uses the cheaper
+liveness-file test in compose.yaml, see app/identity.py)
 """
 
 from __future__ import annotations
@@ -12,9 +13,9 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import get_sessionmaker
+from app.identity import default_worker_name
 from app.models import WorkerHeartbeat
 from app.timeutil import utcnow
-from app.worker import default_worker_name
 
 
 def worker_is_healthy(worker_name: str) -> bool:

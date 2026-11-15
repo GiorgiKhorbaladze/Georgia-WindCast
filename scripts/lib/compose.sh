@@ -22,3 +22,19 @@ if len(rows) == 1 and isinstance(rows[0], list):
 published = any(p.get("PublishedPort", 0) for r in rows for p in (r.get("Publishers") or []))
 print("published" if published else "unpublished")'
 }
+
+# Failure diagnostics, printed BEFORE any teardown: service states, each container's recent
+# healthcheck results (exit code + output), and the tail of every service log.
+dump_diagnostics() {
+  echo "==== diagnostics: docker compose ps -a" >&2
+  "${DC[@]}" ps -a >&2 || true
+  local id name
+  for id in $("${DC[@]}" ps -aq 2>/dev/null); do
+    name="$(docker inspect --format '{{.Name}}' "$id" 2>/dev/null)"
+    echo "==== diagnostics: health of ${name#/}" >&2
+    docker inspect --format '{{if .State.Health}}status={{.State.Health.Status}} failing_streak={{.State.Health.FailingStreak}}{{range .State.Health.Log}}
+  exit={{.ExitCode}} start={{.Start}} output={{printf "%.300s" .Output}}{{end}}{{else}}no healthcheck; state={{.State.Status}} exit={{.State.ExitCode}}{{end}}' "$id" >&2 || true
+  done
+  echo "==== diagnostics: service logs (last 80 lines each)" >&2
+  "${DC[@]}" logs --no-color --tail=80 >&2 || true
+}

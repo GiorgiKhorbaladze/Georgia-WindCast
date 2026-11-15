@@ -41,6 +41,9 @@ services:
     image: windcast-backend:${WINDCAST_IMAGE_TAG:-local}
     command: ["alembic", "upgrade", "head"]
     environment: *backend-env
+    # One-shot job: the image's HTTP healthcheck belongs to the API and would only report noise.
+    healthcheck:
+      disable: true
     depends_on:
       db:
         condition: service_healthy
@@ -64,7 +67,12 @@ services:
     restart: unless-stopped
     environment: *backend-env
     healthcheck:
-      test: ["CMD", "python", "-m", "app.healthcheck"]
+      # Age of the liveness file the worker touches after each committed DB heartbeat. A shell
+      # test, so a probe never starts Python (a cold import of the worker stack took ~22 s under
+      # QEMU). Database-level check: docker compose exec worker python -m app.healthcheck
+      test:
+        - CMD-SHELL
+        - f=$${WINDCAST_WORKER_ALIVE_FILE:-/tmp/windcast-worker.alive}; [ -f "$$f" ] && [ $$(( $$(date +%s) - $$(stat -c %Y "$$f") )) -le $${WINDCAST_WORKER_STALE_AFTER_SECONDS:-120} ]
       interval: 15s
       timeout: 5s
       start_period: 20s

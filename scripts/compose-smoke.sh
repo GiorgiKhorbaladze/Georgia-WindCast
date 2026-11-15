@@ -28,8 +28,7 @@ source scripts/lib/compose.sh
 step() { printf '\n== %s\n' "$*"; }
 
 dump_state() {
-  "${DC[@]}" ps >&2 || true
-  "${DC[@]}" logs --tail=80 >&2 || true
+  dump_diagnostics
 }
 
 wait_for() {  # wait_for <url> <seconds> [expected-substring]   (host-side, frontend only)
@@ -93,7 +92,10 @@ step "Building and starting a clean stack (project: $COMPOSE_PROJECT_NAME, files
 "${DC[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
 build_flag=(--build)
 [[ ${SMOKE_SKIP_BUILD:-0} == 1 ]] && build_flag=()
-"${DC[@]}" up "${build_flag[@]}" -d --wait --wait-timeout 240
+if ! "${DC[@]}" up "${build_flag[@]}" -d --wait --wait-timeout 240; then
+  dump_diagnostics
+  exit 1
+fi
 
 step "Production overlay: API not published"
 assert_api_unpublished
@@ -123,7 +125,7 @@ step "Persistence: record instance timestamp, recreate the full stack, compare"
 before=$(psql_scalar "SELECT installed_at FROM instance_metadata WHERE id = 1")
 echo "installed_at before: $before"
 "${DC[@]}" down            # containers removed, named volume kept
-"${DC[@]}" up -d --wait --wait-timeout 180
+if ! "${DC[@]}" up -d --wait --wait-timeout 180; then dump_diagnostics; exit 1; fi
 api_wait /api/health/ready 60 '"status":"ready"' >/dev/null
 after=$(psql_scalar "SELECT installed_at FROM instance_metadata WHERE id = 1")
 echo "installed_at after:  $after"
@@ -134,7 +136,7 @@ step "Migration round trip (downgrade to base, upgrade to head) against the Comp
 "${DC[@]}" stop api worker
 "${DC[@]}" run --rm migrate alembic downgrade base
 "${DC[@]}" run --rm migrate alembic upgrade head
-"${DC[@]}" up -d --wait --wait-timeout 180
+if ! "${DC[@]}" up -d --wait --wait-timeout 180; then dump_diagnostics; exit 1; fi
 api_wait /api/health/ready 60 '"status":"ready"'
 
 backup_dir="$(mktemp -d)"
