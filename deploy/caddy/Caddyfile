@@ -1,0 +1,82 @@
+# Georgia WindCast public edge (issue #18).
+# - Automatic HTTPS (Let's Encrypt, HTTP-01) with renewal; HTTP is redirected to HTTPS.
+# - Only the frontend is reachable. The API and PostgreSQL are never routed or published.
+# - Per-client-IP rate limits; static assets are exempt.
+# Configuration comes from the environment (compose.public.yaml):
+#   WINDCAST_SITE_ADDRESS  public hostname, e.g. windcast-ge.duckdns.org (no scheme)
+#   ACME_EMAIL             contact for certificate expiry notices
+#   ACME_CA                optional: Let's Encrypt staging for rehearsals
+{
+	email {$ACME_EMAIL}
+	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+	order rate_limit before reverse_proxy
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 10s
+			idle 2m
+		}
+	}
+}
+
+{$WINDCAST_SITE_ADDRESS} {
+	encode zstd gzip
+
+	header {
+		# No includeSubDomains/preload: the hostname may be a subdomain of a shared provider.
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+		-X-Powered-By
+	}
+
+	# Read-only site: no request bodies are needed.
+	request_body {
+		max_size 16KB
+	}
+
+	# Never route internal paths even if something upstream exposes them.
+	@internal path /api/v1/* /api/health* /docs* /openapi.json
+	respond @internal 404
+
+	# Keyed on the TCP peer address (Caddy ignores client-supplied X-Forwarded-For by default).
+	# Defaults allow an office behind one NAT address (each open dashboard polls once a minute)
+	# while still capping a single abusive client at ~10 data requests/s, far below capacity.
+	rate_limit {
+		zone data {
+			match {
+				path /api/data/*
+			}
+			key {remote_host}
+			events {$WINDCAST_RATE_DATA_PER_MIN:600}
+			window 1m
+		}
+		zone pages {
+			match {
+				not path /_next/static/* /vendor/* /og-image.png /icon* /apple-icon* /favicon.ico
+			}
+			key {remote_host}
+			events {$WINDCAST_RATE_PAGES_PER_MIN:1200}
+			window 1m
+		}
+	}
+
+	reverse_proxy frontend:3000 {
+		health_uri /healthz
+		health_interval 15s
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 30s
+		}
+	}
+
+	handle_errors {
+		@limited expression {err.status_code} == 429
+		respond @limited "Too many requests. Please try again in a minute." 429
+		respond "Service temporarily unavailable." {err.status_code}
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

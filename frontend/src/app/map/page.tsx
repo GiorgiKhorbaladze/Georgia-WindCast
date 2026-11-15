@@ -3,8 +3,11 @@ import { ForecastCoverageBanner } from "@/components/ForecastCoverageBanner";
 import { getWeatherOverview } from "@/lib/api";
 import { getI18n } from "@/lib/locale-server";
 import { loadSites } from "@/lib/sitesData";
+import { pageMetadata } from "@/lib/pageMeta";
 
 const DEFAULT_HEIGHT = 120;
+
+export const generateMetadata = () => pageMetadata("map", "/map");
 
 export default async function MapPage() {
   const [{ locale, t }, sites, overview] = await Promise.all([getI18n(), loadSites(DEFAULT_HEIGHT), getWeatherOverview()]);

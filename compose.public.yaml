@@ -1,0 +1,54 @@
+# Public edge overlay (issue #18): HTTPS reverse proxy in front of the frontend.
+#   COMPOSE_FILE=compose.yaml:compose.prod.yaml:compose.public.yaml   (set in .env)
+# - Caddy publishes 80/443 and obtains/renews certificates automatically.
+# - The frontend is no longer published on the host; only Caddy reaches it.
+# - The API stays unpublished (compose.prod.yaml) and PostgreSQL is never published.
+# Required in .env: WINDCAST_SITE_ADDRESS, ACME_EMAIL, WINDCAST_PUBLIC_URL (https://<site address>).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  frontend:
+    ports: !reset []
+
+  caddy:
+    build:
+      context: ./deploy/caddy
+      args:
+        CADDY_BUILDER_IMAGE: ${CADDY_BUILDER_IMAGE:-caddy:2.11.9-builder-alpine}
+        CADDY_IMAGE: ${CADDY_IMAGE:-caddy:2.11.9-alpine}
+    image: windcast-caddy:${WINDCAST_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      WINDCAST_SITE_ADDRESS: ${WINDCAST_SITE_ADDRESS:?set WINDCAST_SITE_ADDRESS in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      WINDCAST_RATE_DATA_PER_MIN: ${WINDCAST_RATE_DATA_PER_MIN:-600}
+      WINDCAST_RATE_PAGES_PER_MIN: ${WINDCAST_RATE_PAGES_PER_MIN:-1200}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+volumes:
+  caddy-data:
+  caddy-config:

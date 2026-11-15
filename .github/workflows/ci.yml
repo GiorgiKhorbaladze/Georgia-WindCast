@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # main, plus stacked PRs onto integration branches (e.g. the #18 PR onto the release candidate)
+    branches: [main, "claude/**"]
   workflow_dispatch:
 
 permissions:
@@ -119,7 +120,8 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm run build
-          WINDCAST_API_URL=http://127.0.0.1:8000 nohup npx next start -p 3000 > ../web.log 2>&1 &
+          # Cache off: scenario steps reseed the database between runs (the cache has unit tests).
+          WINDCAST_API_CACHE_SECONDS=0 WINDCAST_API_URL=http://127.0.0.1:8000 nohup npx next start -p 3000 > ../web.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:3000/healthz && break; sleep 1; done
       - name: Start API on a seeded test database (test-only seed, real recorded values)
         working-directory: backend
@@ -173,3 +175,83 @@ jobs:
         with:
           name: compose-smoke-transcript
           path: compose-smoke.txt
+
+  public-edge-smoke:
+    name: Public edge smoke (HTTPS, rate limits, exposure)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Caddy + production overlays (isolated project, internal CA, random password)
+        shell: bash
+        run: scripts/edge-smoke.sh 2>&1 | tee edge-smoke.txt
+      - name: Upload transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-smoke-transcript
+          path: edge-smoke.txt
+
+  arm64:
+    name: ARM64 images (build + emulated smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    needs: [frontend, backend]
+    env:
+      # DOCKER_DEFAULT_PLATFORM is set only on the smoke steps: job-wide it made
+      # setup-qemu-action pull its own binfmt helper as arm64 ("exec format error").
+      WINDCAST_IMAGE_TAG: arm64
+      SMOKE_SKIP_BUILD: "1"
+      # Emulation only: relaxed healthcheck timeouts. Native Ampere A1 hosts do not use this file.
+      SMOKE_EXTRA_COMPOSE: deploy/emulation.yaml
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+      - name: Build linux/arm64 images (backend, frontend, Caddy)
+        run: |
+          docker buildx build --platform linux/arm64 --load -t windcast-backend:arm64 backend
+          docker buildx build --platform linux/arm64 --load -t windcast-frontend:arm64 frontend
+          docker buildx build --platform linux/arm64 --load -t windcast-caddy:arm64 deploy/caddy
+          for i in windcast-backend:arm64 windcast-frontend:arm64 windcast-caddy:arm64; do
+            echo "$i $(docker image inspect "$i" --format '{{.Architecture}} {{.Size}}')"
+            test "$(docker image inspect "$i" --format '{{.Architecture}}')" = arm64
+          done
+      - name: Compose smoke on arm64 (migrations, production overlay, failing + successful restore)
+        shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
+        run: scripts/compose-smoke.sh 2>&1 | tee arm64-compose-smoke.txt
+      - name: Public edge smoke on arm64
+        shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
+        run: scripts/edge-smoke.sh 2>&1 | tee arm64-edge-smoke.txt
+      - name: Upload transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-transcripts
+          path: arm64-*.txt
+
+  rollback-rehearsal:
+    name: Rollback rehearsal (cross-schema, broken migration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # the rehearsal clones this checkout and commits test revisions on top
+      - name: Deploy A, deploy B (incompatible schema), rollback; deploy C (broken), rollback
+        shell: bash
+        run: scripts/rollback-rehearsal.sh 2>&1 | tee rollback-rehearsal.txt
+      - name: Upload transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-rehearsal-transcript
+          path: rollback-rehearsal.txt

@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import os
 import signal
-import socket
 import threading
 import time
 from datetime import datetime
@@ -19,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.config import get_settings
 from app.db import get_sessionmaker
+from app.identity import alive_file, default_worker_name, touch_alive
 from app.ingestion.gse_job import GseIngestionJob, build_client
 from app.ingestion.weather_job import WeatherIngestionJob, build_weather_client
 from app.models import WorkerHeartbeat
@@ -39,10 +39,11 @@ def record_heartbeat(worker_name: str, started_at: datetime) -> None:
     )
     with get_sessionmaker()() as session, session.begin():
         session.execute(stmt)
-
-
-def default_worker_name() -> str:
-    return f"worker@{socket.gethostname()}"[:64]
+    # Only after the commit: the container healthcheck reads this file's age (cheap, no Python).
+    try:
+        touch_alive()
+    except OSError:
+        log.warning("could not update the liveness file %s", alive_file(), exc_info=True)
 
 
 def run(stop: threading.Event | None = None) -> None:

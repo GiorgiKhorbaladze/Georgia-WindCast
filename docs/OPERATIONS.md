@@ -1,6 +1,6 @@
 # Operations guide - private pilot
 
-Scope: issue #9. This guide covers deploying, monitoring, backing up and rolling back WindCast on a single private host. **No public exposure, paid service or release is implied.** Those need the owner's explicit authorisation.
+Scope: issue #9. For the public HTTPS deployment on Oracle Cloud Always Free see [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) (issue #18). This guide covers deploying, monitoring, backing up and rolling back WindCast on a single private host. **No public exposure, paid service or release is implied.** Those need the owner's explicit authorisation.
 
 ## 1. Deployment checklist
 
@@ -31,7 +31,8 @@ All settings are environment variables; `.env.example` documents each one. Secre
 | API readiness | `GET /api/health/ready` | 200 and the schema at the Alembic head |
 | Worker liveness | container healthcheck `python -m app.healthcheck` (DB heartbeat newer than `WINDCAST_WORKER_STALE_AFTER_SECONDS`) | healthy |
 | Frontend | `GET /healthz` | 200 |
-| Source availability | `GET /api/data/status` on the frontend (a read-only proxy of the API's `/api/v1/status`; the API itself is not published) → `sources[]`: `state` (`ok`/`degraded`/`down`/`not_configured`), `last_success_at`, `consecutive_failures`, `backoff_until`, `last_error` | `ok` |
+| Source availability (public) | `GET /api/data/status` on the frontend: an **allow-listed** summary (`generated_at`, `worker.state/last_seen_at`, `sources[].id/state/last_success_at`, `sites`). Operational details are never public (issue #18) | `ok` |
+| Source diagnostics (host only) | `docker compose exec api python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/status').read().decode())"` → adds `detail` (last error), `consecutive_failures`, `backoff_until`, `last_attempt_at` | - |
 | Data freshness | `GET /api/v1/generation/latest` → `freshness`; `GET /api/v1/weather` → `forecast_state` | `fresh` |
 
 The dashboard's "Data sources" panel shows the same states. For alerting, point any uptime monitor at the frontend through the reverse proxy. A cron job such as `curl -fsS https://<pilot-host>/api/data/status | jq -e '[.sources[].state] | index("down") | not'` can watch for `"down"`. On the host itself: `docker compose exec api python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/status').read().decode())"`. No paid monitoring service is required.
@@ -52,6 +53,9 @@ scripts/restore.sh /srv/windcast-backups/windcast-<UTC>.dump
 - **Verified in CI on every PR** (Compose smoke, production overlay): invalid archive rejected, failing restore rolled back with the marker row and services intact and the API unpublished, successful restore removing a row added after the backup.
 
 ## 5. Upgrade and rollback
+
+For hosts deployed with `scripts/deploy.sh`, use `scripts/rollback.sh` to return to an earlier revision. It restores the paired pre-deploy backup exactly and never restarts the newer code (see [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) §7). The manual steps below apply to a same-schema rollback only.
+
 
 Upgrade:
 1. `scripts/backup.sh`.

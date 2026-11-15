@@ -15,26 +15,21 @@ export function Header({ t, locale }: { t: Dictionary; locale: Locale }) {
   ];
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-ink-950/80 backdrop-blur-md">
-      <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center justify-between gap-4">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-4">
           <Link href="/" className="group flex items-center gap-3">
             <WindGlyph />
             <span>
-              <span className="block font-mono text-base font-bold tracking-[0.22em] text-white">
+              <span className="block font-mono text-sm font-bold tracking-[0.12em] text-white sm:text-base sm:tracking-[0.22em]">
                 {t.appName}
               </span>
-              <span className="block text-[11px] text-slate-400">{t.tagline}</span>
+              <span className="hidden text-[11px] text-slate-400 sm:block">{t.tagline}</span>
             </span>
           </Link>
-          <div className="lg:hidden">
-            <LanguageSwitch current={locale} label={t.languageLabel} />
-          </div>
         </div>
-        <div className="flex items-center gap-4">
-          <NavLinks items={items} label={t.appName} />
-          <div className="hidden lg:block">
-            <LanguageSwitch current={locale} label={t.languageLabel} />
-          </div>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+          <LanguageSwitch current={locale} label={t.languageLabel} />
+          <NavLinks items={items} label={t.appName} menu={t.menu} />
         </div>
       </div>
     </header>

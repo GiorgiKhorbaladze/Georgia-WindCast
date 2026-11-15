@@ -1,11 +1,11 @@
 import { getSystemStatus } from "@/lib/api";
+import { toPublicStatus } from "@/lib/publicStatus";
+import { publicError, publicJson } from "@/lib/routeErrors";
 
-// Read-only status for monitoring through the frontend (the API itself is not published in
-// production). See docs/OPERATIONS.md section 3.
+// Public, read-only health and freshness summary. Only allow-listed fields leave the server (see
+// src/lib/publicStatus.ts); operators read the full status on the host (docs/OPERATIONS.md).
 export async function GET() {
   const result = await getSystemStatus();
-  if (!result.ok) {
-    return Response.json({ error: result.error }, { status: 502, headers: { "cache-control": "no-store" } });
-  }
-  return Response.json(result.data, { headers: { "cache-control": "no-store" } });
+  if (!result.ok) return publicError(result.error);
+  return publicJson(toPublicStatus(result.data));
 }

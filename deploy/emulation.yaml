@@ -1,0 +1,25 @@
+# Test-only overlay for running linux/arm64 images under QEMU emulation on an amd64 machine
+# (CI job "ARM64 images" and local verification). Emulated Python/Node start several times slower,
+# so healthcheck timeouts are relaxed. Never use this on a real host: native Ampere A1 needs no
+# change. Used via SMOKE_EXTRA_COMPOSE=deploy/emulation.yaml with scripts/compose-smoke.sh and
+# scripts/edge-smoke.sh.
+x-relaxed: &relaxed
+  interval: 15s
+  timeout: 20s
+  start_period: 120s
+  retries: 10
+
+services:
+  api:
+    healthcheck:
+      <<: *relaxed
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=15).status==200 else 1)"]
+  worker:
+    healthcheck:
+      # Keeps compose.yaml's shell test (liveness-file age): no Python per probe. Before this,
+      # the probe imported the worker stack and took ~22 s under QEMU, beyond the timeout.
+      <<: *relaxed
+  frontend:
+    healthcheck:
+      <<: *relaxed
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/healthz >/dev/null || exit 1"]

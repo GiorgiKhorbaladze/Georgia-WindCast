@@ -105,3 +105,52 @@ def test_run_weather_tick_survives_job_errors(migrated_db):
             raise RuntimeError("prune boom")
 
     worker.run_weather_tick(Boom())  # must not raise
+
+
+def test_heartbeat_touches_liveness_file_only_after_commit(migrated_db, monkeypatch, tmp_path):
+    """The container healthcheck reads this file's age instead of starting Python (PR #19 ARM64)."""
+    from datetime import UTC, datetime
+
+    from app import identity, worker
+
+    alive = tmp_path / "alive"
+    monkeypatch.setenv("WINDCAST_WORKER_ALIVE_FILE", str(alive))
+    assert identity.alive_age_seconds() is None
+    worker.record_heartbeat("worker@test", datetime.now(UTC))
+    age = identity.alive_age_seconds()
+    assert age is not None and 0 <= age < 5
+
+
+def test_liveness_file_not_touched_when_heartbeat_fails(monkeypatch, tmp_path):
+    from datetime import UTC, datetime
+
+    import pytest
+
+    from app import identity, worker
+    from app.config import get_settings
+    from app.db import get_engine, get_sessionmaker
+
+    alive = tmp_path / "alive"
+    monkeypatch.setenv("WINDCAST_WORKER_ALIVE_FILE", str(alive))
+    monkeypatch.setenv(
+        "WINDCAST_DATABASE_URL", "postgresql+psycopg://nobody:nothing@127.0.0.1:1/none"
+    )
+    for f in (get_settings, get_engine, get_sessionmaker):
+        f.cache_clear()
+    with pytest.raises(Exception):  # noqa: B017 - any DB error
+        worker.record_heartbeat("worker@test", datetime.now(UTC))
+    assert identity.alive_age_seconds() is None
+
+
+def test_healthcheck_module_stays_lightweight():
+    """The DB healthcheck must not import the ingestion stack (slow under emulation)."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys, app.healthcheck; "
+        "bad = [m for m in ('app.worker', 'app.ingestion.gse_job', 'httpx') if m in sys.modules]; "
+        "sys.exit(1 if bad else 0)"
+    )
+    # Fixed argv, no shell, no external input.
+    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0  # noqa: S603

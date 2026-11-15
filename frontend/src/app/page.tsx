@@ -5,13 +5,17 @@ import { LiveGenerationKpi } from "@/components/LiveGenerationKpi";
 import { StatusBadge, type Tone } from "@/components/StatusBadge";
 import { getGenerationHistory, getGenerationLatest, getSystemStatus, getWeatherOverview } from "@/lib/api";
 import { formatTbilisi } from "@/lib/format";
+import type { Dictionary, Locale } from "@/lib/i18n";
 import { getI18n } from "@/lib/locale-server";
+import { homeMetadata } from "@/lib/pageMeta";
 import { freshnessTone, workerTone } from "@/lib/status";
 import type { SourceState, WeatherOverview } from "@/lib/types";
 import { compass, downwindBearing, formatSpeed } from "@/lib/wind";
 
 const SOURCE_TONE: Record<SourceState, Tone> = { ok: "ok", degraded: "warn", down: "bad", not_configured: "neutral" };
 const NOW_HEIGHTS = [10, 80, 120, 180];
+
+export const generateMetadata = homeMetadata;
 
 export default async function DashboardPage() {
   const [{ locale, t }, generation, status, history, weather] = await Promise.all([
@@ -43,7 +47,7 @@ export default async function DashboardPage() {
                 <StatusBadge tone={workerTone(status.data.worker.state)}>{t.worker[status.data.worker.state]}</StatusBadge>
               </li>
               {status.data.sources.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-2" title={s.detail ?? undefined}>
+                <li key={s.id} className="flex items-center justify-between gap-2">
                   <span className="text-slate-300">{t.sourceName[s.id] ?? s.id}</span>
                   <StatusBadge tone={SOURCE_TONE[s.state]}>{t.sourceState[s.state]}</StatusBadge>
                 </li>
@@ -68,6 +72,7 @@ export default async function DashboardPage() {
           <h2 id="wind-now" className="wc-label">{t.weather.now}</h2>
           <Link href="/map" className="text-xs text-cyan-glow hover:underline">{t.nav.map} →</Link>
         </div>
+        {w && <NowProvenance w={w} locale={locale} t={t} />}
         {sites ? (
           <ul className="mt-4 space-y-3">
             {sites.map((site) => {
@@ -167,5 +172,17 @@ function DataType({ swatch, entry }: { swatch: string; entry: string[] }) {
         <span className="block text-xs text-slate-400">{entry[1]}</span>
       </span>
     </li>
+  );
+}
+
+/** The model values' own validity, run and forecast state, next to the values (review #18 item 5). */
+function NowProvenance({ w, locale, t }: { w: WeatherOverview; locale: Locale; t: Dictionary }) {
+  const validAt = w.now.find((n) => n.valid_at)?.valid_at ?? null;
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400" data-testid="now-provenance">
+      <StatusBadge tone={freshnessTone(w.forecast_state)}>{t.freshness[w.forecast_state]}</StatusBadge>
+      {validAt && <span>{t.weather.validAt}: {formatTbilisi(validAt, locale)}</span>}
+      {w.forecast_run_at && <span>{t.weather.run}: {formatTbilisi(w.forecast_run_at, locale)}</span>}
+    </div>
   );
 }

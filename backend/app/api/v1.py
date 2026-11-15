@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db import get_session
+from app.db import session_scope
 from app.ingestion.gse_job import FUTURE_LABEL_TOLERANCE, METRIC_WIND, PERIOD, SOURCE_ID
 from app.ingestion.weather_job import SOURCE_FORECAST, SOURCE_REANALYSIS
 from app.models import GenerationReading, SourceStatusRecord, WorkerHeartbeat
@@ -41,7 +41,6 @@ GAP_THRESHOLD = PERIOD * 1.5
 # not called a gap until this allowance has passed, otherwise every page load shows a false gap.
 PUBLICATION_ALLOWANCE = timedelta(minutes=4)
 
-SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
@@ -56,65 +55,68 @@ def _gse_status_row(session: Session) -> SourceStatusRecord | None:
 
 
 @router.get("/generation/latest", response_model=GenerationLatest)
-def generation_latest(session: SessionDep, settings: SettingsDep) -> GenerationLatest:
+def generation_latest(settings: SettingsDep) -> GenerationLatest:
     """Latest national aggregate wind generation reported by GSE.
 
     Freshness is judged by the *source* period label, never by when we last polled, so a
     reading that GSE stopped updating turns stale even while polling continues.
     """
-    now = utcnow()
-    # Labels later than now (+ clock tolerance) are never treated as the latest reading, even if
-    # one was persisted before label validation existed.
-    latest = session.execute(
-        _wind_readings()
-        .where(GenerationReading.period_label_at <= now + FUTURE_LABEL_TOLERANCE)
-        .order_by(GenerationReading.period_label_at.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    with session_scope() as session:
+        now = utcnow()
+        # Labels later than now (+ clock tolerance) are never treated as the latest reading, even if
+        # one was persisted before label validation existed.
+        latest = session.execute(
+            _wind_readings()
+            .where(GenerationReading.period_label_at <= now + FUTURE_LABEL_TOLERANCE)
+            .order_by(GenerationReading.period_label_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
-    if latest is None:
+        if latest is None:
+            return GenerationLatest(
+                freshness=Freshness.UNAVAILABLE,
+                reason="ingestion_disabled"
+                if not settings.gse_ingestion_enabled
+                else "no_data_yet",
+                checked_at=now,
+                source=GSE_ATTRIBUTION,
+            )
+
+        fresh_until = latest.period_label_at + timedelta(seconds=settings.gse_fresh_within_seconds)
+        reason: str | None
+        if now <= fresh_until:
+            if latest.period_label_at > now:
+                # Accepted within the clock-skew tolerance, but its label time has not arrived on
+                # this clock yet: never claim a future-dated observation as verified current.
+                freshness, reason = Freshness.UNVERIFIED, "label_ahead_of_clock"
+            elif latest.quality == GOOD_QUALITY:
+                freshness, reason = Freshness.FRESH, None
+            else:
+                # Timely, but GSE did not mark the value as an actual measurement.
+                freshness, reason = Freshness.UNVERIFIED, "quality_not_actual"
+        else:
+            freshness = Freshness.STALE
+            status = _gse_status_row(session)
+            if not settings.gse_ingestion_enabled:
+                reason = "ingestion_disabled"
+            elif status is not None and status.consecutive_failures > 0:
+                reason = "source_unreachable"
+            else:
+                reason = "source_not_updated"
+
         return GenerationLatest(
-            freshness=Freshness.UNAVAILABLE,
-            reason="ingestion_disabled" if not settings.gse_ingestion_enabled else "no_data_yet",
+            freshness=freshness,
+            value_mw=latest.value_mw,
+            source_observed_at=latest.period_label_at,
+            retrieved_at=latest.retrieved_at,
+            reason=reason,
+            quality=latest.quality,
+            quality_flagged=latest.quality != GOOD_QUALITY,
+            period_seconds=int(PERIOD.total_seconds()),
+            fresh_until=fresh_until,
             checked_at=now,
             source=GSE_ATTRIBUTION,
         )
-
-    fresh_until = latest.period_label_at + timedelta(seconds=settings.gse_fresh_within_seconds)
-    reason: str | None
-    if now <= fresh_until:
-        if latest.period_label_at > now:
-            # Accepted within the clock-skew tolerance, but its label time has not arrived on this
-            # clock yet: never claim a future-dated observation as verified current.
-            freshness, reason = Freshness.UNVERIFIED, "label_ahead_of_clock"
-        elif latest.quality == GOOD_QUALITY:
-            freshness, reason = Freshness.FRESH, None
-        else:
-            # Timely, but GSE did not mark the value as an actual measurement.
-            freshness, reason = Freshness.UNVERIFIED, "quality_not_actual"
-    else:
-        freshness = Freshness.STALE
-        status = _gse_status_row(session)
-        if not settings.gse_ingestion_enabled:
-            reason = "ingestion_disabled"
-        elif status is not None and status.consecutive_failures > 0:
-            reason = "source_unreachable"
-        else:
-            reason = "source_not_updated"
-
-    return GenerationLatest(
-        freshness=freshness,
-        value_mw=latest.value_mw,
-        source_observed_at=latest.period_label_at,
-        retrieved_at=latest.retrieved_at,
-        reason=reason,
-        quality=latest.quality,
-        quality_flagged=latest.quality != GOOD_QUALITY,
-        period_seconds=int(PERIOD.total_seconds()),
-        fresh_until=fresh_until,
-        checked_at=now,
-        source=GSE_ATTRIBUTION,
-    )
 
 
 def compute_gaps(
@@ -141,51 +143,52 @@ def compute_gaps(
 
 @router.get("/generation/history", response_model=GenerationHistory)
 def generation_history(
-    session: SessionDep,
     start: Annotated[datetime | None, Query(description="UTC ISO 8601; default end - 24h")] = None,
     end: Annotated[datetime | None, Query(description="UTC ISO 8601; default now")] = None,
 ) -> GenerationHistory:
     """Collected actual readings only. Missing intervals are listed, never filled."""
-    now = utcnow()
-    end = end or now
-    start = start or end - timedelta(hours=24)
-    if start.tzinfo is None or end.tzinfo is None:
-        raise HTTPException(422, "start and end must include a timezone offset")
-    if start >= end:
-        raise HTTPException(422, "start must be before end")
-    if end - start > MAX_HISTORY_RANGE:
-        raise HTTPException(422, f"range exceeds {MAX_HISTORY_RANGE.days} days")
+    with session_scope() as session:
+        now = utcnow()
+        end = end or now
+        start = start or end - timedelta(hours=24)
+        if start.tzinfo is None or end.tzinfo is None:
+            raise HTTPException(422, "start and end must include a timezone offset")
+        if start >= end:
+            raise HTTPException(422, "start must be before end")
+        if end - start > MAX_HISTORY_RANGE:
+            raise HTTPException(422, f"range exceeds {MAX_HISTORY_RANGE.days} days")
 
-    rows = session.execute(
-        _wind_readings()
-        .where(
-            GenerationReading.period_label_at >= start,
-            GenerationReading.period_label_at <= min(end, now + FUTURE_LABEL_TOLERANCE),
+        rows = session.execute(
+            _wind_readings()
+            .where(
+                GenerationReading.period_label_at >= start,
+                GenerationReading.period_label_at <= min(end, now + FUTURE_LABEL_TOLERANCE),
+            )
+            .order_by(GenerationReading.period_label_at)
+        ).scalars()
+        points = [
+            GenerationPoint(t=r.period_label_at, value_mw=r.value_mw, quality=r.quality)
+            for r in rows
+        ]
+        collection_started_at = session.execute(
+            select(func.min(GenerationReading.period_label_at)).where(
+                GenerationReading.source == SOURCE_ID, GenerationReading.metric == METRIC_WIND
+            )
+        ).scalar()
+        return GenerationHistory(
+            start=start,
+            end=end,
+            cadence_seconds=int(PERIOD.total_seconds()),
+            collection_started_at=collection_started_at,
+            points=points,
+            gaps=compute_gaps(
+                start,
+                min(end, now - PUBLICATION_ALLOWANCE),
+                [p.t for p in points],
+                collection_started_at,
+            ),
+            source=GSE_ATTRIBUTION,
         )
-        .order_by(GenerationReading.period_label_at)
-    ).scalars()
-    points = [
-        GenerationPoint(t=r.period_label_at, value_mw=r.value_mw, quality=r.quality) for r in rows
-    ]
-    collection_started_at = session.execute(
-        select(func.min(GenerationReading.period_label_at)).where(
-            GenerationReading.source == SOURCE_ID, GenerationReading.metric == METRIC_WIND
-        )
-    ).scalar()
-    return GenerationHistory(
-        start=start,
-        end=end,
-        cadence_seconds=int(PERIOD.total_seconds()),
-        collection_started_at=collection_started_at,
-        points=points,
-        gaps=compute_gaps(
-            start,
-            min(end, now - PUBLICATION_ALLOWANCE),
-            [p.t for p in points],
-            collection_started_at,
-        ),
-        source=GSE_ATTRIBUTION,
-    )
 
 
 def _worker_status(session: Session, settings: Settings) -> WorkerStatus:
@@ -244,15 +247,16 @@ def _status_from_row(source: str, row: SourceStatusRecord | None) -> SourceStatu
 
 
 @router.get("/status", response_model=SystemStatus)
-def system_status(session: SessionDep, settings: SettingsDep) -> SystemStatus:
-    return SystemStatus(
-        generated_at=utcnow(),
-        app_env=settings.app_env.value,
-        worker=_worker_status(session, settings),
-        sources=[
-            _gse_source_status(session, settings),
-            _weather_source_status(session, settings, SOURCE_FORECAST),
-            _weather_source_status(session, settings, SOURCE_REANALYSIS),
-        ],
-        sites=list(SITES),
-    )
+def system_status(settings: SettingsDep) -> SystemStatus:
+    with session_scope() as session:
+        return SystemStatus(
+            generated_at=utcnow(),
+            app_env=settings.app_env.value,
+            worker=_worker_status(session, settings),
+            sources=[
+                _gse_source_status(session, settings),
+                _weather_source_status(session, settings, SOURCE_FORECAST),
+                _weather_source_status(session, settings, SOURCE_REANALYSIS),
+            ],
+            sites=list(SITES),
+        )

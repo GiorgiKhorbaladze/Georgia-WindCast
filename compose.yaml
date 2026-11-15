@@ -41,6 +41,9 @@ services:
     image: windcast-backend:${WINDCAST_IMAGE_TAG:-local}
     command: ["alembic", "upgrade", "head"]
     environment: *backend-env
+    # One-shot job: the image's HTTP healthcheck belongs to the API and would only report noise.
+    healthcheck:
+      disable: true
     depends_on:
       db:
         condition: service_healthy
@@ -64,7 +67,12 @@ services:
     restart: unless-stopped
     environment: *backend-env
     healthcheck:
-      test: ["CMD", "python", "-m", "app.healthcheck"]
+      # Age of the liveness file the worker touches after each committed DB heartbeat. A shell
+      # test, so a probe never starts Python (a cold import of the worker stack took ~22 s under
+      # QEMU). Database-level check: docker compose exec worker python -m app.healthcheck
+      test:
+        - CMD-SHELL
+        - f=$${WINDCAST_WORKER_ALIVE_FILE:-/tmp/windcast-worker.alive}; [ -f "$$f" ] && [ $$(( $$(date +%s) - $$(stat -c %Y "$$f") )) -le $${WINDCAST_WORKER_STALE_AFTER_SECONDS:-120} ]
       interval: 15s
       timeout: 5s
       start_period: 20s
@@ -82,6 +90,11 @@ services:
     restart: unless-stopped
     environment:
       WINDCAST_API_URL: http://api:8000
+      # Public identity (issue #18). Empty = private pilot: no canonical URLs, noindex.
+      WINDCAST_PUBLIC_URL: ${WINDCAST_PUBLIC_URL:-}
+      WINDCAST_PUBLIC_INDEXING: ${WINDCAST_PUBLIC_INDEXING:-false}
+      # Seconds a successful backend response is shared between visitors (0 = off, max 60).
+      WINDCAST_API_CACHE_SECONDS: ${WINDCAST_API_CACHE_SECONDS:-5}
     depends_on:
       api:
         condition: service_healthy

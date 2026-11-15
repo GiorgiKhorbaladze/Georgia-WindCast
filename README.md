@@ -8,7 +8,7 @@ An informational web application that shows:
 - **Model wind (m/s)** at three verified wind farm locations (Ruisi, Zemo Wind, Kartli/Gori): DWD ICON forecasts (72 h, 10/80/120/180 m) and ERA5 reanalysis (10/100 m) via Open-Meteo. Verification: [docs/sources/sites.md](docs/sources/sites.md), [docs/sources/weather.md](docs/sources/weather.md).
 - A dark interactive map (MapLibre, OpenFreeMap basemap), history and forecast charts (Apache ECharts), and a Georgian/English UI.
 
-Both data sources ship **disabled** (`WINDCAST_GSE_INGESTION_ENABLED`, `WINDCAST_WEATHER_INGESTION_ENABLED`) until the owner confirms the reuse/licence terms. While a source is off or failing, the UI shows explicit unavailable or stale states, never placeholder values. No per-plant MW and no MW forecast exist anywhere in the application. Operations: [docs/OPERATIONS.md](docs/OPERATIONS.md).
+Both data sources ship **disabled** (`WINDCAST_GSE_INGESTION_ENABLED`, `WINDCAST_WEATHER_INGESTION_ENABLED`) until the owner confirms the reuse/licence terms. While a source is off or failing, the UI shows explicit unavailable or stale states, never placeholder values. No per-plant MW and no MW forecast exist anywhere in the application. Operations: [docs/OPERATIONS.md](docs/OPERATIONS.md). Public HTTPS deployment on Oracle Cloud Always Free: [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md); launch gates: [docs/PUBLIC-LAUNCH-CHECKLIST.md](docs/PUBLIC-LAUNCH-CHECKLIST.md).
 
 ## Repository layout
 
@@ -21,6 +21,10 @@ Both data sources ship **disabled** (`WINDCAST_GSE_INGESTION_ENABLED`, `WINDCAST
 | `scripts/compose-smoke.sh` | Compose smoke test used locally and in CI (isolated project) |
 | `scripts/backup.sh`, `scripts/restore.sh` | Database backup/restore for a running stack |
 | `compose.prod.yaml` | Production overlay (API unpublished, log rotation, limits) |
+| `compose.public.yaml`, `deploy/caddy/` | Public edge overlay: Caddy with automatic HTTPS and per-IP rate limits |
+| `scripts/edge-smoke.sh` | Public-edge smoke test (HTTPS, exposure, rate limits, status contract) |
+| `scripts/host-setup.sh`, `scripts/deploy.sh`, `scripts/rollback.sh`, `scripts/backup-rotate.sh` | Host preparation, exact-SHA deploy, coordinated rollback (code + paired backup), daily backups |
+| `scripts/rollback-rehearsal.sh` | Cross-schema rollback rehearsal (CI job) |
 | `frontend/e2e/` | Playwright browser tests (desktop + mobile, axe accessibility) |
 | `docs/` | Specification, ADRs, evidence |
 

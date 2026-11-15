@@ -229,3 +229,8 @@ test-results/
 .env.*
 !.env.example
 backups/
+
+# Host-only backup settings (scripts/backup-rotate.sh) and deployment history
+.backup.env
+deploy/history.log
+deploy/last-attempt

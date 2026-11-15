@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from typing import Annotated
-
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Response, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
 
-from app.db import get_session
+from app.db import session_scope
 from app.migrations import alembic_config
 from app.schemas import HealthResponse, ReadinessResponse
 from app.version import __version__
@@ -28,14 +25,14 @@ def liveness() -> HealthResponse:
 
 
 @router.get("/ready", response_model=ReadinessResponse)
-def readiness(
-    response: Response, session: Annotated[Session, Depends(get_session)]
-) -> ReadinessResponse:
+def readiness(response: Response) -> ReadinessResponse:
     """Ready only when the database is reachable and fully migrated."""
     head = _migration_head(alembic_config())
     try:
-        session.execute(text("SELECT 1"))
-        revision = session.execute(text("SELECT version_num FROM alembic_version")).scalar()
+        # Opening the scope already talks to the database, so it is inside the error handling.
+        with session_scope() as session:
+            session.execute(text("SELECT 1"))
+            revision = session.execute(text("SELECT version_num FROM alembic_version")).scalar()
     except SQLAlchemyError as exc:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return ReadinessResponse(
