@@ -1,0 +1,144 @@
+// Mirrors backend/app/schemas.py. There is intentionally no per-site MW type.
+
+export type Freshness = "fresh" | "stale" | "unverified" | "unavailable";
+export type WorkerState = "running" | "stale" | "never_seen";
+export type SourceState = "not_configured" | "ok" | "degraded" | "down";
+
+export interface SourceAttribution {
+  name: string;
+  url: string;
+}
+
+export interface GenerationLatest {
+  scope: "national_aggregate";
+  unit: "MW";
+  freshness: Freshness;
+  value_mw: number | null;
+  source_observed_at: string | null;
+  retrieved_at: string | null;
+  reason: string | null;
+  quality: string | null;
+  quality_flagged: boolean;
+  period_seconds: number | null;
+  fresh_until?: string | null;
+  checked_at?: string | null;
+  source: SourceAttribution;
+}
+
+export interface GenerationHistory {
+  scope: "national_aggregate";
+  unit: "MW";
+  start: string;
+  end: string;
+  cadence_seconds: number;
+  collection_started_at: string | null;
+  points: { t: string; value_mw: number; quality: string }[];
+  gaps: { start: string; end: string }[];
+  source: SourceAttribution;
+}
+
+export interface SiteSummary {
+  id: string;
+  name_ka: string;
+  name_en: string;
+  coordinates_verified: boolean;
+  latitude: number | null;
+  longitude: number | null;
+  municipality_en: string | null;
+  municipality_ka: string | null;
+  status_en: string | null;
+  status_ka: string | null;
+  coordinate_source: string | null;
+  coordinate_uncertainty_km: number | null;
+  coordinate_note: string | null;
+}
+
+export interface SystemStatus {
+  generated_at: string;
+  app_env: string;
+  worker: { state: WorkerState; last_seen_at: string | null };
+  sources: {
+    id: string;
+    state: SourceState;
+    detail: string | null;
+    last_attempt_at: string | null;
+    last_success_at: string | null;
+    consecutive_failures: number;
+    backoff_until: string | null;
+  }[];
+  sites: SiteSummary[];
+}
+
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+export type WeatherProduct = "forecast" | "reanalysis";
+
+export interface WeatherPoint {
+  t: string;
+  speed_ms: number | null;
+  direction_deg: number | null;
+  run_at?: string | null;
+}
+
+export interface WeatherSeries {
+  product: WeatherProduct;
+  provider: string;
+  model: string;
+  model_label: string;
+  height_m: number;
+  run_at: string | null;
+  retrieved_at: string | null;
+  grid_latitude: number | null;
+  grid_longitude: number | null;
+  grid_elevation_m: number | null;
+  supported: boolean;
+  provenance?: "single_run" | "mixed_runs" | "reanalysis" | "none";
+  points: WeatherPoint[];
+}
+
+export interface SiteWeather {
+  site: SiteSummary;
+  height_m: number;
+  unit: "m/s";
+  measured: false;
+  history: WeatherSeries;
+  forecast: WeatherSeries;
+  reanalysis: WeatherSeries;
+  attribution: SourceAttribution[];
+}
+
+export interface WeatherNow {
+  site_id: string;
+  height_m: number;
+  valid_at: string | null;
+  speed_ms: number | null;
+  direction_deg: number | null;
+  model: string | null;
+  run_at: string | null;
+  measured: false;
+}
+
+export interface WeatherOverview {
+  generated_at: string;
+  unit: "m/s";
+  heights: Record<WeatherProduct, number[]>;
+  unsupported_heights: number[];
+  forecast_model: string;
+  forecast_model_label: string;
+  forecast_state: Freshness;
+  forecast_reason?: string | null;
+  forecast_forward_hours?: number;
+  site_coverage?: {
+    site_id: string;
+    horizon_end: string | null;
+    forward_hours: number;
+    last_valid_at?: string | null;
+    missing_hours?: number;
+  }[];
+  forecast_run_at: string | null;
+  forecast_retrieved_at: string | null;
+  forecast_horizon_end: string | null;
+  sites: SiteSummary[];
+  now: WeatherNow[];
+  attribution: SourceAttribution[];
+}

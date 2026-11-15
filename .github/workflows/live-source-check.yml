@@ -1,0 +1,40 @@
+name: Live source check
+
+# Manually triggered verification against the real GSE source. Deliberately separate from CI,
+# which must never depend on upstream availability. Never writes to any database.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gse:
+    name: GSE live export
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.32"
+      - run: uv sync --frozen --no-dev
+      - run: uv run python -m app.ingestion.live_check --periods 6
+
+  open-meteo:
+    name: Open-Meteo live forecast and reanalysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.32"
+      - run: uv sync --frozen --no-dev
+      - run: uv run python -m app.ingestion.live_check_weather

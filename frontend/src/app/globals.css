@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #03070e;
+  --color-ink-900: #060d18;
+  --color-ink-850: #0a1424;
+  --color-ink-800: #0e1b2f;
+  --color-ink-700: #16263f;
+  --color-line: rgb(103 232 249 / 0.12);
+  --color-cyan-glow: #22d3ee;
+  --color-teal-glow: #2dd4bf;
+  --color-violet-glow: #a78bfa;
+  --color-amber-warn: #fbbf24;
+  --color-rose-warn: #fb7185;
+  --font-sans: "Inter Variable", "Noto Sans Georgian", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-ink-950);
+  color: #dbe7f3;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1;
+}
+
+/* Restrained meteorological backdrop: faint cyan grid with a violet isobar-like glow. */
+.wc-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 30rem at 85% -10%, rgb(167 139 250 / 0.10), transparent 60%),
+    radial-gradient(50rem 30rem at 5% 0%, rgb(34 211 238 / 0.08), transparent 60%),
+    linear-gradient(rgb(103 232 249 / 0.035) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, rgb(103 232 249 / 0.035) 1px, transparent 1px) 0 0 / 48px 48px,
+    var(--color-ink-950);
+}
+
+.wc-panel {
+  background: linear-gradient(180deg, rgb(14 27 47 / 0.85), rgb(6 13 24 / 0.85));
+  border: 1px solid var(--color-line);
+  border-radius: 0.875rem;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.2), 0 20px 40px -24px rgb(0 0 0 / 0.8);
+  backdrop-filter: blur(6px);
+}
+
+.wc-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgb(148 178 204);
+}
+
+@keyframes wc-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.wc-pulse {
+  animation: wc-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wc-pulse {
+    animation: none;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-cyan-glow);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Georgian script has no letter case; wide tracking hurts legibility. */
+:lang(ka) .wc-label {
+  letter-spacing: 0.03em;
+  font-size: 0.75rem;
+}
+
+/* Map site markers: a focusable button with a downwind arrow and the model speed. */
+.wc-marker {
+  --wc-color: #22d3ee;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px 3px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--wc-color);
+  background: rgb(3 7 14 / 0.85);
+  color: var(--wc-color);
+  font: 600 12px/1 var(--font-mono);
+  box-shadow: 0 0 0 4px rgb(34 211 238 / 0.08), 0 0 18px -4px var(--wc-color);
+  cursor: pointer;
+}
+.wc-marker[aria-pressed="true"] {
+  background: rgb(14 27 47 / 0.95);
+  box-shadow: 0 0 0 3px var(--wc-color);
+}
+.wc-marker svg {
+  transition: transform 0.4s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wc-marker svg {
+    transition: none;
+  }
+}
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-attrib.maplibregl-compact {
+  background: rgb(3 7 14 / 0.85) !important;
+  color: #cbd5e1 !important;
+  font-size: 11px;
+}
+.maplibregl-ctrl-attrib a,
+.maplibregl-ctrl-attrib-inner a {
+  color: #67e8f9 !important;
+}
+.maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
+.maplibregl-ctrl-scale {
+  background: rgb(3 7 14 / 0.7) !important;
+  color: #cbd5e1 !important;
+  border-color: #64748b !important;
+}
+
+.wc-attribution {
+  background: rgb(3 7 14 / 0.85);
+  color: #cbd5e1;
+}
+.wc-attribution a {
+  color: #67e8f9;
+}

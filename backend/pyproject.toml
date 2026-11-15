@@ -1,0 +1,52 @@
+[project]
+name = "windcast-backend"
+version = "0.1.0"
+description = "Georgia WindCast read API and ingestion worker"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.14",
+    "defusedxml>=0.7",
+    "fastapi>=0.115",
+    "httpx>=0.28",
+    "psycopg[binary]>=3.2",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
+    "uvicorn[standard]>=0.32",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+    "types-defusedxml>=0.7.0.20260504",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "DTZ", "RUF"]
+ignore = ["S101"]  # assert is idiomatic in pytest
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/**" = ["S"]
+"tests/**" = ["S311"]  # seeded RNG for deterministic jitter tests
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "db: requires a reachable PostgreSQL database (TEST_DATABASE_URL)",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = []
+exclude = ["alembic/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false

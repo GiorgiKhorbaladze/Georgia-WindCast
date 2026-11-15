@@ -1,0 +1,27 @@
+# 2026-11-14T20:06:21Z local Compose smoke, Docker 29.9.2, Compose 5.6.1
+# images prebuilt with docker build (sandbox proxy), then: SMOKE_SKIP_BUILD=1 scripts/compose-smoke.sh
+
+== Building and starting a clean stack
+
+== API liveness
+{"status":"ok","service":"windcast-api","version":"0.1.0"}
+
+== API readiness (database reachable and migrated)
+{"status":"ready","database":"ok","migration_revision":"0001_foundation","migration_head":"0001_foundation","detail":null}
+
+== Generation endpoint reports unavailable with no value
+{"scope":"national_aggregate","unit":"MW","freshness":"unavailable","value_mw":null,"source_observed_at":null,"retrieved_at":null,"reason":"ingestion_not_configured","source":{"name":"Georgian State Electrosystem (GSE)","url":"https://www.gse.com.ge"}}
+
+== Worker heartbeat recorded
+{"generated_at":"2026-11-14T20:06:39.850855Z","app_env":"production","worker":{"state":"running","last_seen_at":"2026-11-14T20:06:29.390579Z"},"sources":[{"id":"gse","state":"not_configured","detail":"Pending source verification (issue #3)."},{"id":"open-meteo","state":"not_configured","detail":"Pending coordinate verification (issue #4)."}],"sites":[{"id":"ruisi","name_ka":"რუისის ქ
+
+== Frontend renders explicit unavailable state (Georgian default)
+dashboard OK (32656 bytes)
+{"status":"ok","service":"windcast-frontend"}
+
+== Persistence: record instance timestamp, restart the full stack, compare
+installed_at before restart: 2026-11-14 20:06:28.176915+00
+installed_at after restart:  2026-11-14 20:06:28.176915+00
+
+== SMOKE PASSED
+exit=0
