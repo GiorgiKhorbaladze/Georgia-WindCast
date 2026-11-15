@@ -9,15 +9,15 @@ Scope: issue #9. This guide covers deploying, monitoring, backing up and rolling
 | 1 | Host with Docker Engine and Compose v2 (2 vCPU, 4 GB RAM and 20 GB disk are ample) | `docker compose version` |
 | 2 | Clone the repository at an approved, merged commit; note its SHA | `git rev-parse HEAD` |
 | 3 | `cp .env.example .env`; set a strong `POSTGRES_PASSWORD` (`openssl rand -hex 24`) | `.env` not tracked (`git status`) |
-| 4 | Set `WINDCAST_IMAGE_TAG=<git SHA>` | `docker compose config \| grep image:` |
+| 4 | Set `WINDCAST_IMAGE_TAG=<git SHA>` **and `COMPOSE_FILE=compose.yaml:compose.prod.yaml`** in `.env`. Every `docker compose` command and every script (startup, backup, restore, rollback) then uses the production overlay, so the API can never be republished by a command that forgot `-f` | `docker compose config \| grep -A3 'api:'` shows no `ports`; `docker compose port api 8000` prints `:0` |
 | 5 | Decide the data sources: `WINDCAST_GSE_INGESTION_ENABLED` (needs GSE reuse confirmation) and `WINDCAST_WEATHER_INGESTION_ENABLED` (needs Open-Meteo use category confirmation) | See `docs/sources/gse.md` §9, `docs/sources/weather.md` |
-| 6 | Build and start: `docker compose -f compose.yaml -f compose.prod.yaml up --build -d --wait` | all services `healthy` in `docker compose ps` |
+| 6 | Build and start: `docker compose up --build -d --wait` (overlay applied through `COMPOSE_FILE`) | all services `healthy` in `docker compose ps` |
 | 7 | Readiness: `docker compose exec api python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready').read())"` | `"status":"ready"` |
 | 8 | Put a TLS reverse proxy with access control (e.g. Caddy/nginx with basic auth or an SSO proxy, or a VPN) in front of `FRONTEND_BIND:FRONTEND_PORT`. Keep `FRONTEND_BIND=127.0.0.1` | Not reachable without authentication |
 | 9 | Schedule backups (§4) and copy them off-host | A dump file exists and a restore test succeeds |
 | 10 | Record the deployed SHA, date and operator | Ops log |
 
-Run the full verification before any release: `scripts/compose-smoke.sh`. It covers a clean start, health, persistence, migration round trip and backup/restore, in an isolated project.
+Run the full verification before any release: `scripts/compose-smoke.sh`. It runs **with the production overlay** in an isolated project. It covers a clean start, the API staying unpublished, health from inside the network, persistence, a migration round trip, rejection of an invalid archive, a **failing restore that must roll back** with services restored, and a successful backup/restore.
 
 ## 2. Configuration
 
@@ -31,10 +31,10 @@ All settings are environment variables; `.env.example` documents each one. Secre
 | API readiness | `GET /api/health/ready` | 200 and the schema at the Alembic head |
 | Worker liveness | container healthcheck `python -m app.healthcheck` (DB heartbeat newer than `WINDCAST_WORKER_STALE_AFTER_SECONDS`) | healthy |
 | Frontend | `GET /healthz` | 200 |
-| Source availability | `GET /api/v1/status` → `sources[]`: `state` (`ok`/`degraded`/`down`/`not_configured`), `last_success_at`, `consecutive_failures`, `backoff_until`, `last_error` | `ok` |
+| Source availability | `GET /api/data/status` on the frontend (a read-only proxy of the API's `/api/v1/status`; the API itself is not published) → `sources[]`: `state` (`ok`/`degraded`/`down`/`not_configured`), `last_success_at`, `consecutive_failures`, `backoff_until`, `last_error` | `ok` |
 | Data freshness | `GET /api/v1/generation/latest` → `freshness`; `GET /api/v1/weather` → `forecast_state` | `fresh` |
 
-The dashboard's "Data sources" panel shows the same states. For alerting, point any uptime monitor at the frontend through the reverse proxy. A cron job such as `curl -fsS .../api/v1/status | jq` can watch for `"down"`. No paid monitoring service is required.
+The dashboard's "Data sources" panel shows the same states. For alerting, point any uptime monitor at the frontend through the reverse proxy. A cron job such as `curl -fsS https://<pilot-host>/api/data/status | jq -e '[.sources[].state] | index("down") | not'` can watch for `"down"`. On the host itself: `docker compose exec api python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/status').read().decode())"`. No paid monitoring service is required.
 
 **Error reporting.** Both services log to stdout (`docker compose logs -f api worker`). Ingestion failures are logged at WARNING with the cause and backoff, and are recorded in `source_status.last_error`. Unhandled exceptions are logged with tracebacks and never stop the worker loop. `compose.prod.yaml` rotates logs (5 × 10 MB per service). Set `WINDCAST_LOG_LEVEL=DEBUG` temporarily for diagnosis.
 
@@ -46,20 +46,22 @@ scripts/restore.sh /srv/windcast-backups/windcast-<UTC>.dump
 ```
 
 - **What matters:** `generation_reading` holds the collected GSE history. GSE's archive is irregular, so this history **cannot be re-fetched** reliably. Weather can be re-fetched only within the provider's windows.
-- **Suggested schedule:** a daily cron at 03:17 local time; keep 14 daily and 8 weekly backups; copy them off-host.
-- **Verified:** the smoke test takes a backup, adds a marker row, restores, and asserts the marker is gone and the instance id unchanged. This runs in CI on every PR.
+- **Suggested schedule:** a daily cron at 03:17 local time; keep 14 daily and 8 weekly backups; copy them off-host. `backup.sh` verifies each archive is readable (`pg_restore --list`) before reporting success.
+- **Restore is atomic.** `restore.sh` first validates the archive and changes nothing if it is invalid (exit 2). It then stops `api` and `worker` and restores in **one transaction** (`--single-transaction --exit-on-error`). On any error the whole restore rolls back and the database stays exactly as it was (exit 1). `api` and `worker` are **always restarted**, on success and on failure. The script fails (exit 3) if they do not come back healthy, or if the API's port publication differs from before the restore, which would indicate a missing production overlay.
+- **Recovery after a failed restore:** the services are already running on the unchanged data. Inspect the reported `pg_restore` error and fix its cause (for example a database object created outside the migrations that depends on WindCast tables). Then rerun the restore, or restore an older backup.
+- **Verified in CI on every PR** (Compose smoke, production overlay): invalid archive rejected, failing restore rolled back with the marker row and services intact and the API unpublished, successful restore removing a row added after the backup.
 
 ## 5. Upgrade and rollback
 
 Upgrade:
 1. `scripts/backup.sh`.
 2. `git fetch && git checkout <new SHA>`; set `WINDCAST_IMAGE_TAG=<new SHA>`.
-3. `docker compose -f compose.yaml -f compose.prod.yaml up --build -d --wait`. The one-shot `migrate` service applies migrations before `api` and `worker` start.
+3. `docker compose up --build -d --wait`. The one-shot `migrate` service applies migrations before `api` and `worker` start.
 
 Rollback, when the new release misbehaves:
 1. If the new release added migrations, downgrade them **with the new image** first: `docker compose run --rm migrate alembic downgrade <previous head>`. Revision ids are in `backend/alembic/versions/`. Downgrades are tested in CI (base ↔ head round trip). They can drop tables that only the new release used, which is why step 1 of the upgrade takes a backup.
 2. Set `WINDCAST_IMAGE_TAG=<previous SHA>` and `git checkout <previous SHA>`.
-3. `docker compose -f compose.yaml -f compose.prod.yaml up -d --wait`. The previous images are reused if still present; otherwise `--build` rebuilds them.
+3. `docker compose up -d --wait`. The previous images are reused if still present; otherwise `--build` rebuilds them.
 4. If the data is inconsistent, restore the pre-upgrade backup (§4).
 
 ## 6. Data retention

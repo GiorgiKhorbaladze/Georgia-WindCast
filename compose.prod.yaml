@@ -1,5 +1,5 @@
 # Production overlay for a private pilot host.
-#   docker compose -f compose.yaml -f compose.prod.yaml up -d --wait
+#   Set COMPOSE_FILE=compose.yaml:compose.prod.yaml in .env, then: docker compose up -d --wait
 # - The API is not published on the host; the frontend reaches it on the internal network.
 # - Log rotation and memory limits; images pinned by WINDCAST_IMAGE_TAG (use a git SHA) so a
 #   rollback is "set the previous tag and up -d". Put a TLS reverse proxy (e.g. Caddy/nginx) in
