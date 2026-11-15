@@ -5,7 +5,15 @@ import { freshnessTone } from "@/lib/status";
 import type { ApiResult, WeatherOverview } from "@/lib/types";
 
 /** States forecast coverage honestly on the forecast and map pages (issue #16). */
-export function ForecastCoverageBanner({ overview, t }: { overview: ApiResult<WeatherOverview>; t: Dictionary }) {
+export function ForecastCoverageBanner({
+  overview,
+  t,
+  locale,
+}: {
+  overview: ApiResult<WeatherOverview>;
+  t: Dictionary;
+  locale: "ka" | "en";
+}) {
   if (!overview.ok) {
     return <p className="wc-panel p-3 text-sm text-rose-warn" data-testid="forecast-coverage">{t.apiUnreachable}</p>;
   }
@@ -23,6 +31,19 @@ export function ForecastCoverageBanner({ overview, t }: { overview: ApiResult<We
         <span className="text-slate-400">{t.weather.run}: {formatTbilisiMinute(w.forecast_run_at)}</span>
       )}
       {reason && <span className="text-amber-warn">{reason}</span>}
+      {w.site_coverage && w.site_coverage.length > 0 && (
+        <ul className="flex w-full flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400" data-testid="site-coverage">
+          {w.site_coverage.map((c) => {
+            const site = w.sites.find((s) => s.id === c.site_id);
+            const name = site ? (locale === "ka" ? site.name_ka : site.name_en) : c.site_id;
+            return (
+              <li key={c.site_id} className={c.forward_hours > 0 ? "" : "text-amber-warn"}>
+                {name}: {Math.round(c.forward_hours)} {t.weather.forwardHours}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

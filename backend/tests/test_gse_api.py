@@ -174,3 +174,11 @@ def test_status_reports_gse_states(migrated_db, gse_enabled, client):
     set_status(consecutive_failures=3, last_error="timeout")
     s = gse()
     assert s["state"] == "down" and s["detail"] == "timeout" and s["consecutive_failures"] == 3
+
+
+def test_label_within_clock_tolerance_is_unverified_until_due(migrated_db, gse_enabled, client):
+    """Review finding: a label slightly ahead of this clock is accepted but never shown Fresh."""
+    add(utcnow() + timedelta(seconds=40), 72.0, "ACT")
+    body = latest(client)
+    assert body["value_mw"] == 72.0
+    assert body["freshness"] == "unverified" and body["reason"] == "label_ahead_of_clock"

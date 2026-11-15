@@ -201,6 +201,14 @@ class WeatherNow(BaseModel):
     measured: Literal[False] = False
 
 
+class SiteCoverage(BaseModel):
+    site_id: str
+    horizon_end: datetime | None = Field(
+        description="Last valid time covered at EVERY forecast height for this site (latest run)."
+    )
+    forward_hours: float = Field(description="Hours ahead of now covered; never negative.")
+
+
 class WeatherOverview(BaseModel):
     generated_at: datetime
     unit: Literal["m/s"] = "m/s"
@@ -219,7 +227,11 @@ class WeatherOverview(BaseModel):
         description="no_forecast | forecast_expired | partial_coverage | run_outdated",
     )
     forecast_forward_hours: float = Field(
-        default=0.0, description="Hours of forecast still ahead of now (never negative)."
+        default=0.0,
+        description="Hours ahead covered at every height for EVERY site (minimum over sites).",
+    )
+    site_coverage: list[SiteCoverage] = Field(
+        default_factory=list, description="Forward coverage per tracked site (latest run)."
     )
     forecast_run_at: datetime | None
     forecast_retrieved_at: datetime | None

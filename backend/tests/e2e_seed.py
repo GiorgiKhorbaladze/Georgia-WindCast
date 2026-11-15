@@ -16,7 +16,7 @@ weather run lies 4 days back so no forward coverage remains; --clear = empty dat
 
 Usage:
   WINDCAST_APP_ENV=test WINDCAST_DATABASE_URL=... python -m tests.e2e_seed \
-      [--clear|--stale|--zero|--forecast-expired]
+      [--clear|--stale|--zero|--forecast-expired|--site-missing]
 """
 
 from __future__ import annotations
@@ -154,6 +154,14 @@ def main() -> int:
                                 retrieved_at=now,
                             )
                         )
+    if "--site-missing" in sys.argv:
+        # Review scenario: one tracked site has no forecast in the latest run.
+        with get_sessionmaker()() as s, s.begin():
+            s.execute(
+                delete(WeatherValue).where(
+                    WeatherValue.site_id == "zemo-wind", WeatherValue.product == "forecast"
+                )
+            )
     print(f"seeded e2e data at {now.isoformat()}")
     return 0
 

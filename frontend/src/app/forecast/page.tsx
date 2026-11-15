@@ -14,7 +14,7 @@ export default async function ForecastPage() {
         <h1 className="text-2xl font-semibold text-white">{t.weather.pageTitle}</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-400">{t.weather.pageNote} {t.weather.notMeasured}.</p>
       </header>
-      <ForecastCoverageBanner overview={overview} t={t} />
+      <ForecastCoverageBanner overview={overview} t={t} locale={locale} />
       <ForecastExplorer initial={sites.map((s) => ({ id: s.id, data: s.data }))} locale={locale} initialHeight={DEFAULT_HEIGHT} />
     </div>
   );

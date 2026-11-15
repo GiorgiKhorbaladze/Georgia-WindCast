@@ -25,6 +25,7 @@ Issue: #4. Verified 2026-11-14. Every value is **model-derived wind (m/s)**. Non
   - Coverage fully in the past: `unavailable` (`forecast_expired`), with no horizon end.
   - Forward hours are never negative.
   - The dashboard, forecast page and map all show this state and reason.
+- **Coverage is per site.** For each tracked site, coverage is the last valid time present at **every** forecast height (10/80/120/180 m) in the latest run. The aggregate horizon and forward hours are the **minimum** across the three sites. If any site lacks forward coverage, the aggregate is `stale` with `incomplete_site_coverage`; if no site is fully covered, it is `unavailable`. `site_coverage[]` lists each site's forward hours, and the forecast page and map show them, with uncovered sites highlighted.
 - **Per-point provenance.** Every forecast point carries its own `run_at`. A series reports `provenance`:
   - `single_run`: the series `run_at` applies to every point.
   - `mixed_runs`: past values assembled from several runs. The series makes no single `run_at` claim, and chart tooltips show each point's run.

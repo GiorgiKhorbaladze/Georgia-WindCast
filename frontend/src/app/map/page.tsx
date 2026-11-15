@@ -15,7 +15,7 @@ export default async function MapPage() {
         <h1 className="text-2xl font-semibold text-white">{t.map.title}</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-400">{t.map.coverage}</p>
       </header>
-      <ForecastCoverageBanner overview={overview} t={t} />
+      <ForecastCoverageBanner overview={overview} t={t} locale={locale} />
       {usable.length ? (
         <WindMap initial={usable} initialHeight={DEFAULT_HEIGHT} locale={locale} />
       ) : (

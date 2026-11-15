@@ -51,15 +51,47 @@ def test_overview_now_from_latest_run(migrated_db, client):
     add("ruisi", "forecast", "icon_global", new, now_h, 80, 7.5, 290)
     add("ruisi", "forecast", "icon_global", new, now_h + timedelta(hours=60), 80, 9.0)
     body = client.get("/api/v1/weather").json()
-    assert body["forecast_state"] == "fresh"
+    # Only one site/height is stored, so the aggregate is never "fresh" (per-site coverage rule).
+    assert body["forecast_state"] == "unavailable"
+    assert body["forecast_reason"] == "incomplete_site_coverage"
     cur = next(n for n in body["now"] if n["site_id"] == "ruisi" and n["height_m"] == 80)
     assert cur["speed_ms"] == 7.5 and cur["direction_deg"] == 290
     assert body["forecast_model"] == "icon_global"
 
 
+SITE_IDS = ("ruisi", "zemo-wind", "kartli-gori")
+HEIGHTS = (10, 80, 120, 180)
+
+
+def add_run(run, leads, sites=SITE_IDS, heights=HEIGHTS):
+    """Bulk-add one forecast run covering the given sites/heights for the given lead hours."""
+    with get_sessionmaker()() as s, s.begin():
+        for site in sites:
+            for h in heights:
+                for lead in leads:
+                    s.add(
+                        WeatherValue(
+                            site_id=site,
+                            product="forecast",
+                            provider="open-meteo",
+                            model="icon_global",
+                            run_ref=run.isoformat(),
+                            run_at=run,
+                            valid_at=run + timedelta(hours=lead),
+                            height_m=h,
+                            speed_ms=5.0,
+                            direction_deg=270.0,
+                            grid_latitude=42.0,
+                            grid_longitude=44.0,
+                            grid_elevation_m=800.0,
+                            retrieved_at=utcnow(),
+                        )
+                    )
+
+
 def test_expired_coverage_is_unavailable_never_negative(migrated_db, client):
     run = hour(utcnow()) - timedelta(days=2)
-    add("ruisi", "forecast", "icon_global", run, run, 10, 3.0)
+    add_run(run, range(0, 6))  # every site and height covered, but only in the past
     body = client.get("/api/v1/weather").json()
     assert body["forecast_state"] == "unavailable"
     assert body["forecast_reason"] == "forecast_expired"
@@ -72,8 +104,7 @@ def test_expired_coverage_is_unavailable_never_negative(migrated_db, client):
 def test_partial_forward_coverage_is_stale(migrated_db, client):
     now_h = hour(utcnow())
     run = now_h - timedelta(hours=3)
-    for lead in range(0, 12):  # ends ~9 h ahead, below the 24 h minimum
-        add("ruisi", "forecast", "icon_global", run, run + timedelta(hours=lead), 10, 3.0)
+    add_run(run, range(0, 12))  # every site/height, ends ~9 h ahead, below the 24 h minimum
     body = client.get("/api/v1/weather").json()
     assert body["forecast_state"] == "stale" and body["forecast_reason"] == "partial_coverage"
     assert 0 < body["forecast_forward_hours"] < 24
@@ -83,8 +114,7 @@ def test_partial_forward_coverage_is_stale(migrated_db, client):
 def test_outdated_run_with_coverage_is_stale(migrated_db, client):
     now_h = hour(utcnow())
     run = now_h - timedelta(hours=20)  # older than the 12 h freshness window
-    for lead in range(0, 100):
-        add("ruisi", "forecast", "icon_global", run, run + timedelta(hours=lead), 10, 3.0)
+    add_run(run, range(0, 100))
     body = client.get("/api/v1/weather").json()
     assert body["forecast_state"] == "stale" and body["forecast_reason"] == "run_outdated"
     assert body["forecast_forward_hours"] == 72.0  # capped at the 72 h product horizon
@@ -93,10 +123,45 @@ def test_outdated_run_with_coverage_is_stale(migrated_db, client):
 def test_full_coverage_recent_run_is_fresh(migrated_db, client):
     now_h = hour(utcnow())
     run = now_h - timedelta(hours=3)
-    for lead in range(0, 80):
-        add("ruisi", "forecast", "icon_global", run, run + timedelta(hours=lead), 10, 3.0)
+    add_run(run, range(0, 80))
     body = client.get("/api/v1/weather").json()
     assert body["forecast_state"] == "fresh" and body["forecast_reason"] is None
+    assert [c["forward_hours"] for c in body["site_coverage"]] == [72.0, 72.0, 72.0]
+
+
+def test_missing_site_is_never_reported_fresh(migrated_db, client):
+    """Review finding: one or two sites without coverage must not yield a Fresh aggregate."""
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    add_run(run, range(0, 80), sites=("ruisi",))
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "stale"
+    assert body["forecast_reason"] == "incomplete_site_coverage"
+    assert body["forecast_forward_hours"] == 0.0
+    cov = {c["site_id"]: c["forward_hours"] for c in body["site_coverage"]}
+    assert cov == {"ruisi": 72.0, "zemo-wind": 0.0, "kartli-gori": 0.0}
+
+
+def test_site_missing_one_height_counts_as_uncovered(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    add_run(run, range(0, 80), sites=("ruisi", "kartli-gori"))
+    add_run(run, range(0, 80), sites=("zemo-wind",), heights=(10, 80, 120))  # no 180 m
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "stale"
+    assert body["forecast_reason"] == "incomplete_site_coverage"
+    zemo = next(c for c in body["site_coverage"] if c["site_id"] == "zemo-wind")
+    assert zemo["forward_hours"] == 0.0 and zemo["horizon_end"] is None
+
+
+def test_shortest_site_sets_the_aggregate_horizon(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    add_run(run, range(0, 80), sites=("ruisi", "kartli-gori"))
+    add_run(run, range(0, 15), sites=("zemo-wind",))  # ~11 h ahead only
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "stale" and body["forecast_reason"] == "partial_coverage"
+    assert 0 < body["forecast_forward_hours"] < 24
 
 
 def test_site_series_separates_history_forecast_and_reanalysis(migrated_db, client):

@@ -97,6 +97,7 @@ Retention is irregular. WindCast does **not** backfill from the archive. History
 
 - **Embedded label must match the request.** The `Export Time` inside a file must equal the period of the requested file name. Otherwise the payload is rejected as `label_mismatch` before anything is written, and counts as a failure with backoff.
 - **No future labels.** A label more than 60 s ahead of this host's clock is rejected (`future_label`). The latest-reading and history queries also ignore any stored label later than now, so a bad row cannot become "latest".
+- **Accepted skew is not "current".** A label up to 60 s ahead is accepted at ingestion (clock skew). Until its label time arrives on this clock it is reported as `unverified` with reason `label_ahead_of_clock`, never `fresh`.
 - **Quality is not freshness.** A timely reading with a quality code other than `ACT` is reported as `unverified` with reason `quality_not_actual`. The published value and the raw code stay visible, but it is never shown with a plain "Fresh" badge.
 - **Open pages expire.** The API returns `fresh_until`. The dashboard refreshes once a minute through the frontend (never GSE directly), expires the badge locally after `fresh_until`, and marks the kept value stale when a refresh fails.
 

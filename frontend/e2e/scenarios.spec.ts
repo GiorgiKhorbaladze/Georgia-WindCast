@@ -45,3 +45,16 @@ test("expired forecast coverage: unavailable with reason, never negative hours",
     await expect(banner).toContainText("The latest forecast has expired");
   }
 });
+
+test("one site without forecast: aggregate not fresh, site shown with 0 hours", async ({ page }) => {
+  test.skip(scenario !== "site-missing", "site-missing scenario only");
+  await page.goto("/forecast");
+  const banner = page.getByTestId("forecast-coverage");
+  await expect(banner).toContainText("Stale");
+  await expect(banner).not.toContainText("Fresh");
+  await expect(banner).toContainText("incomplete for one or more sites");
+  await expect(page.getByTestId("site-coverage")).toContainText("Zemo Wind: 0 hours ahead");
+  await page.goto("/");
+  await expect(page.getByTestId("forecast-horizon")).toContainText("incomplete for one or more sites");
+  await expect(page.getByTestId("forecast-horizon")).not.toContainText("Fresh");
+});

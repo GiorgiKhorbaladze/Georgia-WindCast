@@ -83,7 +83,11 @@ def generation_latest(session: SessionDep, settings: SettingsDep) -> GenerationL
     fresh_until = latest.period_label_at + timedelta(seconds=settings.gse_fresh_within_seconds)
     reason: str | None
     if now <= fresh_until:
-        if latest.quality == GOOD_QUALITY:
+        if latest.period_label_at > now:
+            # Accepted within the clock-skew tolerance, but its label time has not arrived on this
+            # clock yet: never claim a future-dated observation as verified current.
+            freshness, reason = Freshness.UNVERIFIED, "label_ahead_of_clock"
+        elif latest.quality == GOOD_QUALITY:
             freshness, reason = Freshness.FRESH, None
         else:
             # Timely, but GSE did not mark the value as an actual measurement.
