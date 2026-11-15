@@ -17,6 +17,19 @@ Issue: #4. Verified 2026-11-14. Every value is **model-derived wind (m/s)**. Non
 
 `best_match` and `icon_seamless` blend models or domains with different run times. A single run time could not then be attributed honestly. `icon_global` covers 72 h from every run, and its run time is published in `meta.json`. The worker reads the run time **before and after** fetching the forecast and discards the data if they differ. It stores only valid times at or after the run's initialisation, because Open-Meteo fills earlier hours from older runs.
 
+## Coverage and provenance rules (issue #16)
+
+- **Freshness needs forward coverage.** The forecast is `fresh` only with a run newer than 12 h **and** at least `WINDCAST_WEATHER_MIN_FORWARD_HOURS` (24) of coverage ahead of now.
+  - Less coverage than that: `stale` (`partial_coverage`).
+  - An older run: `stale` (`run_outdated`).
+  - Coverage fully in the past: `unavailable` (`forecast_expired`), with no horizon end.
+  - Forward hours are never negative.
+  - The dashboard, forecast page and map all show this state and reason.
+- **Per-point provenance.** Every forecast point carries its own `run_at`. A series reports `provenance`:
+  - `single_run`: the series `run_at` applies to every point.
+  - `mixed_runs`: past values assembled from several runs. The series makes no single `run_at` claim, and chart tooltips show each point's run.
+  - `reanalysis`: ERA5 values, which have no run time.
+
 ## Request budget and politeness
 
 - All three sites go in **one request** (comma-separated coordinates; the response is a list in request order).

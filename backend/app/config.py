@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     weather_forecast_retention_days: int = Field(default=30, ge=1)
     # A forecast run older than this is reported as stale.
     weather_fresh_within_seconds: int = Field(default=43200, ge=3600)
+    # Forward coverage below this is "partial" (stale); zero or less is "expired" (unavailable).
+    weather_min_forward_hours: int = Field(default=24, ge=1, le=72)
     weather_user_agent: str | None = None
 
     @model_validator(mode="after")

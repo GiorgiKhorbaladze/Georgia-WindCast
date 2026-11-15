@@ -25,6 +25,8 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.ingestion.gse_parser import (
     PARSER_VERSION,
+    GseFutureLabelError,
+    GseLabelError,
     GseParseError,
     export_file_name,
     parse_wind_export,
@@ -69,8 +71,30 @@ class StoreOutcome:
     revised: bool
 
 
-def store_reading(session: Session, result: FetchResult, retrieved_at: datetime) -> StoreOutcome:
+# Clock skew allowance between this host and GSE before a label counts as "in the future".
+FUTURE_LABEL_TOLERANCE = timedelta(seconds=60)
+
+
+def validate_label(reading_label: datetime, expected_label: datetime | None, now: datetime) -> None:
+    """Refuse a payload whose embedded period does not match the requested file, or lies ahead."""
+    if expected_label is not None and reading_label != expected_label:
+        raise GseLabelError(
+            f"embedded period {reading_label.isoformat()} does not match requested "
+            f"{expected_label.isoformat()}"
+        )
+    if reading_label > now + FUTURE_LABEL_TOLERANCE:
+        raise GseFutureLabelError(f"embedded period {reading_label.isoformat()} is in the future")
+
+
+def store_reading(
+    session: Session,
+    result: FetchResult,
+    retrieved_at: datetime,
+    expected_label: datetime | None = None,
+) -> StoreOutcome:
     reading = parse_wind_export(result.body)
+    # Validated before anything is written, so a mislabelled file can never become data.
+    validate_label(reading.period_label_utc, expected_label, retrieved_at)
     digest = hashlib.sha256(result.body).hexdigest()
     values = {
         "source": SOURCE_ID,
@@ -200,7 +224,9 @@ class GseIngestionJob:
             if result.kind is FetchKind.OK:
                 try:
                     with session.begin_nested():
-                        outcome = store_reading(session, result, retrieved_at=utcnow())
+                        outcome = store_reading(
+                            session, result, retrieved_at=utcnow(), expected_label=label
+                        )
                 except GseParseError as exc:
                     self._fail(status, now, f"{exc.code}: {exc}", None, report)
                     break

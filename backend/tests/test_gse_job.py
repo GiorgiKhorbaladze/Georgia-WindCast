@@ -194,3 +194,29 @@ def test_unpublished_older_periods_are_abandoned_after_attempts(migrated_db, mon
     assert fake.requests.count(older) == 2  # given up after 2 attempts
     assert fake.requests.count(REAL_ACT_NAME) == 4  # newest keeps being checked
     assert status().consecutive_failures == 0  # 404s are not failures
+
+
+def test_mismatched_embedded_label_is_rejected_before_persistence(migrated_db):
+    """A file whose embedded Export Time differs from the requested period is not data."""
+    other = "GSE_EXPORT_NEW_PERIOD_03M_15112026_0006.XML"  # requested 20:06, embedded 20:09
+    fake = FakeGse({REAL_ACT_NAME: REAL_ACT, other: REAL_ACT})
+    report = tick(make_job(fake))
+    assert report.stored == 1  # only the correctly labelled file
+    assert report.failure is not None and report.failure.startswith("label_mismatch")
+    with get_sessionmaker()() as s:
+        labels = s.execute(select(GenerationReading.period_label_at)).scalars().all()
+    assert labels == [datetime(2026, 11, 14, 20, 9, tzinfo=UTC)]
+    assert status().consecutive_failures == 1
+
+
+def test_future_embedded_label_is_rejected(migrated_db):
+    ok = FetchResult(FetchKind.OK, "u", status=200, body=REAL_ACT)
+    label = datetime(2026, 11, 14, 20, 9, tzinfo=UTC)
+    from app.ingestion.gse_parser import GseFutureLabelError
+
+    with pytest.raises(GseFutureLabelError), get_sessionmaker()() as s, s.begin():
+        store_reading(s, ok, retrieved_at=label - timedelta(hours=1), expected_label=label)
+    assert count_readings() == 0
+    # within the clock tolerance it is accepted
+    with get_sessionmaker()() as s, s.begin():
+        assert store_reading(s, ok, retrieved_at=label - timedelta(seconds=30)).inserted

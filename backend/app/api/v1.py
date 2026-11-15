@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_session
-from app.ingestion.gse_job import METRIC_WIND, PERIOD, SOURCE_ID
+from app.ingestion.gse_job import FUTURE_LABEL_TOLERANCE, METRIC_WIND, PERIOD, SOURCE_ID
 from app.ingestion.weather_job import SOURCE_FORECAST, SOURCE_REANALYSIS
 from app.models import GenerationReading, SourceStatusRecord, WorkerHeartbeat
 from app.schemas import (
@@ -62,20 +62,32 @@ def generation_latest(session: SessionDep, settings: SettingsDep) -> GenerationL
     Freshness is judged by the *source* period label, never by when we last polled, so a
     reading that GSE stopped updating turns stale even while polling continues.
     """
+    now = utcnow()
+    # Labels later than now (+ clock tolerance) are never treated as the latest reading, even if
+    # one was persisted before label validation existed.
     latest = session.execute(
-        _wind_readings().order_by(GenerationReading.period_label_at.desc()).limit(1)
+        _wind_readings()
+        .where(GenerationReading.period_label_at <= now + FUTURE_LABEL_TOLERANCE)
+        .order_by(GenerationReading.period_label_at.desc())
+        .limit(1)
     ).scalar_one_or_none()
 
     if latest is None:
         return GenerationLatest(
             freshness=Freshness.UNAVAILABLE,
             reason="ingestion_disabled" if not settings.gse_ingestion_enabled else "no_data_yet",
+            checked_at=now,
             source=GSE_ATTRIBUTION,
         )
 
-    age = utcnow() - latest.period_label_at
-    if age <= timedelta(seconds=settings.gse_fresh_within_seconds):
-        freshness, reason = Freshness.FRESH, None
+    fresh_until = latest.period_label_at + timedelta(seconds=settings.gse_fresh_within_seconds)
+    reason: str | None
+    if now <= fresh_until:
+        if latest.quality == GOOD_QUALITY:
+            freshness, reason = Freshness.FRESH, None
+        else:
+            # Timely, but GSE did not mark the value as an actual measurement.
+            freshness, reason = Freshness.UNVERIFIED, "quality_not_actual"
     else:
         freshness = Freshness.STALE
         status = _gse_status_row(session)
@@ -95,6 +107,8 @@ def generation_latest(session: SessionDep, settings: SettingsDep) -> GenerationL
         quality=latest.quality,
         quality_flagged=latest.quality != GOOD_QUALITY,
         period_seconds=int(PERIOD.total_seconds()),
+        fresh_until=fresh_until,
+        checked_at=now,
         source=GSE_ATTRIBUTION,
     )
 
@@ -140,7 +154,10 @@ def generation_history(
 
     rows = session.execute(
         _wind_readings()
-        .where(GenerationReading.period_label_at >= start, GenerationReading.period_label_at <= end)
+        .where(
+            GenerationReading.period_label_at >= start,
+            GenerationReading.period_label_at <= min(end, now + FUTURE_LABEL_TOLERANCE),
+        )
         .order_by(GenerationReading.period_label_at)
     ).scalars()
     points = [

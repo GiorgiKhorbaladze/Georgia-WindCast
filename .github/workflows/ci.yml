@@ -135,12 +135,14 @@ jobs:
       - name: Browser tests (desktop + mobile, a11y), seeded data
         working-directory: frontend
         run: npx playwright test --trace off
-      - name: Browser tests, stale / zero / empty scenarios
+      - name: Browser tests, stale / zero / forecast-expired / empty scenarios
         run: |
           (cd backend && uv run python -m tests.e2e_seed --stale)
           (cd frontend && E2E_SCENARIO=stale npx playwright test e2e/scenarios.spec.ts --trace off)
           (cd backend && uv run python -m tests.e2e_seed --zero)
           (cd frontend && E2E_SCENARIO=zero npx playwright test e2e/scenarios.spec.ts --trace off)
+          (cd backend && uv run python -m tests.e2e_seed --forecast-expired)
+          (cd frontend && E2E_SCENARIO=forecast-expired npx playwright test e2e/scenarios.spec.ts --trace off)
           (cd backend && uv run python -m tests.e2e_seed --clear)
           (cd frontend && E2E_EMPTY=1 npx playwright test e2e/empty.spec.ts --trace off)
       - name: Upload Playwright report and server logs

@@ -16,7 +16,8 @@ from pydantic import BaseModel, Field
 class Freshness(StrEnum):
     FRESH = "fresh"
     STALE = "stale"
-    # A reading exists but the source supplied no trustworthy observation timestamp.
+    # A timely reading whose source quality (or timestamp) is not verified, e.g. GSE quality
+    # code other than ACT. The value stays visible but must never be shown as plainly "fresh".
     UNVERIFIED = "unverified"
     UNAVAILABLE = "unavailable"
 
@@ -70,6 +71,11 @@ class GenerationLatest(BaseModel):
     period_seconds: int | None = Field(
         default=None, description="Length of the averaging period behind the value."
     )
+    fresh_until: datetime | None = Field(
+        default=None,
+        description="After this UTC time the reading is stale, even if nothing refreshes it.",
+    )
+    checked_at: datetime | None = Field(default=None, description="Server time of this answer.")
     source: SourceAttribution
 
 
@@ -144,6 +150,9 @@ class WeatherPoint(BaseModel):
     direction_deg: float | None = Field(
         description="Meteorological convention: direction the wind blows FROM, degrees."
     )
+    run_at: datetime | None = Field(
+        default=None, description="Model run that produced this value (forecast products)."
+    )
 
 
 class WeatherSeries(BaseModel):
@@ -158,6 +167,13 @@ class WeatherSeries(BaseModel):
     grid_longitude: float | None
     grid_elevation_m: float | None
     supported: bool = Field(description="False when this product does not offer this height.")
+    provenance: Literal["single_run", "mixed_runs", "reanalysis", "none"] = Field(
+        default="none",
+        description=(
+            "single_run: every point is from run_at. mixed_runs: points come from several runs; "
+            "see each point's run_at (series run_at is then null)."
+        ),
+    )
     points: list[WeatherPoint]
 
 
@@ -193,7 +209,17 @@ class WeatherOverview(BaseModel):
     forecast_model: str
     forecast_model_label: str
     forecast_state: Freshness = Field(
-        description="fresh/stale by model run age; unavailable without any stored run."
+        description=(
+            "fresh only with a recent run AND enough forward coverage; stale for an old run or "
+            "partial coverage; unavailable without a run or once its coverage has expired."
+        )
+    )
+    forecast_reason: str | None = Field(
+        default=None,
+        description="no_forecast | forecast_expired | partial_coverage | run_outdated",
+    )
+    forecast_forward_hours: float = Field(
+        default=0.0, description="Hours of forecast still ahead of now (never negative)."
     )
     forecast_run_at: datetime | None
     forecast_retrieved_at: datetime | None

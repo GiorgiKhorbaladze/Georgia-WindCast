@@ -51,6 +51,16 @@ class GseValueError(GseParseError):
     code = "invalid_value"
 
 
+class GseLabelError(GseParseError):
+    """The embedded Export Time does not fit the request (wrong period or in the future)."""
+
+    code = "label_mismatch"
+
+
+class GseFutureLabelError(GseLabelError):
+    code = "future_label"
+
+
 @dataclass(frozen=True, slots=True)
 class WindReading:
     period_label_utc: datetime

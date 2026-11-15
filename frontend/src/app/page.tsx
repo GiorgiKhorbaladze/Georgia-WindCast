@@ -1,10 +1,10 @@
 import Link from "next/link";
 
 import { GenerationExplorer } from "@/components/GenerationChart";
+import { LiveGenerationKpi } from "@/components/LiveGenerationKpi";
 import { StatusBadge, type Tone } from "@/components/StatusBadge";
 import { getGenerationHistory, getGenerationLatest, getSystemStatus, getWeatherOverview } from "@/lib/api";
 import { formatTbilisi } from "@/lib/format";
-import { generationKpiView } from "@/lib/kpi";
 import { getI18n } from "@/lib/locale-server";
 import { freshnessTone, workerTone } from "@/lib/status";
 import type { SourceState, WeatherOverview } from "@/lib/types";
@@ -21,50 +21,12 @@ export default async function DashboardPage() {
     getGenerationHistory(),
     getWeatherOverview(),
   ]);
-  const kpi = generationKpiView(generation);
   const sites = status.ok ? status.data.sites : weather.ok ? weather.data.sites : null;
-  const reasonText = kpi.apiReachable ? kpi.reason && (t.reasons[kpi.reason] ?? kpi.reason) : t.apiUnreachable;
   const w = weather.ok ? weather.data : null;
 
   return (
     <div className="grid gap-5 lg:grid-cols-12">
-      <section aria-labelledby="kpi-total" className="wc-panel relative overflow-hidden p-5 sm:p-7 lg:col-span-8">
-        <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-cyan-glow/10 blur-3xl" />
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 id="kpi-total" className="wc-label">{t.kpi.totalWind}</h1>
-          <span data-testid="kpi-freshness">
-            <StatusBadge tone={freshnessTone(kpi.freshness)}>{t.freshness[kpi.freshness]}</StatusBadge>
-          </span>
-        </div>
-        <div className="mt-5 flex flex-wrap items-baseline gap-3" data-testid="kpi-total-value">
-          {kpi.value !== null ? (
-            <>
-              <span className="font-mono text-6xl font-semibold tracking-tight text-white sm:text-7xl">{kpi.value}</span>
-              <span className="font-mono text-2xl text-cyan-glow">MW</span>
-              <span className="text-xs text-slate-400">{t.kpi.periodAverage}</span>
-            </>
-          ) : (
-            <span className="text-3xl font-semibold text-slate-300 sm:text-4xl">{t.unavailable}</span>
-          )}
-        </div>
-        {reasonText && <p className="mt-2 max-w-xl text-sm text-slate-400">{reasonText}</p>}
-        {kpi.qualityFlagged && (
-          <p className="mt-2 max-w-xl text-sm text-amber-warn" data-testid="kpi-quality-flag">{t.kpi.qualityFlagged}</p>
-        )}
-        <dl className="mt-6 grid gap-4 border-t border-line pt-4 text-sm sm:grid-cols-2 xl:grid-cols-4">
-          <Meta label={t.kpi.source}>
-            {generation.ok ? (
-              <a className="text-cyan-glow hover:underline" href={generation.data.source.url} rel="noreferrer" target="_blank">
-                {generation.data.source.name}
-              </a>
-            ) : "GSE"}
-          </Meta>
-          <Meta label={t.kpi.observedAt}>{formatTbilisi(kpi.observedAt, locale) ?? t.kpi.notReported}</Meta>
-          <Meta label={t.kpi.retrievedAt}>{formatTbilisi(kpi.retrievedAt, locale) ?? t.kpi.notReported}</Meta>
-          <Meta label={t.kpi.quality}>{kpi.quality ?? t.kpi.notReported}</Meta>
-        </dl>
-        <p className="mt-4 text-xs text-slate-400">{t.kpi.scopeNote}</p>
-      </section>
+      <LiveGenerationKpi initial={generation} locale={locale} />
 
       <div className="grid gap-5 sm:grid-cols-3 lg:col-span-4 lg:grid-cols-1">
         <SmallKpi label={t.kpi.trackedLocations} note={t.kpi.trackedLocationsNote}>
@@ -160,29 +122,31 @@ export default async function DashboardPage() {
 
 function ForecastHorizon({ w, locale, t }: { w: WeatherOverview | null; locale: "ka" | "en"; t: Awaited<ReturnType<typeof getI18n>>["t"] }) {
   if (!w) return <span className="text-sm text-slate-400">{t.apiUnreachable}</span>;
-  if (!w.forecast_horizon_end) return <span className="text-lg text-slate-300">{t.kpi.forecastHorizonPending}</span>;
-  const hours = Math.round((Date.parse(w.forecast_horizon_end) - Date.parse(w.generated_at)) / 3600e3);
+  const reason = w.forecast_reason ? (t.weather.coverage[w.forecast_reason] ?? w.forecast_reason) : null;
+  if (w.forecast_state === "unavailable" || !w.forecast_horizon_end) {
+    return (
+      <div className="space-y-1" data-testid="forecast-horizon">
+        <StatusBadge tone="bad">{t.freshness.unavailable}</StatusBadge>
+        <p className="text-sm text-slate-300">{reason ?? t.kpi.forecastHorizonPending}</p>
+      </div>
+    );
+  }
+  // Forward coverage from the API; never negative.
+  const hours = Math.max(0, Math.round(w.forecast_forward_hours ?? 0));
   return (
-    <div className="space-y-1">
+    <div className="space-y-1" data-testid="forecast-horizon">
       <div className="flex items-baseline gap-2">
         <span className="font-mono text-3xl text-white">{hours}</span>
         <span className="text-sm text-violet-glow">h</span>
         <StatusBadge tone={freshnessTone(w.forecast_state)}>{t.freshness[w.forecast_state]}</StatusBadge>
       </div>
+      {reason && <p className="text-xs text-amber-warn">{reason}</p>}
       <div className="text-xs text-slate-400">{t.kpi.until}: {formatTbilisi(w.forecast_horizon_end, locale)}</div>
       <div className="text-xs text-slate-400">{t.weather.run}: {formatTbilisi(w.forecast_run_at, locale) ?? "-"}</div>
     </div>
   );
 }
 
-function Meta({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs text-slate-400">{label}</dt>
-      <dd className="mt-0.5 tabular-nums text-slate-200">{children}</dd>
-    </div>
-  );
-}
 
 function SmallKpi({ label, note, children }: { label: string; note?: string | null; children: React.ReactNode }) {
   return (

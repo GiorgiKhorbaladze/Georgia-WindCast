@@ -20,6 +20,8 @@ export interface GenerationLatest {
   quality: string | null;
   quality_flagged: boolean;
   period_seconds: number | null;
+  fresh_until?: string | null;
+  checked_at?: string | null;
   source: SourceAttribution;
 }
 
@@ -75,6 +77,7 @@ export interface WeatherPoint {
   t: string;
   speed_ms: number | null;
   direction_deg: number | null;
+  run_at?: string | null;
 }
 
 export interface WeatherSeries {
@@ -89,6 +92,7 @@ export interface WeatherSeries {
   grid_longitude: number | null;
   grid_elevation_m: number | null;
   supported: boolean;
+  provenance?: "single_run" | "mixed_runs" | "reanalysis" | "none";
   points: WeatherPoint[];
 }
 
@@ -122,6 +126,8 @@ export interface WeatherOverview {
   forecast_model: string;
   forecast_model_label: string;
   forecast_state: Freshness;
+  forecast_reason?: string | null;
+  forecast_forward_hours?: number;
   forecast_run_at: string | null;
   forecast_retrieved_at: string | null;
   forecast_horizon_end: string | null;

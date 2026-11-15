@@ -11,10 +11,12 @@ Content, so the UI can be exercised in populated states:
   a forecast run (heights 10/80/120/180) and as reanalysis (10/100), so all chart series appear.
 
 Scenarios (UI states for issue #5): default = fresh; --stale = all readings shifted 2 h into the
-past; --zero = the latest reading is a real 0.0 MW value (calm); --clear = empty database.
+past; --zero = the latest reading is a real 0.0 MW value (calm); --forecast-expired = the
+weather run lies 4 days back so no forward coverage remains; --clear = empty database.
 
 Usage:
-  WINDCAST_APP_ENV=test WINDCAST_DATABASE_URL=... python -m tests.e2e_seed [--clear|--stale|--zero]
+  WINDCAST_APP_ENV=test WINDCAST_DATABASE_URL=... python -m tests.e2e_seed \
+      [--clear|--stale|--zero|--forecast-expired]
 """
 
 from __future__ import annotations
@@ -75,6 +77,8 @@ def main() -> int:
         print(f"WARNING: {ARCHIVE.name} missing; weather not seeded", file=sys.stderr)
     hour = now.replace(minute=0)
     run_at = hour - timedelta(hours=3)
+    if "--forecast-expired" in sys.argv:
+        run_at -= timedelta(days=4)
 
     with get_sessionmaker()() as s, s.begin():
         s.execute(delete(GenerationReading))

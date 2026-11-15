@@ -57,10 +57,46 @@ def test_overview_now_from_latest_run(migrated_db, client):
     assert body["forecast_model"] == "icon_global"
 
 
-def test_overview_stale_run(migrated_db, client):
+def test_expired_coverage_is_unavailable_never_negative(migrated_db, client):
     run = hour(utcnow()) - timedelta(days=2)
     add("ruisi", "forecast", "icon_global", run, run, 10, 3.0)
-    assert client.get("/api/v1/weather").json()["forecast_state"] == "stale"
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "unavailable"
+    assert body["forecast_reason"] == "forecast_expired"
+    assert body["forecast_horizon_end"] is None
+    assert body["forecast_forward_hours"] == 0.0
+    series = client.get("/api/v1/weather/sites/ruisi", params={"height": 10}).json()
+    assert series["forecast"]["points"] == []
+
+
+def test_partial_forward_coverage_is_stale(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    for lead in range(0, 12):  # ends ~9 h ahead, below the 24 h minimum
+        add("ruisi", "forecast", "icon_global", run, run + timedelta(hours=lead), 10, 3.0)
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "stale" and body["forecast_reason"] == "partial_coverage"
+    assert 0 < body["forecast_forward_hours"] < 24
+    assert body["forecast_horizon_end"] is not None
+
+
+def test_outdated_run_with_coverage_is_stale(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=20)  # older than the 12 h freshness window
+    for lead in range(0, 100):
+        add("ruisi", "forecast", "icon_global", run, run + timedelta(hours=lead), 10, 3.0)
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "stale" and body["forecast_reason"] == "run_outdated"
+    assert body["forecast_forward_hours"] == 72.0  # capped at the 72 h product horizon
+
+
+def test_full_coverage_recent_run_is_fresh(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    for lead in range(0, 80):
+        add("ruisi", "forecast", "icon_global", run, run + timedelta(hours=lead), 10, 3.0)
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "fresh" and body["forecast_reason"] is None
 
 
 def test_site_series_separates_history_forecast_and_reanalysis(migrated_db, client):
@@ -81,6 +117,17 @@ def test_site_series_separates_history_forecast_and_reanalysis(migrated_db, clie
     assert body["reanalysis"]["points"][0]["speed_ms"] == 4.0
     assert body["measured"] is False and body["unit"] == "m/s"
     assert body["history"]["supported"] and body["reanalysis"]["supported"]
+    # Provenance: history combines two runs, so it claims no single run time; each point
+    # carries its own run. The forecast is one run.
+    assert body["history"]["provenance"] == "mixed_runs"
+    assert body["history"]["run_at"] is None
+    runs = {p["run_at"] for p in hist}
+    assert len(runs) == 2
+    assert all(p["run_at"].startswith(r1.isoformat()[:13]) for p in hist[:6])
+    assert body["forecast"]["provenance"] == "single_run"
+    assert {p["run_at"] for p in fc["points"]} == {fc["run_at"]}
+    assert body["reanalysis"]["provenance"] == "reanalysis"
+    assert body["reanalysis"]["points"][0]["run_at"] is None
 
 
 def test_unsupported_height_is_explicit(migrated_db, client):

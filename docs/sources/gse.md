@@ -93,6 +93,13 @@ Retention is irregular. WindCast does **not** backfill from the archive. History
 - Strict parser (`defusedxml`, entity expansion forbidden). A missing or renamed block, duplicate rows, unexpected `Period`, bad time format, non-numeric or non-finite values, and values outside -50…2000 MW are all rejected.
 - No `User-Agent` override by default. Operators may set `WINDCAST_GSE_USER_AGENT` to identify their deployment to GSE.
 
+## 8a. Label and quality safeguards (issue #16)
+
+- **Embedded label must match the request.** The `Export Time` inside a file must equal the period of the requested file name. Otherwise the payload is rejected as `label_mismatch` before anything is written, and counts as a failure with backoff.
+- **No future labels.** A label more than 60 s ahead of this host's clock is rejected (`future_label`). The latest-reading and history queries also ignore any stored label later than now, so a bad row cannot become "latest".
+- **Quality is not freshness.** A timely reading with a quality code other than `ACT` is reported as `unverified` with reason `quality_not_actual`. The published value and the raw code stay visible, but it is never shown with a plain "Fresh" badge.
+- **Open pages expire.** The API returns `fresh_until`. The dashboard refreshes once a minute through the frontend (never GSE directly), expires the badge locally after `fresh_until`, and marks the kept value stale when a refresh fails.
+
 ## 9. Reuse terms (open - blocker)
 
 No terms of use, licence or API policy covering these files were found on the public site during this check. The files are unauthenticated, are linked from the public homepage, and include no copyright statement. **That is not permission.** Before enabling ingestion for any deployment, the owner should confirm with GSE that automated retrieval at this rate and display with attribution are acceptable. The UI already credits "Georgian State Electrosystem (GSE)" with a link.

@@ -18,9 +18,17 @@ function speedData(points: WeatherPoint[]): ChartDatum[] {
   return breakOnStep(points.map((p) => [Date.parse(p.t), p.speed_ms] as ChartDatum), 1.5 * HOUR);
 }
 
+function runIndex(points: WeatherPoint[]): Map<number, string> {
+  const m = new Map<number, string>();
+  for (const p of points) if (p.run_at) m.set(Date.parse(p.t), p.run_at);
+  return m;
+}
+
 export function buildWeatherOption(w: SiteWeather, locale: Locale) {
   const t = getDictionary(locale);
   const tip = tbilisiTooltipTime();
+  const historyRuns = runIndex(w.history.points);
+  const forecastRuns = runIndex(w.forecast.points);
   const all = [...w.history.points, ...w.forecast.points, ...w.reanalysis.points];
   const times = all.map((p) => Date.parse(p.t));
   const minT = times.length ? Math.min(...times) : Date.now() - 48 * HOUR;
@@ -53,7 +61,9 @@ export function buildWeatherOption(w: SiteWeather, locale: Locale) {
           if (p.data && typeof p.data === "object" && "dir" in p.data && p.data.dir !== undefined) {
             lines.push(`${t.weather.direction}: ${t.weather.from} ${compass(p.data.dir, locale)} (${Math.round(p.data.dir)}°)`);
           } else if (p.value[1] !== null && p.value[1] !== undefined) {
-            lines.push(`${p.seriesName}: ${p.value[1].toFixed(1)} m/s`);
+            const runs = p.seriesName === t.weather.history ? historyRuns : p.seriesName === t.weather.forecast ? forecastRuns : null;
+            const run = runs?.get(p.value[0]);
+            lines.push(`${p.seriesName}: ${p.value[1].toFixed(1)} m/s${run ? ` (${t.weather.pointRun} ${formatTbilisiMinute(run)})` : ""}`);
           }
         }
         return lines.join("<br/>");

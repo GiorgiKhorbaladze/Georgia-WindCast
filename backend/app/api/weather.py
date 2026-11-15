@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import func, select
@@ -72,6 +72,18 @@ def _series(
     run_at: datetime | None,
 ) -> WeatherSeries:
     first = rows[0] if rows else None
+    provenance: Literal["single_run", "mixed_runs", "reanalysis", "none"]
+    if spec.product == REANALYSIS.product:
+        provenance = "reanalysis" if rows else "none"
+    else:
+        runs = {r.run_at for r in rows}
+        if not rows:
+            provenance = "none"
+        elif len(runs) == 1:
+            provenance, run_at = "single_run", next(iter(runs))
+        else:
+            # Several runs contribute: no single run time is claimed for the series.
+            provenance, run_at = "mixed_runs", None
     return WeatherSeries(
         product=WeatherProduct(spec.product),
         provider=PROVIDER,
@@ -84,11 +96,30 @@ def _series(
         grid_longitude=first.grid_longitude if first else None,
         grid_elevation_m=first.grid_elevation_m if first else None,
         supported=height in spec.heights,
+        provenance=provenance,
         points=[
-            WeatherPoint(t=r.valid_at, speed_ms=r.speed_ms, direction_deg=r.direction_deg)
+            WeatherPoint(
+                t=r.valid_at, speed_ms=r.speed_ms, direction_deg=r.direction_deg, run_at=r.run_at
+            )
             for r in rows
         ],
     )
+
+
+def forecast_coverage_state(
+    now: datetime, run_at: datetime | None, horizon_end: datetime | None, settings: Settings
+) -> tuple[Freshness, str | None, timedelta]:
+    """Freshness requires usable forward coverage, not just a recent run."""
+    if run_at is None or horizon_end is None:
+        return Freshness.UNAVAILABLE, "no_forecast", timedelta(0)
+    forward = min(horizon_end, now + FORECAST_HORIZON) - now
+    if forward <= timedelta(0):
+        return Freshness.UNAVAILABLE, "forecast_expired", timedelta(0)
+    if forward < timedelta(hours=settings.weather_min_forward_hours):
+        return Freshness.STALE, "partial_coverage", forward
+    if now - run_at > timedelta(seconds=settings.weather_fresh_within_seconds):
+        return Freshness.STALE, "run_outdated", forward
+    return Freshness.FRESH, None, forward
 
 
 @router.get("", response_model=WeatherOverview)
@@ -131,12 +162,9 @@ def weather_overview(session: SessionDep, settings: SettingsDep) -> WeatherOverv
                     run_at=run_at if r else None,
                 )
             )
-    if run_at is None:
-        state = Freshness.UNAVAILABLE
-    elif now - run_at <= timedelta(seconds=settings.weather_fresh_within_seconds):
-        state = Freshness.FRESH
-    else:
-        state = Freshness.STALE
+    state, reason, forward = forecast_coverage_state(now, run_at, horizon_end, settings)
+    if state is Freshness.UNAVAILABLE:
+        horizon_end = None
     return WeatherOverview(
         generated_at=now,
         heights={name: list(spec.heights) for name, spec in PRODUCTS.items()},
@@ -144,6 +172,8 @@ def weather_overview(session: SessionDep, settings: SettingsDep) -> WeatherOverv
         forecast_model=FORECAST.model,
         forecast_model_label=FORECAST.label,
         forecast_state=state,
+        forecast_reason=reason,
+        forecast_forward_hours=round(forward.total_seconds() / 3600, 1),
         forecast_run_at=run_at,
         forecast_retrieved_at=retrieved_at,
         forecast_horizon_end=min(horizon_end, now + FORECAST_HORIZON) if horizon_end else None,
@@ -226,11 +256,10 @@ def site_weather(
             .order_by(WeatherValue.valid_at)
         ).scalars()
     )
-    history_run = max((r.run_at for r in history_rows if r.run_at), default=None)
     return SiteWeather(
         site=site,
         height_m=height,
-        history=_series(FORECAST, height, history_rows, history_run),
+        history=_series(FORECAST, height, history_rows, None),
         forecast=_series(FORECAST, height, forecast_rows, run_at),
         reanalysis=_series(REANALYSIS, height, reanalysis_rows, None),
         attribution=ATTRIBUTION,

@@ -62,12 +62,35 @@ def test_zero_is_a_fresh_value(migrated_db, gse_enabled, client):
     add(utcnow() - timedelta(minutes=1), 0.0)
     body = latest(client)
     assert body["freshness"] == "fresh" and body["value_mw"] == 0.0
+    assert body["quality"] == "ACT" and body["reason"] is None
 
 
-def test_non_act_quality_is_flagged(migrated_db, gse_enabled, client):
+def test_recent_non_act_is_unverified_not_fresh(migrated_db, gse_enabled, client):
     add(utcnow() - timedelta(minutes=1), 91.3, "NRE")
     body = latest(client)
     assert body["quality"] == "NRE" and body["quality_flagged"] is True
+    assert body["value_mw"] == 91.3  # published value stays visible
+    assert body["freshness"] == "unverified" and body["reason"] == "quality_not_actual"
+
+
+def test_recent_act_is_fresh_with_expiry(migrated_db, gse_enabled, client):
+    t = utcnow() - timedelta(minutes=2)
+    add(t, 70.0, "ACT")
+    body = latest(client)
+    assert body["freshness"] == "fresh" and body["quality_flagged"] is False
+    assert datetime.fromisoformat(body["fresh_until"]) == t + timedelta(seconds=600)
+    assert body["checked_at"] is not None
+
+
+def test_persisted_future_label_is_never_latest(migrated_db, gse_enabled, client):
+    real = utcnow() - timedelta(minutes=2)
+    add(real, 60.0)
+    add(utcnow() + timedelta(hours=3), 999.0)  # invalid row persisted before validation existed
+    body = latest(client)
+    assert body["value_mw"] == 60.0
+    assert datetime.fromisoformat(body["source_observed_at"]) == real
+    hist = client.get("/api/v1/generation/history").json()
+    assert all(p["value_mw"] != 999.0 for p in hist["points"])
 
 
 def test_stale_keeps_last_value_and_original_timestamps(migrated_db, gse_enabled, client):

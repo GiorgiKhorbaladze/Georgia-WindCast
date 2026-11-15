@@ -30,3 +30,18 @@ test("zero: 0.0 MW is shown as a real fresh reading, not as unavailable", async 
   await expect(page.getByTestId("kpi-total-value")).not.toContainText("Data unavailable");
   await expect(page.getByTestId("kpi-freshness")).toHaveText("Fresh");
 });
+
+test("expired forecast coverage: unavailable with reason, never negative hours", async ({ page }) => {
+  test.skip(scenario !== "forecast-expired", "forecast-expired scenario only");
+  await page.goto("/");
+  const horizon = page.getByTestId("forecast-horizon");
+  await expect(horizon).toContainText("Unavailable");
+  await expect(horizon).toContainText("The latest forecast has expired");
+  await expect(horizon).not.toContainText("-");
+  for (const path of ["/forecast", "/map"]) {
+    await page.goto(path);
+    const banner = page.getByTestId("forecast-coverage");
+    await expect(banner).toContainText("Unavailable");
+    await expect(banner).toContainText("The latest forecast has expired");
+  }
+});
