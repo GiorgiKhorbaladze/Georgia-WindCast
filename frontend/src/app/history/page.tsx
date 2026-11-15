@@ -1,6 +1,9 @@
 import { GenerationExplorer } from "@/components/GenerationChart";
 import { getGenerationHistory } from "@/lib/api";
 import { getI18n } from "@/lib/locale-server";
+import { pageMetadata } from "@/lib/pageMeta";
+
+export const generateMetadata = () => pageMetadata("history", "/history");
 
 export default async function HistoryPage() {
   const [{ locale, t }, history] = await Promise.all([getI18n(), getGenerationHistory()]);

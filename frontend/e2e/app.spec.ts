@@ -43,7 +43,7 @@ test("dashboard shows the national MW KPI with source time and quality, no per-s
   await expect(page.getByTestId("history-summary")).toContainText(/Missing intervals: [12]/);
 });
 
-test("language switch works with the keyboard and persists", async ({ page }) => {
+test("language switch works with the keyboard and persists", async ({ page, isMobile }) => {
   await useLang(page, "ka");
   await page.goto("/");
   await expect(page.locator("html")).toHaveAttribute("lang", "ka");
@@ -51,6 +51,7 @@ test("language switch works with the keyboard and persists", async ({ page }) =>
   await en.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  if (isMobile) await page.getByRole("button", { name: "Open menu" }).click();
   await expect(page.getByRole("navigation").getByRole("link", { name: "History" })).toBeVisible();
   await page.goto("/about");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");

@@ -174,6 +174,30 @@ const ka = {
   },
   timezoneNote: "დრო მითითებულია თბილისის დროით (UTC+04:00)",
   footer: "საინფორმაციო მონიტორინგი. არ წარმოადგენს ოპერატიულ ან დისპეჩერულ ინსტრუმენტს.",
+  independenceTitle: "დამოუკიდებლობა",
+  independence:
+    "დამოუკიდებელი საინფორმაციო პროექტი. არ არის სს „საქართველოს სახელმწიფო ელექტროსისტემის“ (GSE) ან სხვა ორგანიზაციის ოფიციალური სერვისი და მათ მიერ მოწონებული არ არის.",
+  menu: { open: "მენიუს გახსნა", close: "მენიუს დახურვა", label: "მენიუ" },
+  meta: {
+    defaultTitle: "Georgia WindCast - ქარის გენერაცია და მეტეოროლოგიური პირობები",
+    description:
+      "საქართველოს ქარის ჯამური გენერაცია (MW, GSE-ის 3-წუთიანი მონაცემები) და სამი ქარის სადგურის ლოკაციის მოდელური ქარი, წყაროს, ხარისხისა და აქტუალურობის მითითებით.",
+    ogAlt: "Georgia WindCast - ქარის გენერაციისა და მეტეოროლოგიური პირობების დამოუკიდებელი მონიტორინგი",
+    pages: {
+      map: { title: "ინტერაქტიული რუკა", description: "სამი ქარის სადგურის ლოკაციის მოდელური ქარის სიჩქარე და მიმართულება საქართველოს რუკაზე." },
+      history: { title: "გენერაციის ისტორია", description: "ქარის ჯამური გენერაციის ისტორია: 24 საათი, 7 დღე, 30 დღე და მორგებული პერიოდი, ხარვეზების მითითებით." },
+      forecast: { title: "ქარის პროგნოზი", description: "მეტეოროლოგიური ქარის პროგნოზი სამ ლოკაციაზე, მოდელისა და გაშვების დროის მითითებით. არ არის MW პროგნოზი." },
+      about: { title: "მონაცემების შესახებ", description: "მონაცემების წყაროები, შეზღუდვები, ატრიბუცია, დამოუკიდებლობა და კონფიდენციალურობა." },
+    },
+  },
+  privacy: {
+    title: "კონფიდენციალურობა",
+    paragraphs: [
+      "საიტი არ იყენებს ანალიტიკას, სარეკლამო ან თვალთვალის ქუქი-ფაილებს. ინახება მხოლოდ ენის არჩევანის ქუქი-ფაილი.",
+      "ტექნიკური უსაფრთხოებისთვის სერვერი აწარმოებს მოთხოვნების ჟურნალს (IP მისამართი, დრო, გვერდი). ჟურნალი ინახება მხოლოდ შეზღუდული მოცულობით და ძველი ჩანაწერები ავტომატურად იშლება.",
+      "რუკის ფონური ფენა იტვირთება OpenFreeMap-იდან, ამიტომ თქვენი ბრაუზერი მას უშუალოდ უკავშირდება.",
+    ],
+  },
 };
 
 export type Dictionary = typeof ka;
@@ -323,6 +347,30 @@ const en: Dictionary = {
   },
   timezoneNote: "Times shown in Tbilisi time (UTC+04:00)",
   footer: "Informational monitoring. Not an operational or dispatching tool.",
+  independenceTitle: "Independence",
+  independence:
+    "Independent informational project. Not an official service of, or endorsed by, the Georgian State Electrosystem (GSE) or any other organisation.",
+  menu: { open: "Open menu", close: "Close menu", label: "Menu" },
+  meta: {
+    defaultTitle: "Georgia WindCast - wind generation and meteorological conditions",
+    description:
+      "Georgia's national aggregate wind generation (MW, GSE 3-minute data) and model wind at three wind-farm locations, with source, quality and freshness shown.",
+    ogAlt: "Georgia WindCast - independent monitoring of wind generation and meteorological conditions",
+    pages: {
+      map: { title: "Interactive map", description: "Model wind speed and direction at three wind-farm locations on a map of Georgia." },
+      history: { title: "Generation history", description: "National aggregate wind generation history: 24 hours, 7 days, 30 days and custom ranges, with gaps shown." },
+      forecast: { title: "Wind forecast", description: "Meteorological wind forecasts at three locations with model and run time. Not a MW forecast." },
+      about: { title: "About the data", description: "Data sources, limitations, attribution, independence and privacy." },
+    },
+  },
+  privacy: {
+    title: "Privacy",
+    paragraphs: [
+      "The site uses no analytics, advertising or tracking cookies. Only a language-preference cookie is stored.",
+      "For technical security the server keeps a request log (IP address, time, page). The log is capped in size and older entries are deleted automatically.",
+      "The map basemap is loaded from OpenFreeMap, so your browser contacts it directly.",
+    ],
+  },
 };
 
 const DICTIONARIES: Record<Locale, Dictionary> = { ka, en };

@@ -1,5 +1,6 @@
 import { getSystemStatus } from "@/lib/api";
 import { getI18n } from "@/lib/locale-server";
+import { pageMetadata } from "@/lib/pageMeta";
 
 const SOURCES = [
   { name: "Georgian State Electrosystem (GSE) - national wind generation, 3-minute exports", url: "https://www.gse.com.ge" },
@@ -8,6 +9,8 @@ const SOURCES = [
   { name: "ERA5 reanalysis (ECMWF / Copernicus Climate Change Service)", url: "https://cds.climate.copernicus.eu/" },
   { name: "Basemap: OpenFreeMap, © OpenMapTiles, data © OpenStreetMap contributors", url: "https://www.openstreetmap.org/copyright" },
 ];
+
+export const generateMetadata = () => pageMetadata("about", "/about");
 
 export default async function AboutPage() {
   const [{ locale, t }, status] = await Promise.all([getI18n(), getSystemStatus()]);
@@ -20,6 +23,10 @@ export default async function AboutPage() {
         </div>
         <p className="mt-6 text-sm text-slate-400">{t.timezoneNote}</p>
       </section>
+      <section className="wc-panel p-6 sm:p-8" aria-labelledby="independence-title" data-testid="independence">
+        <h2 id="independence-title" className="wc-label">{t.independenceTitle}</h2>
+        <p className="mt-4 leading-relaxed text-slate-300">{t.independence}</p>
+      </section>
       <section className="wc-panel p-6 sm:p-8" aria-labelledby="sources-title">
         <h2 id="sources-title" className="wc-label">{t.about.sources}</h2>
         <ul className="mt-4 space-y-2 text-sm">
@@ -27,6 +34,12 @@ export default async function AboutPage() {
             <li key={s.url}><a className="text-cyan-glow hover:underline" href={s.url} rel="noreferrer" target="_blank">{s.name}</a></li>
           ))}
         </ul>
+      </section>
+      <section className="wc-panel p-6 sm:p-8" aria-labelledby="privacy-title">
+        <h2 id="privacy-title" className="wc-label">{t.privacy.title}</h2>
+        <div className="mt-4 space-y-3 text-sm leading-relaxed text-slate-300">
+          {t.privacy.paragraphs.map((p) => <p key={p}>{p}</p>)}
+        </div>
       </section>
       {status.ok && (
         <section className="wc-panel p-6 sm:p-8" aria-labelledby="coords-title">

@@ -30,6 +30,47 @@ export async function getJson<T>(path: string, timeoutMs = DEFAULT_TIMEOUT_MS): 
   }
 }
 
+/**
+ * Short-lived server-side cache with request coalescing (issue #18 load test).
+ *
+ * Many simultaneous visitors share one backend request per URL: concurrent callers await the same
+ * in-flight promise, and a successful response is reused for WINDCAST_API_CACHE_SECONDS (default
+ * 5 s). Failures are never cached. The data changes every 3 minutes at most (GSE) and the API
+ * reports source times and freshness explicitly, so a few seconds of reuse cannot make stale data
+ * look current. The cache is bounded so unique query strings cannot grow memory without limit.
+ */
+const MAX_ENTRIES = 256;
+const cache = new Map<string, { expires: number; value: Promise<ApiResult<unknown>> }>();
+
+function cacheTtlMs(): number {
+  const raw = Number(process.env.WINDCAST_API_CACHE_SECONDS ?? "5");
+  return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 60) * 1000 : 0;
+}
+
+export function cachedJson<T>(path: string, now: () => number = Date.now): Promise<ApiResult<T>> {
+  const ttl = cacheTtlMs();
+  if (ttl === 0) return getJson<T>(path);
+  const hit = cache.get(path);
+  if (hit && hit.expires > now()) return hit.value as Promise<ApiResult<T>>;
+  const value = getJson<T>(path).then((result) => {
+    if (result.ok) {
+      const entry = cache.get(path);
+      if (entry) entry.expires = now() + ttl;
+    } else {
+      cache.delete(path); // never keep failures
+    }
+    return result;
+  });
+  // In flight: concurrent callers share this promise until it settles.
+  cache.set(path, { expires: Number.POSITIVE_INFINITY, value });
+  if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value!);
+  return value;
+}
+
+export function clearApiCache(): void {
+  cache.clear();
+}
+
 function query(params: Record<string, string | number | undefined | null>): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
@@ -37,10 +78,10 @@ function query(params: Record<string, string | number | undefined | null>): stri
   return s ? `?${s}` : "";
 }
 
-export const getGenerationLatest = () => getJson<GenerationLatest>("/api/v1/generation/latest");
-export const getSystemStatus = () => getJson<SystemStatus>("/api/v1/status");
+export const getGenerationLatest = () => cachedJson<GenerationLatest>("/api/v1/generation/latest");
+export const getSystemStatus = () => cachedJson<SystemStatus>("/api/v1/status");
 export const getGenerationHistory = (start?: string | null, end?: string | null) =>
-  getJson<GenerationHistory>(`/api/v1/generation/history${query({ start, end })}`);
-export const getWeatherOverview = () => getJson<WeatherOverview>("/api/v1/weather");
+  cachedJson<GenerationHistory>(`/api/v1/generation/history${query({ start, end })}`);
+export const getWeatherOverview = () => cachedJson<WeatherOverview>("/api/v1/weather");
 export const getSiteWeather = (siteId: string, height: number, start?: string | null, end?: string | null) =>
-  getJson<SiteWeather>(`/api/v1/weather/sites/${encodeURIComponent(siteId)}${query({ height, start, end })}`);
+  cachedJson<SiteWeather>(`/api/v1/weather/sites/${encodeURIComponent(siteId)}${query({ height, start, end })}`);

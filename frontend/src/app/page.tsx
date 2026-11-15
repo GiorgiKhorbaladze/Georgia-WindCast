@@ -6,12 +6,15 @@ import { StatusBadge, type Tone } from "@/components/StatusBadge";
 import { getGenerationHistory, getGenerationLatest, getSystemStatus, getWeatherOverview } from "@/lib/api";
 import { formatTbilisi } from "@/lib/format";
 import { getI18n } from "@/lib/locale-server";
+import { homeMetadata } from "@/lib/pageMeta";
 import { freshnessTone, workerTone } from "@/lib/status";
 import type { SourceState, WeatherOverview } from "@/lib/types";
 import { compass, downwindBearing, formatSpeed } from "@/lib/wind";
 
 const SOURCE_TONE: Record<SourceState, Tone> = { ok: "ok", degraded: "warn", down: "bad", not_configured: "neutral" };
 const NOW_HEIGHTS = [10, 80, 120, 180];
+
+export const generateMetadata = homeMetadata;
 
 export default async function DashboardPage() {
   const [{ locale, t }, generation, status, history, weather] = await Promise.all([
@@ -43,7 +46,7 @@ export default async function DashboardPage() {
                 <StatusBadge tone={workerTone(status.data.worker.state)}>{t.worker[status.data.worker.state]}</StatusBadge>
               </li>
               {status.data.sources.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-2" title={s.detail ?? undefined}>
+                <li key={s.id} className="flex items-center justify-between gap-2">
                   <span className="text-slate-300">{t.sourceName[s.id] ?? s.id}</span>
                   <StatusBadge tone={SOURCE_TONE[s.state]}>{t.sourceState[s.state]}</StatusBadge>
                 </li>

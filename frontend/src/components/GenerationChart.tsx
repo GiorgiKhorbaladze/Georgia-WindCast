@@ -6,7 +6,7 @@ import { EChart } from "@/components/charts/EChart";
 import { baseChart, COLORS, tbilisiAxisLabel, tbilisiTooltipTime } from "@/lib/chartTheme";
 import { formatTbilisiMinute, tbilisiInputValue } from "@/lib/format";
 import { getDictionary, type Locale } from "@/lib/i18n";
-import { withGapBreaks } from "@/lib/series";
+import { labelFlags, withGapBreaks } from "@/lib/series";
 import type { GenerationHistory } from "@/lib/types";
 
 const RANGES = { "24h": 24, "7d": 24 * 7, "30d": 24 * 30 } as const;
@@ -17,21 +17,30 @@ export function buildGenerationOption(h: GenerationHistory, locale: Locale) {
   const t = getDictionary(locale);
   const spanMs = Date.parse(h.end) - Date.parse(h.start);
   const data = withGapBreaks(h.points, (p) => p.t, (p) => p.value_mw, h.gaps);
-  const marks: [{ xAxis: number; name?: string }, { xAxis: number }][] = h.gaps.map((g) => [
-    { xAxis: Date.parse(g.start), name: t.history.gapLegend },
+  const startedAt = h.collection_started_at ? Date.parse(h.collection_started_at) : null;
+  const hasBefore = startedAt !== null && startedAt > Date.parse(h.start);
+  // Shaded intervals in time order; labels are thinned so they never overlap (see labelFlags).
+  const intervals = [
+    ...(hasBefore ? [{ start: Date.parse(h.start), end: startedAt! }] : []),
+    ...h.gaps.map((g) => ({ start: Date.parse(g.start), end: Date.parse(g.end) })),
+  ];
+  const flags = labelFlags(intervals, spanMs);
+  const gapFlags = hasBefore ? flags.slice(1) : flags;
+  const marks: [{ xAxis: number; name?: string }, { xAxis: number }][] = h.gaps.map((g, i) => [
+    { xAxis: Date.parse(g.start), name: gapFlags[i] ? t.history.gapLegend : undefined },
     { xAxis: Date.parse(g.end) },
   ]);
   // Time before collection began is not a source gap: shown faintly, without the amber gap style.
   const before =
-    h.collection_started_at && Date.parse(h.collection_started_at) > Date.parse(h.start)
+    hasBefore
       ? [[
           {
             xAxis: Date.parse(h.start),
-            name: t.history.beforeCollection,
+            name: flags[0] ? t.history.beforeCollection : undefined,
             itemStyle: { color: "rgba(148,163,184,0.04)", borderWidth: 0 },
             label: { color: "#64748b" },
           },
-          { xAxis: Date.parse(h.collection_started_at) },
+          { xAxis: startedAt! },
         ]]
       : [];
   const tip = tbilisiTooltipTime();
@@ -196,7 +205,12 @@ export function GenerationExplorer({
           {history.collection_started_at && (
             <span>{t.history.since}: {formatTbilisiMinute(history.collection_started_at)}</span>
           )}
-          <span>{t.history.gaps(history.gaps.length)}</span>
+          <span className="inline-flex items-center gap-1.5">
+            {history.gaps.length > 0 && (
+              <span aria-hidden="true" className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-amber-warn/70 bg-amber-warn/10" />
+            )}
+            {t.history.gaps(history.gaps.length)}
+          </span>
         </p>
       )}
     </div>
