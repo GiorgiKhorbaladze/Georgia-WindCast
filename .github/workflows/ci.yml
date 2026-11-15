@@ -199,7 +199,8 @@ jobs:
     timeout-minutes: 75
     needs: [frontend, backend]
     env:
-      DOCKER_DEFAULT_PLATFORM: linux/arm64
+      # DOCKER_DEFAULT_PLATFORM is set only on the smoke steps: job-wide it made
+      # setup-qemu-action pull its own binfmt helper as arm64 ("exec format error").
       WINDCAST_IMAGE_TAG: arm64
       SMOKE_SKIP_BUILD: "1"
       # Emulation only: relaxed healthcheck timeouts. Native Ampere A1 hosts do not use this file.
@@ -221,9 +222,13 @@ jobs:
           done
       - name: Compose smoke on arm64 (migrations, production overlay, failing + successful restore)
         shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
         run: scripts/compose-smoke.sh 2>&1 | tee arm64-compose-smoke.txt
       - name: Public edge smoke on arm64
         shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
         run: scripts/edge-smoke.sh 2>&1 | tee arm64-edge-smoke.txt
       - name: Upload transcripts
         if: always()
