@@ -1,4 +1,4 @@
-import type { Freshness, WorkerState } from "./types";
+import type { Freshness, SourceState, WorkerState } from "./types";
 
 export const LOCALES = ["ka", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
@@ -9,57 +9,10 @@ export function resolveLocale(value: string | undefined | null): Locale {
   return (LOCALES as readonly string[]).includes(value ?? "") ? (value as Locale) : DEFAULT_LOCALE;
 }
 
-export interface Dictionary {
-  appName: string;
-  tagline: string;
-  nav: { dashboard: string; map: string; history: string; forecast: string; about: string };
-  languageLabel: string;
-  kpi: {
-    totalWind: string;
-    scopeNote: string;
-    source: string;
-    observedAt: string;
-    retrievedAt: string;
-    notReported: string;
-    quality: string;
-    qualityFlagged: string;
-    periodAverage: string;
-    trackedLocations: string;
-    trackedLocationsNote: string;
-    ingestionStatus: string;
-    forecastHorizon: string;
-    forecastHorizonPending: string;
-  };
-  freshness: Record<Freshness, string>;
-  worker: Record<WorkerState, string>;
-  reasons: Record<string, string>;
-  unavailable: string;
-  apiUnreachable: string;
-  sites: { title: string; coordinatesPending: string; noMw: string };
-  dataTypes: {
-    title: string;
-    actual: [string, string];
-    model: [string, string];
-    forecast: [string, string];
-    missing: [string, string];
-  };
-  history: {
-    title: string;
-    empty: string;
-    collected: (n: number) => string;
-    since: string;
-    gaps: (n: number) => string;
-    chartPending: string;
-  };
-  planned: { title: string; body: string; issue: string };
-  about: { title: string; paragraphs: string[] };
-  timezoneNote: string;
-  footer: string;
-}
-
-const ka: Dictionary = {
+const ka = {
   appName: "GEORGIA WINDCAST",
   tagline: "ქარის გენერაციისა და მეტეოროლოგიური პირობების მონიტორინგი",
+  skip: "მთავარ შინაარსზე გადასვლა",
   nav: {
     dashboard: "მთავარი",
     map: "რუკა",
@@ -80,32 +33,48 @@ const ka: Dictionary = {
     periodAverage: "3-წუთიანი საშუალო",
     trackedLocations: "მონიტორინგის ლოკაციები",
     trackedLocationsNote: "მეტეოროლოგიური მოდელის მონაცემები, არა გენერაცია",
-    ingestionStatus: "მონაცემთა მიღების სტატუსი",
+    ingestionStatus: "მონაცემთა წყაროები",
     forecastHorizon: "მეტეოროლოგიური პროგნოზის ჰორიზონტი",
-    forecastHorizonPending: "ამინდის წყარო ჯერ არ არის ჩართული",
+    forecastHorizonPending: "ამინდის პროგნოზი ჯერ არ არის მიღებული",
+    until: "მდე",
   },
   freshness: {
     fresh: "აქტუალური",
     stale: "მოძველებული",
     unverified: "დროის ნიშნული დაუდასტურებელია",
     unavailable: "მიუწვდომელია",
-  },
+  } satisfies Record<Freshness, string>,
   worker: {
     running: "მუშაობს",
     stale: "კავშირი შეწყვეტილია",
     never_seen: "ჯერ არ გაშვებულა",
-  },
+  } satisfies Record<WorkerState, string>,
+  sourceState: {
+    ok: "მუშაობს",
+    degraded: "შეფერხებით",
+    down: "მიუწვდომელია",
+    not_configured: "გამორთულია",
+  } satisfies Record<SourceState, string>,
+  sourceName: {
+    gse: "GSE - ქარის გენერაცია",
+    "open-meteo-forecast": "Open-Meteo - პროგნოზი",
+    "open-meteo-reanalysis": "Open-Meteo - რეანალიზი",
+    worker: "მონაცემთა მიღების პროცესი",
+  } as Record<string, string>,
   reasons: {
     ingestion_disabled: "GSE-დან მონაცემთა მიღება გამორთულია, სანამ არ დადასტურდება მათი გამოყენების პირობები.",
     no_data_yet: "მონაცემთა მიღება ჩართულია, ვალიდური ჩანაწერი ჯერ არ არის მიღებული.",
     source_unreachable: "GSE წყარო დროებით მიუწვდომელია. ნაჩვენებია ბოლო ვალიდური მნიშვნელობა.",
     source_not_updated: "GSE-მ ახალი მონაცემი არ გამოაქვეყნა. ნაჩვენებია ბოლო ვალიდური მნიშვნელობა.",
-  },
+  } as Record<string, string>,
   unavailable: "მონაცემები მიუწვდომელია",
   apiUnreachable: "სერვერთან კავშირი ვერ დამყარდა",
+  loading: "იტვირთება…",
   sites: {
     title: "ქარის ელექტროსადგურების ლოკაციები",
     coordinatesPending: "კოორდინატები გადამოწმების პროცესშია",
+    coordinateSource: "კოორდინატების წყარო",
+    uncertainty: "განუსაზღვრელობა",
     noMw: "სადგურის დონეზე MW არ ჩანს: GSE მხოლოდ ჯამურ მაჩვენებელს აქვეყნებს.",
   },
   dataTypes: {
@@ -117,11 +86,61 @@ const ka: Dictionary = {
   },
   history: {
     title: "ჯამური გენერაციის ისტორია",
+    pageTitle: "ქარის ჯამური გენერაციის ისტორია",
     empty: "ისტორია იწყება მონაცემთა ვალიდური მიღების დაწყებიდან. ჩანაწერები ჯერ არ არის.",
-    collected: (n) => `ბოლო 24 საათში შეგროვებულია ${n} ფაქტობრივი ჩანაწერი`,
+    collected: (n: number) => `შეგროვებულია ${n} ფაქტობრივი ჩანაწერი`,
     since: "შეგროვება დაიწყო",
-    gaps: (n) => (n === 0 ? "გამოტოვებული ინტერვალები არ ფიქსირდება" : `გამოტოვებული ინტერვალები: ${n}`),
-    chartPending: "ინტერაქტიული გრაფიკი მომდევნო ეტაპზე დაემატება (#5).",
+    gaps: (n: number) => (n === 0 ? "გამოტოვებული ინტერვალები არ ფიქსირდება" : `გამოტოვებული ინტერვალები: ${n}`),
+    range24h: "24 სთ",
+    range7d: "7 დღე",
+    range30d: "30 დღე",
+    custom: "პერიოდი",
+    from: "დან",
+    to: "მდე",
+    apply: "ჩვენება",
+    invalidRange: "მიუთითეთ სწორი პერიოდი (მაქს. 31 დღე).",
+    series: "ფაქტობრივი გენერაცია (GSE)",
+    gapLegend: "მონაცემი არ არის",
+    beforeCollection: "შეგროვებამდე",
+    note: "ნაჩვენებია მხოლოდ შეგროვებული ფაქტობრივი 3-წუთიანი მნიშვნელობები. გამოტოვებული ინტერვალები არ ივსება და არ ინტერპოლირდება.",
+  },
+  weather: {
+    title: "ქარის მოდელური პირობები",
+    notMeasured: "მოდელის მონაცემი, არა ანემომეტრის გაზომვა",
+    height: "სიმაღლე",
+    heightUnsupported: "ამ სიმაღლეზე პროდუქტი მონაცემს არ აწვდის",
+    unsupportedAll: "200 მ - არ არის ხელმისაწვდომი",
+    speed: "სიჩქარე",
+    direction: "მიმართულება",
+    from: "საიდან",
+    validTime: "მოქმედების დრო",
+    run: "მოდელის გაშვება",
+    retrieved: "მიღებულია",
+    model: "მოდელი",
+    history: "წარსული (მოდელის უახლესი გაშვებები)",
+    forecast: "პროგნოზი",
+    reanalysis: "რეანალიზი ERA5",
+    reanalysisNote: "რუისი და ქართლი ერთმანეთისგან ~6 კმ-ითაა დაშორებული და ორივე მოდელში (ICON ~13 კმ, ERA5 ~25 კმ) ერთსა და იმავე ბადის წერტილს ემთხვევა, ამიტომ მათი მოდელური მნიშვნელობები იდენტურია.",
+    now: "ახლა (მოდელი)",
+    noData: "მოდელის მონაცემი ჯერ არ არის",
+    stale: "მოდელის გაშვება მოძველებულია",
+    pageTitle: "მეტეოროლოგიური პროგნოზი ლოკაციების მიხედვით",
+    pageNote: "მოდელური ქარის სიჩქარე და მიმართულება 72 საათამდე. ეს არ არის MW გენერაციის პროგნოზი.",
+    nowLine: "ახლა",
+    gridPoint: "მოდელის ბადის წერტილი",
+  },
+  map: {
+    title: "ქარის ლოკაციების რუკა",
+    time: "პროგნოზის დრო",
+    play: "დაკვრა",
+    pause: "პაუზა",
+    animation: "ანიმაცია",
+    animationOn: "ჩართ.",
+    animationOff: "გამორთ.",
+    coverage: "ანიმაცია ნაჩვენებია მხოლოდ სამი წერტილის ირგვლივ. ეს არ არის სივრცითი ქარის ველი.",
+    webglFallback: "ინტერაქტიული რუკა ვერ ჩაიტვირთა (WebGL მიუწვდომელია). ნაჩვენებია გამარტივებული სქემა.",
+    openDetails: "დეტალები",
+    list: "ლოკაციები და მნიშვნელობები",
   },
   planned: {
     title: "განვითარების პროცესშია",
@@ -131,19 +150,23 @@ const ka: Dictionary = {
   about: {
     title: "მონაცემების შესახებ",
     paragraphs: [
-      "ქარის ჯამური გენერაცია (MW) აღებულია სს „საქართველოს სახელმწიფო ელექტროსისტემის“ (GSE) საჯარო ვებგვერდიდან. GSE ცალკეული სადგურების გენერაციას არ აქვეყნებს და აპლიკაცია მას არ აფასებს.",
-      "ლოკაციების ქარის მონაცემები მეტეოროლოგიური მოდელის პროდუქტია და არ წარმოადგენს ანემომეტრის გაზომვას. პროგნოზი მიბმულია მოდელის გაშვების დროს.",
+      "ქარის ჯამური გენერაცია (MW) აღებულია სს „საქართველოს სახელმწიფო ელექტროსისტემის“ (GSE) საჯარო 3-წუთიანი მონაცემებიდან. GSE ცალკეული სადგურების გენერაციას არ აქვეყნებს და აპლიკაცია მას არ აფასებს.",
+      "ლოკაციების ქარის მონაცემები მეტეოროლოგიური მოდელების პროდუქტია (DWD ICON, ECMWF ERA5, Open-Meteo-ს მეშვეობით) და არ წარმოადგენს ანემომეტრის გაზომვას. პროგნოზი მიბმულია მოდელის გაშვების დროს.",
       "ქარის სიჩქარის ზრდა გენერაციის პროპორციულ ზრდას არ ნიშნავს. MW გენერაციის პროგნოზი ამ ეტაპზე არ არის.",
-      "ეს ინსტრუმენტი საინფორმაციოა და არ ასრულებს SCADA-ს ან დისპეჩერიზაციის ფუნქციას.",
+      "ეს ინსტრუმენტი საინფორმაციოა და არ ასრულებს SCADA-ს, ოპერატიული დისპეჩერიზაციის ან ელექტროენერგეტიკული უსაფრთხოების მართვის ფუნქციას.",
     ],
+    sources: "წყაროები და ატრიბუცია",
   },
   timezoneNote: "დრო მითითებულია თბილისის დროით (UTC+04:00)",
   footer: "საინფორმაციო მონიტორინგი. არ წარმოადგენს ოპერატიულ ან დისპეჩერულ ინსტრუმენტს.",
 };
 
+export type Dictionary = typeof ka;
+
 const en: Dictionary = {
   appName: "GEORGIA WINDCAST",
   tagline: "Wind generation and meteorological monitoring",
+  skip: "Skip to content",
   nav: { dashboard: "Dashboard", map: "Map", history: "History", forecast: "Forecast", about: "About Data" },
   languageLabel: "Language",
   kpi: {
@@ -158,17 +181,20 @@ const en: Dictionary = {
     periodAverage: "3-minute average",
     trackedLocations: "Tracked locations",
     trackedLocationsNote: "Meteorological model data, not generation",
-    ingestionStatus: "Ingestion status",
+    ingestionStatus: "Data sources",
     forecastHorizon: "Meteorological forecast horizon",
-    forecastHorizonPending: "Weather source not yet enabled",
+    forecastHorizonPending: "No weather forecast received yet",
+    until: "until",
   },
-  freshness: {
-    fresh: "Fresh",
-    stale: "Stale",
-    unverified: "Timestamp unverified",
-    unavailable: "Unavailable",
-  },
+  freshness: { fresh: "Fresh", stale: "Stale", unverified: "Timestamp unverified", unavailable: "Unavailable" },
   worker: { running: "Running", stale: "Not reporting", never_seen: "Not started yet" },
+  sourceState: { ok: "Operational", degraded: "Degraded", down: "Down", not_configured: "Disabled" },
+  sourceName: {
+    gse: "GSE - wind generation",
+    "open-meteo-forecast": "Open-Meteo - forecast",
+    "open-meteo-reanalysis": "Open-Meteo - reanalysis",
+    worker: "Ingestion worker",
+  },
   reasons: {
     ingestion_disabled: "GSE ingestion is disabled until reuse terms are confirmed.",
     no_data_yet: "Ingestion is enabled; no valid reading has been received yet.",
@@ -177,9 +203,12 @@ const en: Dictionary = {
   },
   unavailable: "Data unavailable",
   apiUnreachable: "Cannot reach the server",
+  loading: "Loading…",
   sites: {
     title: "Wind farm locations",
     coordinatesPending: "Coordinates pending verification",
+    coordinateSource: "Coordinate source",
+    uncertainty: "Uncertainty",
     noMw: "No per-plant MW is shown: GSE publishes the national total only.",
   },
   dataTypes: {
@@ -191,11 +220,61 @@ const en: Dictionary = {
   },
   history: {
     title: "Aggregate generation history",
+    pageTitle: "National wind generation history",
     empty: "History starts when valid ingestion begins. No records yet.",
-    collected: (n) => `${n} actual readings collected in the last 24 hours`,
+    collected: (n: number) => `${n} actual readings collected`,
     since: "Collection started",
-    gaps: (n) => (n === 0 ? "No missing intervals" : `Missing intervals: ${n}`),
-    chartPending: "The interactive chart arrives in the next stage (#5).",
+    gaps: (n: number) => (n === 0 ? "No missing intervals" : `Missing intervals: ${n}`),
+    range24h: "24 h",
+    range7d: "7 days",
+    range30d: "30 days",
+    custom: "Custom",
+    from: "From",
+    to: "To",
+    apply: "Show",
+    invalidRange: "Enter a valid range (max. 31 days).",
+    series: "Actual generation (GSE)",
+    gapLegend: "No data",
+    beforeCollection: "Before collection",
+    note: "Only collected actual 3-minute values are shown. Missing intervals are never filled or interpolated.",
+  },
+  weather: {
+    title: "Model wind conditions",
+    notMeasured: "Model data, not an anemometer measurement",
+    height: "Height",
+    heightUnsupported: "This product provides no data at this height",
+    unsupportedAll: "200 m - not available",
+    speed: "Speed",
+    direction: "Direction",
+    from: "from",
+    validTime: "Valid time",
+    run: "Model run",
+    retrieved: "Retrieved",
+    model: "Model",
+    history: "Past (latest model runs)",
+    forecast: "Forecast",
+    reanalysis: "ERA5 reanalysis",
+    reanalysisNote: "Ruisi and Kartli are ~6 km apart and map to the same grid point in both models (ICON ~13 km, ERA5 ~25 km), so their model values are identical.",
+    now: "Now (model)",
+    noData: "No model data yet",
+    stale: "Model run is stale",
+    pageTitle: "Meteorological forecast by location",
+    pageNote: "Model wind speed and direction up to 72 hours. This is not an MW generation forecast.",
+    nowLine: "Now",
+    gridPoint: "Model grid point",
+  },
+  map: {
+    title: "Wind site map",
+    time: "Forecast time",
+    play: "Play",
+    pause: "Pause",
+    animation: "Animation",
+    animationOn: "on",
+    animationOff: "off",
+    coverage: "Animation is drawn only around the three site points. It is not a spatial wind field.",
+    webglFallback: "The interactive map could not load (WebGL unavailable). Showing a simplified schematic.",
+    openDetails: "Details",
+    list: "Sites and values",
   },
   planned: {
     title: "In development",
@@ -205,11 +284,12 @@ const en: Dictionary = {
   about: {
     title: "About the data",
     paragraphs: [
-      "Total wind generation (MW) comes from the public website of the Georgian State Electrosystem (GSE). GSE does not publish per-plant output and this application does not estimate it.",
-      "Site wind values are meteorological model products, not anemometer measurements. Forecasts are tied to their model run time.",
+      "Total wind generation (MW) comes from the public 3-minute data of the Georgian State Electrosystem (GSE). GSE does not publish per-plant output and this application does not estimate it.",
+      "Site wind values are meteorological model products (DWD ICON, ECMWF ERA5, via Open-Meteo), not anemometer measurements. Forecasts are tied to their model run time.",
       "Higher wind speed does not imply proportionally higher generation. No MW generation forecast is provided at this stage.",
-      "This tool is informational and has no SCADA or dispatching function.",
+      "This tool is informational. It has no SCADA, operational dispatching or grid-security function.",
     ],
+    sources: "Sources and attribution",
   },
   timezoneNote: "Times shown in Tbilisi time (UTC+04:00)",
   footer: "Informational monitoring. Not an operational or dispatching tool.",

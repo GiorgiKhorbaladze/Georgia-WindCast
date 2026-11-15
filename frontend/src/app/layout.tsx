@@ -30,14 +30,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           href="#main"
           className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-ink-800 focus:px-3 focus:py-2"
         >
-          {locale === "ka" ? "მთავარ შინაარსზე გადასვლა" : "Skip to content"}
+          {t.skip}
         </a>
         <Header t={t} locale={locale} />
         <main id="main" className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
           {children}
         </main>
         <footer className="border-t border-line">
-          <div className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-4 text-xs text-slate-500 sm:flex-row sm:justify-between sm:px-6">
+          <div className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-4 text-xs text-slate-400 sm:flex-row sm:justify-between sm:px-6">
             <span>{t.footer}</span>
             <span>{t.timezoneNote}</span>
           </div>
