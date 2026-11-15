@@ -37,13 +37,15 @@ export function ForecastCoverageBanner({
             const site = w.sites.find((s) => s.id === c.site_id);
             const name = site ? (locale === "ka" ? site.name_ka : site.name_en) : c.site_id;
             return (
-              <li key={c.site_id} className={c.forward_hours > 0 ? "" : "text-amber-warn"}>
+              <li key={c.site_id} className={c.forward_hours > 0 && !c.missing_hours ? "" : "text-amber-warn"}>
                 {name}: {Math.round(c.forward_hours)} {t.weather.forwardHours}
+                {c.missing_hours ? ` · ${t.weather.missingHours(c.missing_hours)}` : ""}
               </li>
             );
           })}
         </ul>
       )}
+      <p className="w-full text-xs text-slate-400">{t.weather.coverageNote}</p>
     </div>
   );
 }

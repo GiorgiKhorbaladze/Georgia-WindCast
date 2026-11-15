@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -222,3 +222,65 @@ def test_site_series_validation(migrated_db, client, path, params, code):
 def test_status_lists_weather_sources(migrated_db, weather_enabled, client):
     sources = {s["id"]: s["state"] for s in client.get("/api/v1/status").json()["sources"]}
     assert sources["open-meteo-forecast"] == "degraded"  # enabled, nothing fetched yet
+
+
+def _cov(body):
+    return {c["site_id"]: c for c in body["site_coverage"]}
+
+
+def test_interior_gaps_end_contiguous_coverage(migrated_db, client):
+    """Review finding: a distant point after missing hours is not usable coverage."""
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    # hours now-3 .. now+5 present, then a gap until now+20, then data to +80
+    leads = [lead for lead in range(0, 84) if not (9 <= lead < 24)]
+    add_run(run, leads)
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "stale"
+    assert body["forecast_reason"] == "partial_coverage"
+    assert body["forecast_forward_hours"] < 24
+    c = _cov(body)["zemo-wind"]
+    assert c["forward_hours"] < 24
+    assert c["missing_hours"] == 15  # the interior gap is reported, not hidden
+    assert c["last_valid_at"] is not None
+    assert datetime.fromisoformat(c["last_valid_at"]) > now_h + timedelta(hours=70)
+
+
+def test_single_far_point_is_not_coverage(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=1)
+    add_run(run, [73])  # only a point ~72 h ahead at every height and site
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] != "fresh"
+    assert body["forecast_reason"] == "incomplete_site_coverage"
+    assert body["forecast_forward_hours"] == 0.0
+    assert all(c["forward_hours"] == 0.0 and c["missing_hours"] > 60 for c in body["site_coverage"])
+
+
+def test_missing_current_hour_means_no_contiguous_coverage(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    add_run(run, [lead for lead in range(0, 80) if lead != 3])  # lead 3 == current hour
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_reason"] == "incomplete_site_coverage"
+    assert all(c["forward_hours"] == 0.0 for c in body["site_coverage"])
+
+
+def test_gap_at_one_height_breaks_contiguity(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    add_run(run, range(0, 80), heights=(10, 80, 120))
+    add_run(run, [lead for lead in range(0, 80) if lead != 13], heights=(180,))  # now+10 missing
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_reason"] == "partial_coverage"
+    c = _cov(body)["ruisi"]
+    assert c["forward_hours"] <= 10.0 and c["missing_hours"] == 1
+
+
+def test_contiguous_full_coverage_reports_no_missing_hours(migrated_db, client):
+    now_h = hour(utcnow())
+    run = now_h - timedelta(hours=3)
+    add_run(run, range(0, 80))
+    body = client.get("/api/v1/weather").json()
+    assert body["forecast_state"] == "fresh"
+    assert all(c["missing_hours"] == 0 for c in body["site_coverage"])

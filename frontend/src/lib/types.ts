@@ -128,7 +128,13 @@ export interface WeatherOverview {
   forecast_state: Freshness;
   forecast_reason?: string | null;
   forecast_forward_hours?: number;
-  site_coverage?: { site_id: string; horizon_end: string | null; forward_hours: number }[];
+  site_coverage?: {
+    site_id: string;
+    horizon_end: string | null;
+    forward_hours: number;
+    last_valid_at?: string | null;
+    missing_hours?: number;
+  }[];
   forecast_run_at: string | null;
   forecast_retrieved_at: string | null;
   forecast_horizon_end: string | null;

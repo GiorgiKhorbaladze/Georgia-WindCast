@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
 
@@ -107,48 +108,103 @@ def _series(
     )
 
 
-def site_horizons(session: Session, run_at: datetime) -> dict[str, datetime | None]:
-    """Per site: the last valid time covered at every forecast height in the given run."""
+FORECAST_STEP = timedelta(hours=1)  # ICON global via Open-Meteo is hourly
+
+
+@dataclass(frozen=True)
+class SiteForwardCoverage:
+    contiguous_end: datetime | None  # last hour of the unbroken run of usable hours from now
+    last_valid_at: datetime | None  # last hour with data at every height (may follow gaps)
+    missing_hours: int  # hours without data at every height between now and last_valid_at
+
+
+def site_coverage_info(
+    session: Session, run_at: datetime, now: datetime
+) -> dict[str, SiteForwardCoverage]:
+    """Usable forward coverage per site in one run.
+
+    An hour counts only when every forecast height has a non-null speed for it. Coverage is the
+    *contiguous* run of such hours starting at the current hour; a single missing hour ends it.
+    Hours after the first gap are reported separately (last_valid_at, missing_hours), never as
+    coverage.
+    """
+    start = _hour_floor(now)
     rows = session.execute(
-        select(WeatherValue.site_id, WeatherValue.height_m, func.max(WeatherValue.valid_at))
+        select(WeatherValue.site_id, WeatherValue.valid_at, func.count())
         .where(
             WeatherValue.product == FORECAST.product,
             WeatherValue.run_at == run_at,
             WeatherValue.speed_ms.is_not(None),
+            WeatherValue.height_m.in_(FORECAST.heights),
+            WeatherValue.valid_at >= start,
+            WeatherValue.valid_at <= start + FORECAST_HORIZON,
         )
-        .group_by(WeatherValue.site_id, WeatherValue.height_m)
+        .group_by(WeatherValue.site_id, WeatherValue.valid_at)
     ).all()
-    per_site: dict[str, dict[int, datetime]] = {}
-    for site_id, height, end in rows:
-        per_site.setdefault(site_id, {})[height] = end
-    out: dict[str, datetime | None] = {}
+    complete: dict[str, set[datetime]] = {}
+    for site_id, valid_at, n_heights in rows:
+        if n_heights == len(FORECAST.heights):
+            complete.setdefault(site_id, set()).add(valid_at)
+    out: dict[str, SiteForwardCoverage] = {}
     for site in SITES:
-        heights = per_site.get(site.id, {})
-        out[site.id] = (
-            min(heights[h] for h in FORECAST.heights)
-            if all(h in heights for h in FORECAST.heights)
-            else None
-        )
+        hours = complete.get(site.id, set())
+        contiguous_end = None
+        t = start
+        while t in hours:
+            contiguous_end = t
+            t += FORECAST_STEP
+        last = max(hours, default=None)
+        missing = 0
+        if last is not None:
+            expected = int((last - start) / FORECAST_STEP) + 1
+            missing = expected - len(hours)
+        out[site.id] = SiteForwardCoverage(contiguous_end, last, missing)
     return out
 
 
+def last_valid_any(session: Session, run_at: datetime) -> datetime | None:
+    return session.execute(
+        select(func.max(WeatherValue.valid_at)).where(
+            WeatherValue.product == FORECAST.product,
+            WeatherValue.run_at == run_at,
+            WeatherValue.speed_ms.is_not(None),
+        )
+    ).scalar()
+
+
+def _forward(end: datetime | None, now: datetime) -> timedelta:
+    if end is None:
+        return timedelta(0)
+    # The hour labelled `end` is covered, so coverage extends to the end of that step.
+    return max(timedelta(0), min(end + FORECAST_STEP, now + FORECAST_HORIZON) - now)
+
+
 def forecast_coverage_state(
-    now: datetime, run_at: datetime | None, horizon_end: datetime | None, settings: Settings
-) -> tuple[Freshness, str | None, timedelta]:
-    """Freshness requires usable forward coverage, not just a recent run."""
+    now: datetime,
+    run_at: datetime | None,
+    coverage: dict[str, SiteForwardCoverage],
+    last_valid: datetime | None,
+    settings: Settings,
+) -> tuple[Freshness, str | None, timedelta, datetime | None]:
+    """Freshness requires a recent run AND contiguous forward coverage at every site.
+
+    Returns (state, reason, aggregate forward coverage, aggregate contiguous horizon end).
+    """
     if run_at is None:
-        return Freshness.UNAVAILABLE, "no_forecast", timedelta(0)
-    if horizon_end is None:
-        # A run exists but no tracked site is covered at every forecast height.
-        return Freshness.UNAVAILABLE, "incomplete_site_coverage", timedelta(0)
-    forward = min(horizon_end, now + FORECAST_HORIZON) - now
-    if forward <= timedelta(0):
-        return Freshness.UNAVAILABLE, "forecast_expired", timedelta(0)
+        return Freshness.UNAVAILABLE, "no_forecast", timedelta(0), None
+    if last_valid is None or last_valid < _hour_floor(now):
+        return Freshness.UNAVAILABLE, "forecast_expired", timedelta(0), None
+    ends = [c.contiguous_end for c in coverage.values()]
+    if any(end is None for end in ends):
+        state = Freshness.STALE if any(e is not None for e in ends) else Freshness.UNAVAILABLE
+        return state, "incomplete_site_coverage", timedelta(0), None
+    horizon = min(e for e in ends if e is not None)
+    forward = _forward(horizon, now)
     if forward < timedelta(hours=settings.weather_min_forward_hours):
-        return Freshness.STALE, "partial_coverage", forward
+        return Freshness.STALE, "partial_coverage", forward, horizon
     if now - run_at > timedelta(seconds=settings.weather_fresh_within_seconds):
-        return Freshness.STALE, "run_outdated", forward
-    return Freshness.FRESH, None, forward
+        return Freshness.STALE, "run_outdated", forward, horizon
+    return Freshness.FRESH, None, forward, horizon
 
 
 @router.get("", response_model=WeatherOverview)
@@ -157,17 +213,16 @@ def weather_overview(session: SessionDep, settings: SettingsDep) -> WeatherOverv
     run_at = latest_run(session)
     now_rows: list[WeatherNow] = []
     retrieved_at = horizon_end = None
-    site_ends: dict[str, datetime | None] = {site.id: None for site in SITES}
+    coverage: dict[str, SiteForwardCoverage] = {}
+    last_valid: datetime | None = None
     if run_at is not None:
         retrieved_at = session.execute(
             select(func.max(WeatherValue.retrieved_at)).where(
                 WeatherValue.product == FORECAST.product, WeatherValue.run_at == run_at
             )
         ).scalar()
-        site_ends = site_horizons(session, run_at)
-        covered = [end for end in site_ends.values() if end is not None]
-        # The aggregate horizon is the most conservative one: what EVERY site has.
-        horizon_end = min(covered) if len(covered) == len(SITES) else max(covered, default=None)
+        coverage = site_coverage_info(session, run_at, now)
+        last_valid = last_valid_any(session, run_at)
         hour = _hour_floor(now)
         current = {
             (r.site_id, r.height_m): r
@@ -195,24 +250,21 @@ def weather_overview(session: SessionDep, settings: SettingsDep) -> WeatherOverv
                     run_at=run_at if r else None,
                 )
             )
-    state, reason, forward = forecast_coverage_state(now, run_at, horizon_end, settings)
-    incomplete = run_at is not None and any(end is None or end <= now for end in site_ends.values())
-    if incomplete and state is not Freshness.UNAVAILABLE:
-        # At least one tracked site has no forward coverage: never report the aggregate as fresh.
-        state, reason, forward = Freshness.STALE, "incomplete_site_coverage", timedelta(0)
-    if state is Freshness.UNAVAILABLE:
-        horizon_end = None
+    state, reason, forward, horizon_end = forecast_coverage_state(
+        now, run_at, coverage, last_valid, settings
+    )
     site_coverage = [
         SiteCoverage(
-            site_id=site_id,
-            horizon_end=end if end is not None and end > now else None,
+            site_id=site.id,
+            horizon_end=(c.contiguous_end + FORECAST_STEP) if c and c.contiguous_end else None,
             forward_hours=round(
-                max(timedelta(0), min(end, now + FORECAST_HORIZON) - now).total_seconds() / 3600, 1
-            )
-            if end is not None
-            else 0.0,
+                _forward(c.contiguous_end if c else None, now).total_seconds() / 3600, 1
+            ),
+            last_valid_at=c.last_valid_at if c else None,
+            missing_hours=c.missing_hours if c else 0,
         )
-        for site_id, end in site_ends.items()
+        for site in SITES
+        for c in [coverage.get(site.id)]
     ]
     return WeatherOverview(
         generated_at=now,
@@ -226,7 +278,9 @@ def weather_overview(session: SessionDep, settings: SettingsDep) -> WeatherOverv
         site_coverage=site_coverage,
         forecast_run_at=run_at,
         forecast_retrieved_at=retrieved_at,
-        forecast_horizon_end=min(horizon_end, now + FORECAST_HORIZON) if horizon_end else None,
+        forecast_horizon_end=(
+            min(horizon_end + FORECAST_STEP, now + FORECAST_HORIZON) if horizon_end else None
+        ),
         sites=list(SITES),
         now=now_rows,
         attribution=ATTRIBUTION,

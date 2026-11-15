@@ -204,9 +204,21 @@ class WeatherNow(BaseModel):
 class SiteCoverage(BaseModel):
     site_id: str
     horizon_end: datetime | None = Field(
-        description="Last valid time covered at EVERY forecast height for this site (latest run)."
+        description=(
+            "End of CONTIGUOUS usable coverage from now: every hour up to here has data at every "
+            "forecast height (latest run)."
+        )
     )
-    forward_hours: float = Field(description="Hours ahead of now covered; never negative.")
+    forward_hours: float = Field(
+        description="Contiguous usable hours ahead of now; never negative; capped at 72."
+    )
+    last_valid_at: datetime | None = Field(
+        default=None,
+        description="Last hour with data at every height, possibly after gaps. Not coverage.",
+    )
+    missing_hours: int = Field(
+        default=0, description="Hours without complete data between now and last_valid_at."
+    )
 
 
 class WeatherOverview(BaseModel):
@@ -228,7 +240,9 @@ class WeatherOverview(BaseModel):
     )
     forecast_forward_hours: float = Field(
         default=0.0,
-        description="Hours ahead covered at every height for EVERY site (minimum over sites).",
+        description=(
+            "Contiguous usable hours ahead at every height for EVERY site (minimum over sites)."
+        ),
     )
     site_coverage: list[SiteCoverage] = Field(
         default_factory=list, description="Forward coverage per tracked site (latest run)."
