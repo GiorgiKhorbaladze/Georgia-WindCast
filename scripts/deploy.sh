@@ -5,7 +5,7 @@
 #   scripts/deploy.sh --rollback        redeploy the revision that was live before the current one
 #
 # Steps: fetch -> check out the exact commit (detached) -> build images natively, tagged with the
-# short SHA -> back up the database (if it is running) -> start with `docker compose up --wait`
+# short SHA (DEPLOY_SKIP_BUILD=1: use images already tagged so) -> back up the database (if it is running) -> start with `docker compose up --wait`
 # (migrations run first via the one-shot "migrate" service) -> verify health through the public
 # edge -> record the revision in deploy/history.log.
 #
@@ -34,7 +34,7 @@ env_set() {  # env_set KEY VALUE  (in place; keeps the file mode)
 
 [[ -f .env ]] || die ".env missing: cp .env.example .env and fill it in (docs/DEPLOY-ORACLE.md)"
 [[ $(stat -c %a .env) =~ ^6[04]0$ ]] || echo "WARNING: chmod 600 .env (it holds the database password)" >&2
-grep -q 'change-me' .env && die ".env still contains change-me placeholders"
+grep -qE '^[A-Z_]+=change-me' .env && die ".env still contains change-me placeholders"
 files="$(compose_files)"
 [[ $files == *compose.prod.yaml* ]] || die "COMPOSE_FILE in .env must include compose.prod.yaml"
 public=0
@@ -60,9 +60,18 @@ git checkout --quiet --detach "$sha"
 tag="${sha:0:12}"
 echo "revision: $sha (image tag $tag)"
 
-step "Building images natively for $(uname -m)"
 env_set WINDCAST_IMAGE_TAG "$tag"
-"${DC[@]}" build
+if [[ ${DEPLOY_SKIP_BUILD:-0} == 1 ]]; then
+  # Images built elsewhere (or for a rehearsal) must already carry the tag of this exact commit.
+  step "Using prebuilt images tagged $tag"
+  for img in windcast-backend windcast-frontend windcast-caddy; do
+    [[ $img == windcast-caddy && $public == 0 ]] && continue
+    docker image inspect "$img:$tag" >/dev/null || die "image $img:$tag not found"
+  done
+else
+  step "Building images natively for $(uname -m)"
+  "${DC[@]}" build
+fi
 
 step "Pre-deploy backup"
 if "${DC[@]}" ps --status running --services 2>/dev/null | grep -qx db; then
