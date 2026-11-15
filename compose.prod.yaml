@@ -1,0 +1,40 @@
+# Production overlay for a private pilot host.
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d --wait
+# - The API is not published on the host; the frontend reaches it on the internal network.
+# - Log rotation and memory limits; images pinned by WINDCAST_IMAGE_TAG (use a git SHA) so a
+#   rollback is "set the previous tag and up -d". Put a TLS reverse proxy (e.g. Caddy/nginx) in
+#   front of the frontend port; do not expose PostgreSQL.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+  migrate:
+    logging: *logging
+  api:
+    ports: !reset []
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+  worker:
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+  frontend:
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m

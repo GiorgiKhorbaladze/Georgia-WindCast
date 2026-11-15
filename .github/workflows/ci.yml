@@ -80,6 +80,79 @@ jobs:
           uv run alembic upgrade head
           uv run alembic check
 
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [frontend, backend]
+    services:
+      postgres:
+        image: postgres:17.7-alpine3.22
+        env:
+          POSTGRES_USER: windcast
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: windcast_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U windcast -d windcast_e2e"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      WINDCAST_APP_ENV: test
+      WINDCAST_DATABASE_URL: postgresql+psycopg://windcast:ci-only-password@localhost:5432/windcast_e2e
+      # Seeded readings are re-timestamped once; a wider window keeps them "fresh" for the run.
+      WINDCAST_GSE_FRESH_WITHIN_SECONDS: "3600"
+      BASE_URL: http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.32"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.21.1
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build and start the production frontend (API started next)
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          WINDCAST_API_URL=http://127.0.0.1:8000 nohup npx next start -p 3000 > ../web.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:3000/healthz && break; sleep 1; done
+      - name: Start API on a seeded test database (test-only seed, real recorded values)
+        working-directory: backend
+        run: |
+          uv sync --frozen
+          uv run alembic upgrade head
+          uv run python -m tests.e2e_seed
+          nohup uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 > ../api.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/health/ready && break; sleep 1; done
+      - name: Install Chromium for Playwright
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests (desktop + mobile, a11y), seeded data
+        working-directory: frontend
+        run: npx playwright test --trace off
+      - name: Browser tests, stale / zero / empty scenarios
+        run: |
+          (cd backend && uv run python -m tests.e2e_seed --stale)
+          (cd frontend && E2E_SCENARIO=stale npx playwright test e2e/scenarios.spec.ts --trace off)
+          (cd backend && uv run python -m tests.e2e_seed --zero)
+          (cd frontend && E2E_SCENARIO=zero npx playwright test e2e/scenarios.spec.ts --trace off)
+          (cd backend && uv run python -m tests.e2e_seed --clear)
+          (cd frontend && E2E_EMPTY=1 npx playwright test e2e/empty.spec.ts --trace off)
+      - name: Upload Playwright report and server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: |
+            frontend/playwright-report
+            api.log
+            web.log
+
   compose-smoke:
     name: Compose smoke
     runs-on: ubuntu-latest

@@ -97,4 +97,18 @@ step "Migration round trip (downgrade to base, upgrade to head) against the Comp
 "${DC[@]}" up -d --wait --wait-timeout 180
 wait_for "$API/api/health/ready" 60 '"status":"ready"'
 
+step "Backup and restore: a row added after the backup must disappear after restore"
+backup_dir="$(mktemp -d)"
+at_backup=$(psql_scalar "SELECT installed_at FROM instance_metadata WHERE id = 1")
+dump="$(scripts/backup.sh "$backup_dir")"
+echo "backup: $dump ($(wc -c <"$dump") bytes)"
+psql_scalar "INSERT INTO source_status (source, consecutive_failures) VALUES ('smoke-marker', 0)" >/dev/null
+[[ $(psql_scalar "SELECT count(*) FROM source_status WHERE source = 'smoke-marker'") == 1 ]]
+scripts/restore.sh "$dump"
+[[ $(psql_scalar "SELECT count(*) FROM source_status WHERE source = 'smoke-marker'") == 0 ]]
+[[ $(psql_scalar "SELECT installed_at FROM instance_metadata WHERE id = 1") == "$at_backup" ]]
+wait_for "$API/api/health/ready" 60 '"status":"ready"' >/dev/null
+rm -rf "$backup_dir"
+echo "restore verified"
+
 step "SMOKE PASSED"
