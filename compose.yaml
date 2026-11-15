@@ -82,6 +82,11 @@ services:
     restart: unless-stopped
     environment:
       WINDCAST_API_URL: http://api:8000
+      # Public identity (issue #18). Empty = private pilot: no canonical URLs, noindex.
+      WINDCAST_PUBLIC_URL: ${WINDCAST_PUBLIC_URL:-}
+      WINDCAST_PUBLIC_INDEXING: ${WINDCAST_PUBLIC_INDEXING:-false}
+      # Seconds a successful backend response is shared between visitors (0 = off, max 60).
+      WINDCAST_API_CACHE_SECONDS: ${WINDCAST_API_CACHE_SECONDS:-5}
     depends_on:
       api:
         condition: service_healthy

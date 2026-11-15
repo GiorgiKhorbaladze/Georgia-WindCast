@@ -15,7 +15,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 export COMPOSE_PROJECT_NAME="${SMOKE_PROJECT_NAME:-windcast-smoke}"
-export COMPOSE_FILE="compose.yaml:compose.prod.yaml"
+export COMPOSE_FILE="compose.yaml:compose.prod.yaml${SMOKE_EXTRA_COMPOSE:+:$SMOKE_EXTRA_COMPOSE}"
 export POSTGRES_USER=windcast POSTGRES_DB=windcast
 POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
 export POSTGRES_PASSWORD
