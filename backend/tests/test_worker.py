@@ -69,3 +69,39 @@ def test_healthcheck_fails_closed_without_database(monkeypatch):
     for f in (get_settings, get_engine, get_sessionmaker):
         f.cache_clear()
     assert healthcheck.main() == 1
+
+
+@pytest.mark.db
+def test_worker_runs_enabled_weather_and_gse_jobs(migrated_db, monkeypatch):
+    """Regression: the weather job must actually be scheduled by the worker loop."""
+    calls: list[str] = []
+    stop = threading.Event()
+
+    def fake_weather(job):
+        calls.append("weather")
+        stop.set()
+
+    monkeypatch.setenv("WINDCAST_WEATHER_INGESTION_ENABLED", "true")
+    monkeypatch.setenv("WINDCAST_GSE_INGESTION_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setattr(worker, "run_gse_tick", lambda job: calls.append("gse"))
+    monkeypatch.setattr(worker, "run_weather_tick", fake_weather)
+    worker.run(stop)
+    assert calls == ["gse", "weather"]
+
+
+@pytest.mark.db
+def test_run_weather_tick_survives_job_errors(migrated_db):
+    class Boom:
+        def tick_forecast(self, session):
+            raise RuntimeError("forecast boom")
+
+        def tick_reanalysis(self, session):
+            raise RuntimeError("reanalysis boom")
+
+        def prune(self, session):
+            raise RuntimeError("prune boom")
+
+    worker.run_weather_tick(Boom())  # must not raise

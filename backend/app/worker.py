@@ -7,6 +7,7 @@ Each job runs in its own transaction; an exception in one job never stops the lo
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import socket
 import threading
@@ -19,6 +20,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app.config import get_settings
 from app.db import get_sessionmaker
 from app.ingestion.gse_job import GseIngestionJob, build_client
+from app.ingestion.weather_job import WeatherIngestionJob, build_weather_client
 from app.models import WorkerHeartbeat
 from app.timeutil import utcnow
 from app.version import __version__
@@ -58,35 +60,72 @@ def run(stop: threading.Event | None = None) -> None:
 
     started_at = utcnow()
     log.info(
-        "worker %s starting (env=%s, gse_ingestion=%s)",
+        "worker %s starting (env=%s, gse_ingestion=%s, weather_ingestion=%s)",
         worker_name,
         settings.app_env.value,
         settings.gse_ingestion_enabled,
+        settings.weather_ingestion_enabled,
     )
     gse_job: GseIngestionJob | None = None
     if settings.gse_ingestion_enabled:
         gse_job = GseIngestionJob(settings, build_client(settings))
+    weather_job: WeatherIngestionJob | None = None
+    if settings.weather_ingestion_enabled:
+        weather_job = WeatherIngestionJob(settings, build_weather_client(settings))
 
-    next_heartbeat = next_gse = time.monotonic()
+    t0 = time.monotonic()
+    due = {"heartbeat": t0, "gse": t0, "weather": t0}
     while not stop.is_set():
         now = time.monotonic()
-        if now >= next_heartbeat:
+        if now >= due["heartbeat"]:
             try:
                 record_heartbeat(worker_name, started_at)
             except Exception:  # keep the worker alive across transient DB outages
                 log.exception("heartbeat failed")
-            next_heartbeat = now + settings.worker_heartbeat_seconds
-        if gse_job is not None and now >= next_gse:
+            due["heartbeat"] = now + settings.worker_heartbeat_seconds
+        if gse_job is not None and now >= due["gse"]:
             run_gse_tick(gse_job)
-            next_gse = now + settings.gse_poll_seconds
-        stop.wait(
-            max(
-                0.0, min(next_heartbeat, next_gse if gse_job else next_heartbeat) - time.monotonic()
-            )
-        )
-    if gse_job is not None:
-        gse_job.client.close()
+            due["gse"] = now + settings.gse_poll_seconds
+        if weather_job is not None and now >= due["weather"]:
+            run_weather_tick(weather_job)
+            due["weather"] = now + settings.weather_poll_seconds
+        upcoming = [due["heartbeat"]]
+        if gse_job is not None:
+            upcoming.append(due["gse"])
+        if weather_job is not None:
+            upcoming.append(due["weather"])
+        stop.wait(max(0.0, min(upcoming) - time.monotonic()))
+    for job in (gse_job, weather_job):
+        if job is not None:
+            job.client.close()
     log.info("worker stopped")
+
+
+def run_weather_tick(job: WeatherIngestionJob) -> None:
+    """Forecast, reanalysis and retention, each in its own transaction."""
+    for name, step in (("forecast", job.tick_forecast), ("reanalysis", job.tick_reanalysis)):
+        try:
+            with get_sessionmaker()() as session, session.begin():
+                report = step(session)
+            if report.requested or report.failure:
+                log.info(
+                    "weather %s: requested=%d stored=%d skipped=%s failure=%s run=%s",
+                    name,
+                    report.requested,
+                    report.stored,
+                    report.skipped,
+                    report.failure,
+                    report.run_at,
+                )
+        except Exception:
+            log.exception("weather %s tick failed", name)
+    try:
+        with get_sessionmaker()() as session, session.begin():
+            pruned = job.prune(session)
+        if pruned:
+            log.info("weather retention: pruned %d long-lead forecast values", pruned)
+    except Exception:
+        log.exception("weather retention failed")
 
 
 def run_gse_tick(job: GseIngestionJob) -> None:
@@ -107,5 +146,8 @@ def run_gse_tick(job: GseIngestionJob) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    logging.basicConfig(
+        level=os.environ.get("WINDCAST_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     run()

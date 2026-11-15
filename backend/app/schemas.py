@@ -122,6 +122,85 @@ class SiteSummary(BaseModel):
     coordinates_verified: bool
     latitude: float | None = None
     longitude: float | None = None
+    municipality_en: str | None = None
+    municipality_ka: str | None = None
+    status_en: str | None = None
+    status_ka: str | None = None
+    coordinate_source: str | None = None
+    coordinate_uncertainty_km: float | None = None
+    coordinate_note: str | None = None
+
+
+class WeatherProduct(StrEnum):
+    # Model forecast; past valid times come from earlier runs of the same model.
+    FORECAST = "forecast"
+    # Retrospective reanalysis (ERA5). A historical model product, not a measurement.
+    REANALYSIS = "reanalysis"
+
+
+class WeatherPoint(BaseModel):
+    t: datetime = Field(description="Valid time, UTC.")
+    speed_ms: float | None
+    direction_deg: float | None = Field(
+        description="Meteorological convention: direction the wind blows FROM, degrees."
+    )
+
+
+class WeatherSeries(BaseModel):
+    product: WeatherProduct
+    provider: str
+    model: str
+    model_label: str
+    height_m: int
+    run_at: datetime | None = Field(description="Model run (initialisation) time, if published.")
+    retrieved_at: datetime | None
+    grid_latitude: float | None
+    grid_longitude: float | None
+    grid_elevation_m: float | None
+    supported: bool = Field(description="False when this product does not offer this height.")
+    points: list[WeatherPoint]
+
+
+class SiteWeather(BaseModel):
+    site: SiteSummary
+    height_m: int
+    unit: Literal["m/s"] = "m/s"
+    measured: Literal[False] = False
+    history: WeatherSeries = Field(
+        description="Past valid times: latest available forecast-run value for each hour."
+    )
+    forecast: WeatherSeries = Field(description="Latest model run, future valid times.")
+    reanalysis: WeatherSeries
+    attribution: list[SourceAttribution]
+
+
+class WeatherNow(BaseModel):
+    site_id: str
+    height_m: int
+    valid_at: datetime | None
+    speed_ms: float | None
+    direction_deg: float | None
+    model: str | None
+    run_at: datetime | None
+    measured: Literal[False] = False
+
+
+class WeatherOverview(BaseModel):
+    generated_at: datetime
+    unit: Literal["m/s"] = "m/s"
+    heights: dict[str, list[int]] = Field(description="Supported heights per product.")
+    unsupported_heights: list[int]
+    forecast_model: str
+    forecast_model_label: str
+    forecast_state: Freshness = Field(
+        description="fresh/stale by model run age; unavailable without any stored run."
+    )
+    forecast_run_at: datetime | None
+    forecast_retrieved_at: datetime | None
+    forecast_horizon_end: datetime | None
+    sites: list[SiteSummary]
+    now: list[WeatherNow]
+    attribution: list[SourceAttribution]
 
 
 class SystemStatus(BaseModel):

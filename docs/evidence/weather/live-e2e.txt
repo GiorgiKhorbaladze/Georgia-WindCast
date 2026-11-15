@@ -1,0 +1,32 @@
+# Live end-to-end run, 2026-11-15T00:22:46Z: host-run worker + API (dev DB) with WINDCAST_GSE_INGESTION_ENABLED=true
+# and WINDCAST_WEATHER_INGESTION_ENABLED=true, real Open-Meteo and GSE sources (sandbox egress proxy).
+
+== worker log (weather)
+windcast.worker worker worker@vm starting (env=development, gse_ingestion=True, weather_ingestion=True)
+windcast.worker weather forecast: requested=3 stored=1152 skipped=None failure=None run=2026-11-14 18:00:00+00:00
+windcast.worker weather reanalysis: requested=1 stored=576 skipped=None failure=None run=None
+
+== GET /api/v1/weather (summary)
+{'forecast_state': 'fresh', 'forecast_model': 'icon_global', 'forecast_run_at': '2026-11-14T18:00:00Z', 'forecast_retrieved_at': '2026-11-15T00:14:36.530948Z', 'forecast_horizon_end': '2026-11-18T00:22:46.780616Z', 'heights': {'forecast': [10, 80, 120, 180], 'reanalysis': [10, 100]}, 'unsupported_heights': [200]}
+ now ruisi 10 m 1.92 m/s from 261.0 valid 2026-11-15T00:00:00Z
+ now ruisi 80 m 3.71 m/s from 275.0 valid 2026-11-15T00:00:00Z
+ now ruisi 120 m 4.36 m/s from 279.0 valid 2026-11-15T00:00:00Z
+ now ruisi 180 m 5.29 m/s from 285.0 valid 2026-11-15T00:00:00Z
+ now zemo-wind 10 m 2.55 m/s from 228.0 valid 2026-11-15T00:00:00Z
+ now zemo-wind 80 m 3.83 m/s from 255.0 valid 2026-11-15T00:00:00Z
+ now zemo-wind 120 m 4.22 m/s from 265.0 valid 2026-11-15T00:00:00Z
+ now zemo-wind 180 m 4.7 m/s from 270.0 valid 2026-11-15T00:00:00Z
+ now kartli-gori 10 m 1.92 m/s from 261.0 valid 2026-11-15T00:00:00Z
+ now kartli-gori 80 m 3.71 m/s from 275.0 valid 2026-11-15T00:00:00Z
+ now kartli-gori 120 m 4.36 m/s from 279.0 valid 2026-11-15T00:00:00Z
+ now kartli-gori 180 m 5.29 m/s from 285.0 valid 2026-11-15T00:00:00Z
+
+== GET /api/v1/weather/sites/zemo-wind?height=100 (series sizes)
+history supported= False points= 0 model= icon_global grid= (None, None) first= None
+forecast supported= False points= 0 model= icon_global grid= (None, None) first= None
+reanalysis supported= True points= 96 model= era5 grid= (42.0, 44.25) first= {'t': '2026-11-05T00:00:00Z', 'speed_ms': 4.34, 'direction_deg': 294.0}
+
+== GET /api/v1/status (sources)
+  gse ok 2026-11-15T00:21:34.449571Z
+  open-meteo-forecast ok 2026-11-15T00:14:36.082390Z
+  open-meteo-reanalysis ok 2026-11-15T00:14:36.871444Z

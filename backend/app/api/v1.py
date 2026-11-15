@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.ingestion.gse_job import METRIC_WIND, PERIOD, SOURCE_ID
+from app.ingestion.weather_job import SOURCE_FORECAST, SOURCE_REANALYSIS
 from app.models import GenerationReading, SourceStatusRecord, WorkerHeartbeat
 from app.schemas import (
     Freshness,
@@ -186,7 +187,20 @@ def _gse_source_status(session: Session, settings: Settings) -> SourceStatus:
             state=SourceState.NOT_CONFIGURED,
             detail="Ingestion disabled pending owner confirmation of reuse terms.",
         )
-    row = _gse_status_row(session)
+    return _status_from_row("gse", _gse_status_row(session))
+
+
+def _weather_source_status(session: Session, settings: Settings, source: str) -> SourceStatus:
+    if not settings.weather_ingestion_enabled:
+        return SourceStatus(
+            id=source,
+            state=SourceState.NOT_CONFIGURED,
+            detail="Weather ingestion disabled (WINDCAST_WEATHER_INGESTION_ENABLED=false).",
+        )
+    return _status_from_row(source, session.get(SourceStatusRecord, source))
+
+
+def _status_from_row(source: str, row: SourceStatusRecord | None) -> SourceStatus:
     state: SourceState
     detail: str | None
     if row is None or row.last_success_at is None:
@@ -198,7 +212,7 @@ def _gse_source_status(session: Session, settings: Settings) -> SourceStatus:
     else:
         state, detail = SourceState.OK, None
     return SourceStatus(
-        id="gse",
+        id=source,
         state=state,
         detail=detail,
         last_attempt_at=row.last_attempt_at if row else None,
@@ -216,11 +230,8 @@ def system_status(session: SessionDep, settings: SettingsDep) -> SystemStatus:
         worker=_worker_status(session, settings),
         sources=[
             _gse_source_status(session, settings),
-            SourceStatus(
-                id="open-meteo",
-                state=SourceState.NOT_CONFIGURED,
-                detail="Pending coordinate verification (issue #4).",
-            ),
+            _weather_source_status(session, settings, SOURCE_FORECAST),
+            _weather_source_status(session, settings, SOURCE_REANALYSIS),
         ],
         sites=list(SITES),
     )

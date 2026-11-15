@@ -105,3 +105,11 @@ def gse_enabled(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     _clear_caches()
     yield
     _clear_caches()
+
+
+@pytest.fixture
+def weather_enabled(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("WINDCAST_WEATHER_INGESTION_ENABLED", "true")
+    _clear_caches()
+    yield
+    _clear_caches()

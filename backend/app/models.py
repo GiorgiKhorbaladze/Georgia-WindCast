@@ -13,6 +13,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     Text,
@@ -94,3 +95,46 @@ class SourceStatusRecord(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     last_http_status: Mapped[int | None] = mapped_column(Integer)
     backoff_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WeatherValue(Base):
+    """Model wind at one site, height and valid time, from one product run.
+
+    ``run_ref`` identifies the run: the ISO initialisation time for forecasts, or the product
+    name for reanalysis (which is revised in place).
+    """
+
+    __tablename__ = "weather_value"
+    __table_args__ = (
+        UniqueConstraint(
+            "site_id",
+            "product",
+            "model",
+            "run_ref",
+            "valid_at",
+            "height_m",
+            name="uq_weather_value",
+        ),
+        Index("ix_weather_site_height_valid", "site_id", "height_m", "valid_at"),
+        CheckConstraint("speed_ms IS NULL OR speed_ms >= 0", name="ck_weather_speed_nonneg"),
+        CheckConstraint(
+            "direction_deg IS NULL OR (direction_deg >= 0 AND direction_deg <= 360)",
+            name="ck_weather_direction_range",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    site_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    product: Mapped[str] = mapped_column(String(16), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(32), nullable=False)
+    run_ref: Mapped[str] = mapped_column(String(40), nullable=False)
+    run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    height_m: Mapped[int] = mapped_column(Integer, nullable=False)
+    speed_ms: Mapped[float | None] = mapped_column(Float(precision=53))
+    direction_deg: Mapped[float | None] = mapped_column(Float(precision=53))
+    grid_latitude: Mapped[float | None] = mapped_column(Float(precision=53))
+    grid_longitude: Mapped[float | None] = mapped_column(Float(precision=53))
+    grid_elevation_m: Mapped[float | None] = mapped_column(Float(precision=53))
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
