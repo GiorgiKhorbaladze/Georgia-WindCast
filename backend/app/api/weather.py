@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db import get_session
+from app.db import session_scope
 from app.ingestion.openmeteo import (
     ALL_HEIGHTS,
     FORECAST,
@@ -39,7 +39,6 @@ from app.timeutil import utcnow
 
 router = APIRouter(prefix="/api/v1/weather", tags=["weather"])
 
-SessionDep = Annotated[Session, Depends(get_session)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 ATTRIBUTION = [
@@ -208,163 +207,164 @@ def forecast_coverage_state(
 
 
 @router.get("", response_model=WeatherOverview)
-def weather_overview(session: SessionDep, settings: SettingsDep) -> WeatherOverview:
-    now = utcnow()
-    run_at = latest_run(session)
-    now_rows: list[WeatherNow] = []
-    retrieved_at = horizon_end = None
-    coverage: dict[str, SiteForwardCoverage] = {}
-    last_valid: datetime | None = None
-    if run_at is not None:
-        retrieved_at = session.execute(
-            select(func.max(WeatherValue.retrieved_at)).where(
-                WeatherValue.product == FORECAST.product, WeatherValue.run_at == run_at
-            )
-        ).scalar()
-        coverage = site_coverage_info(session, run_at, now)
-        last_valid = last_valid_any(session, run_at)
-        hour = _hour_floor(now)
-        current = {
-            (r.site_id, r.height_m): r
-            for r in session.execute(
-                select(WeatherValue).where(
-                    WeatherValue.product == FORECAST.product,
-                    WeatherValue.run_at == run_at,
-                    WeatherValue.valid_at == hour,
+def weather_overview(settings: SettingsDep) -> WeatherOverview:
+    with session_scope() as session:
+        now = utcnow()
+        run_at = latest_run(session)
+        now_rows: list[WeatherNow] = []
+        retrieved_at = horizon_end = None
+        coverage: dict[str, SiteForwardCoverage] = {}
+        last_valid: datetime | None = None
+        if run_at is not None:
+            retrieved_at = session.execute(
+                select(func.max(WeatherValue.retrieved_at)).where(
+                    WeatherValue.product == FORECAST.product, WeatherValue.run_at == run_at
                 )
-            ).scalars()
-        }
-    else:
-        current = {}
-    for site in SITES:
-        for h in FORECAST.heights:
-            r = current.get((site.id, h))
-            now_rows.append(
-                WeatherNow(
-                    site_id=site.id,
-                    height_m=h,
-                    valid_at=r.valid_at if r else None,
-                    speed_ms=r.speed_ms if r else None,
-                    direction_deg=r.direction_deg if r else None,
-                    model=FORECAST.model if r else None,
-                    run_at=run_at if r else None,
+            ).scalar()
+            coverage = site_coverage_info(session, run_at, now)
+            last_valid = last_valid_any(session, run_at)
+            hour = _hour_floor(now)
+            current = {
+                (r.site_id, r.height_m): r
+                for r in session.execute(
+                    select(WeatherValue).where(
+                        WeatherValue.product == FORECAST.product,
+                        WeatherValue.run_at == run_at,
+                        WeatherValue.valid_at == hour,
+                    )
+                ).scalars()
+            }
+        else:
+            current = {}
+        for site in SITES:
+            for h in FORECAST.heights:
+                r = current.get((site.id, h))
+                now_rows.append(
+                    WeatherNow(
+                        site_id=site.id,
+                        height_m=h,
+                        valid_at=r.valid_at if r else None,
+                        speed_ms=r.speed_ms if r else None,
+                        direction_deg=r.direction_deg if r else None,
+                        model=FORECAST.model if r else None,
+                        run_at=run_at if r else None,
+                    )
                 )
-            )
-    state, reason, forward, horizon_end = forecast_coverage_state(
-        now, run_at, coverage, last_valid, settings
-    )
-    site_coverage = [
-        SiteCoverage(
-            site_id=site.id,
-            horizon_end=(c.contiguous_end + FORECAST_STEP) if c and c.contiguous_end else None,
-            forward_hours=round(
-                _forward(c.contiguous_end if c else None, now).total_seconds() / 3600, 1
-            ),
-            last_valid_at=c.last_valid_at if c else None,
-            missing_hours=c.missing_hours if c else 0,
+        state, reason, forward, horizon_end = forecast_coverage_state(
+            now, run_at, coverage, last_valid, settings
         )
-        for site in SITES
-        for c in [coverage.get(site.id)]
-    ]
-    return WeatherOverview(
-        generated_at=now,
-        heights={name: list(spec.heights) for name, spec in PRODUCTS.items()},
-        unsupported_heights=list(UNSUPPORTED_HEIGHTS),
-        forecast_model=FORECAST.model,
-        forecast_model_label=FORECAST.label,
-        forecast_state=state,
-        forecast_reason=reason,
-        forecast_forward_hours=round(forward.total_seconds() / 3600, 1),
-        site_coverage=site_coverage,
-        forecast_run_at=run_at,
-        forecast_retrieved_at=retrieved_at,
-        forecast_horizon_end=(
-            min(horizon_end + FORECAST_STEP, now + FORECAST_HORIZON) if horizon_end else None
-        ),
-        sites=list(SITES),
-        now=now_rows,
-        attribution=ATTRIBUTION,
-    )
+        site_coverage = [
+            SiteCoverage(
+                site_id=site.id,
+                horizon_end=(c.contiguous_end + FORECAST_STEP) if c and c.contiguous_end else None,
+                forward_hours=round(
+                    _forward(c.contiguous_end if c else None, now).total_seconds() / 3600, 1
+                ),
+                last_valid_at=c.last_valid_at if c else None,
+                missing_hours=c.missing_hours if c else 0,
+            )
+            for site in SITES
+            for c in [coverage.get(site.id)]
+        ]
+        return WeatherOverview(
+            generated_at=now,
+            heights={name: list(spec.heights) for name, spec in PRODUCTS.items()},
+            unsupported_heights=list(UNSUPPORTED_HEIGHTS),
+            forecast_model=FORECAST.model,
+            forecast_model_label=FORECAST.label,
+            forecast_state=state,
+            forecast_reason=reason,
+            forecast_forward_hours=round(forward.total_seconds() / 3600, 1),
+            site_coverage=site_coverage,
+            forecast_run_at=run_at,
+            forecast_retrieved_at=retrieved_at,
+            forecast_horizon_end=(
+                min(horizon_end + FORECAST_STEP, now + FORECAST_HORIZON) if horizon_end else None
+            ),
+            sites=list(SITES),
+            now=now_rows,
+            attribution=ATTRIBUTION,
+        )
 
 
 @router.get("/sites/{site_id}", response_model=SiteWeather)
 def site_weather(
-    session: SessionDep,
     site_id: Annotated[str, Path()],
     height: Annotated[int, Query(description="Height above ground, m")] = 100,
     start: Annotated[datetime | None, Query(description="UTC ISO 8601; default now - 48 h")] = None,
     end: Annotated[datetime | None, Query(description="UTC ISO 8601; default now")] = None,
 ) -> SiteWeather:
-    site = SITES_BY_ID.get(site_id)
-    if site is None:
-        raise HTTPException(404, "unknown site")
-    if height not in ALL_HEIGHTS:
-        raise HTTPException(422, f"height must be one of {list(ALL_HEIGHTS)}")
-    now = utcnow()
-    end = end or now
-    start = start or end - timedelta(hours=48)
-    if start.tzinfo is None or end.tzinfo is None:
-        raise HTTPException(422, "start and end must include a timezone offset")
-    if start >= end:
-        raise HTTPException(422, "start must be before end")
-    if end - start > MAX_RANGE:
-        raise HTTPException(422, f"range exceeds {MAX_RANGE.days} days")
-    past_end = min(end, now)
+    with session_scope() as session:
+        site = SITES_BY_ID.get(site_id)
+        if site is None:
+            raise HTTPException(404, "unknown site")
+        if height not in ALL_HEIGHTS:
+            raise HTTPException(422, f"height must be one of {list(ALL_HEIGHTS)}")
+        now = utcnow()
+        end = end or now
+        start = start or end - timedelta(hours=48)
+        if start.tzinfo is None or end.tzinfo is None:
+            raise HTTPException(422, "start and end must include a timezone offset")
+        if start >= end:
+            raise HTTPException(422, "start must be before end")
+        if end - start > MAX_RANGE:
+            raise HTTPException(422, f"range exceeds {MAX_RANGE.days} days")
+        past_end = min(end, now)
 
-    # History: for each past hour, the value from the most recent run issued at or before it
-    # (i.e. the shortest-lead forecast available). Gaps stay gaps.
-    history_rows = list(
-        session.execute(
-            select(WeatherValue)
-            .where(
-                WeatherValue.site_id == site_id,
-                WeatherValue.product == FORECAST.product,
-                WeatherValue.model == FORECAST.model,
-                WeatherValue.height_m == height,
-                WeatherValue.valid_at >= start,
-                WeatherValue.valid_at < past_end,
-                WeatherValue.run_at <= WeatherValue.valid_at,
-            )
-            .order_by(WeatherValue.valid_at, WeatherValue.run_at.desc())
-            .ext(distinct_on(WeatherValue.valid_at))
-        ).scalars()
-    )
-    run_at = latest_run(session)
-    forecast_rows: list[WeatherValue] = []
-    if run_at is not None:
-        forecast_rows = list(
+        # History: for each past hour, the value from the most recent run issued at or before it
+        # (i.e. the shortest-lead forecast available). Gaps stay gaps.
+        history_rows = list(
             session.execute(
                 select(WeatherValue)
                 .where(
                     WeatherValue.site_id == site_id,
                     WeatherValue.product == FORECAST.product,
-                    WeatherValue.run_at == run_at,
+                    WeatherValue.model == FORECAST.model,
                     WeatherValue.height_m == height,
-                    WeatherValue.valid_at >= _hour_floor(now),
-                    WeatherValue.valid_at <= now + FORECAST_HORIZON,
+                    WeatherValue.valid_at >= start,
+                    WeatherValue.valid_at < past_end,
+                    WeatherValue.run_at <= WeatherValue.valid_at,
+                )
+                .order_by(WeatherValue.valid_at, WeatherValue.run_at.desc())
+                .ext(distinct_on(WeatherValue.valid_at))
+            ).scalars()
+        )
+        run_at = latest_run(session)
+        forecast_rows: list[WeatherValue] = []
+        if run_at is not None:
+            forecast_rows = list(
+                session.execute(
+                    select(WeatherValue)
+                    .where(
+                        WeatherValue.site_id == site_id,
+                        WeatherValue.product == FORECAST.product,
+                        WeatherValue.run_at == run_at,
+                        WeatherValue.height_m == height,
+                        WeatherValue.valid_at >= _hour_floor(now),
+                        WeatherValue.valid_at <= now + FORECAST_HORIZON,
+                    )
+                    .order_by(WeatherValue.valid_at)
+                ).scalars()
+            )
+        reanalysis_rows = list(
+            session.execute(
+                select(WeatherValue)
+                .where(
+                    WeatherValue.site_id == site_id,
+                    WeatherValue.product == REANALYSIS.product,
+                    WeatherValue.run_ref == REANALYSIS_RUN_REF,
+                    WeatherValue.height_m == height,
+                    WeatherValue.valid_at >= start,
+                    WeatherValue.valid_at <= past_end,
                 )
                 .order_by(WeatherValue.valid_at)
             ).scalars()
         )
-    reanalysis_rows = list(
-        session.execute(
-            select(WeatherValue)
-            .where(
-                WeatherValue.site_id == site_id,
-                WeatherValue.product == REANALYSIS.product,
-                WeatherValue.run_ref == REANALYSIS_RUN_REF,
-                WeatherValue.height_m == height,
-                WeatherValue.valid_at >= start,
-                WeatherValue.valid_at <= past_end,
-            )
-            .order_by(WeatherValue.valid_at)
-        ).scalars()
-    )
-    return SiteWeather(
-        site=site,
-        height_m=height,
-        history=_series(FORECAST, height, history_rows, None),
-        forecast=_series(FORECAST, height, forecast_rows, run_at),
-        reanalysis=_series(REANALYSIS, height, reanalysis_rows, None),
-        attribution=ATTRIBUTION,
-    )
+        return SiteWeather(
+            site=site,
+            height_m=height,
+            history=_series(FORECAST, height, history_rows, None),
+            forecast=_series(FORECAST, height, forecast_rows, run_at),
+            reanalysis=_series(REANALYSIS, height, reanalysis_rows, None),
+            attribution=ATTRIBUTION,
+        )
