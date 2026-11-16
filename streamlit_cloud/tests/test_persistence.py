@@ -255,3 +255,106 @@ def test_reader_serves_stored_weather_and_cache_prefers_newer_run(tmp_path):
     assert cache.forecast["run"] == RUN and cache.archive is archive
     cache.adopt_stored(dict(forecast, run=RUN - timedelta(hours=12)), None)
     assert cache.forecast["run"] == RUN  # never replaced by an older run
+
+
+def test_all_404_outage_and_recovery(tmp_path):
+    missing = Gse(override=lambda name: httpx.Response(404))
+    report, code = collector(tmp_path, missing).run(NOW)
+    assert code == 2 and report.not_published == 20
+    status = json.loads((tmp_path / 'status/gse_collector.json').read_text())
+    assert 'last_success_at' not in status
+    collector(tmp_path, Gse()).run(NOW)
+    assert collector(tmp_path, missing).run(NOW + timedelta(minutes=15))[1] == 0
+    assert collector(tmp_path, missing).run(NOW + timedelta(hours=7))[1] == 2
+    status = json.loads((tmp_path / 'status/gse_collector.json').read_text())
+    assert status['last_success_at'] == NOW.isoformat()
+    assert collector(tmp_path, Gse()).run(NOW + timedelta(hours=7))[1] == 0
+
+
+def test_collector_rediscovers_revisions_and_bounds_requests(tmp_path):
+    from dataclasses import replace
+    collector(tmp_path, Gse()).run(NOW)
+    path = tmp_path / day_path(NOW.date())
+    rows = parse_day_csv(path.read_text())
+    label = rows[-1].period_label_utc
+    rows[-1] = replace(rows[-1], quality='NRE', value_mw=0, payload_sha256='old')
+    path.write_text(render_day_csv(rows))
+    later = NOW + timedelta(hours=1)
+    report, code = collector(tmp_path, Gse(), hours=3, max_requests=40).run(later)
+    assert code == 0 and report.revised == 1 and report.requested <= 40
+    revised = next(r for r in parse_day_csv(path.read_text()) if r.period_label_utc == label)
+    assert revised.quality == 'ACT' and revised.value_mw > 0 and revised.revision == 1
+    collector(tmp_path, Gse(), hours=4, max_requests=80).run(later + timedelta(hours=1))
+    assert next(r for r in parse_day_csv(path.read_text()) if r.period_label_utc == label).revision == 1
+
+
+@pytest.mark.real_history
+@pytest.mark.parametrize('product', ['forecast', 'era5'])
+@pytest.mark.parametrize('fault', ['hash', 'naive', 'future', 'missing'])
+def test_stored_weather_refuses_bad_copy_retains_and_recovers(tmp_path, product, fault):
+    from collector import collect_weather
+    now = RUN + timedelta(hours=1)
+    collect_weather(tmp_path, Weather().client, now)
+    reader = reader_for(tmp_path)
+    first = reader.weather(now)
+    meta_path = tmp_path / f'weather/{product}_meta.json'
+    original = meta_path.read_text()
+    meta = json.loads(original)
+    if fault == 'hash':
+        # Legacy mutable URL rollover: metadata hash must reject a different valid JSON body.
+        meta.pop('content_addressed')
+        payload = tmp_path / f'weather/{product}.json'
+        payload.write_bytes(payload.read_bytes() + b' ')
+    elif fault == 'naive':
+        meta['retrieved'] = now.replace(tzinfo=None).isoformat()
+    elif fault == 'future':
+        meta['retrieved'] = (now + timedelta(days=1)).isoformat()
+    if fault == 'missing':
+        meta_path.unlink()
+    else:
+        meta_path.write_text(json.dumps(meta))
+    index = 0 if product == 'forecast' else 1
+    assert reader.weather(now + timedelta(minutes=11))[index] is first[index]
+    # A fresh reader must never adopt this unvalidated copy.
+    assert reader_for(tmp_path).weather(now + timedelta(minutes=11))[index] is None
+    meta_path.write_text(original)
+    assert reader.weather(now + timedelta(minutes=22))[index]['sha256'] == first[index]['sha256']
+
+
+@pytest.mark.real_history
+@pytest.mark.parametrize('run', ['2026-11-14T18:00:00', '2026-11-15T18:00:00+00:00'])
+def test_stored_forecast_refuses_invalid_run(tmp_path, run):
+    from collector import collect_weather
+    now = RUN + timedelta(hours=1)
+    collect_weather(tmp_path, Weather().client, now)
+    path = tmp_path / 'weather/forecast_meta.json'
+    meta = json.loads(path.read_text())
+    meta['run'] = run
+    path.write_text(json.dumps(meta))
+    forecast, archive = reader_for(tmp_path).weather(now)
+    assert forecast is None and archive is not None
+
+
+@pytest.mark.real_history
+def test_content_addressed_reader_survives_manifest_rollover(tmp_path):
+    from collector import collect_weather
+    now = RUN + timedelta(hours=1)
+    collect_weather(tmp_path, Weather().client, now)
+    meta_path = tmp_path / 'weather/forecast_meta.json'
+    old = json.loads(meta_path.read_text())
+    def handler(request):
+        path = tmp_path / request.url.path.split('/data/', 1)[1]
+        if path == meta_path:
+            response = path.read_bytes()
+            # Publisher advances immediately after the manifest response.
+            import hashlib
+            body = FORECAST_BODY + b' '
+            digest = hashlib.sha256(body).hexdigest()
+            (tmp_path / f'weather/payloads/{digest}.json').write_bytes(body)
+            (tmp_path / 'weather/forecast.json').write_bytes(body)
+            meta_path.write_text(json.dumps({**old, 'sha256': digest}))
+            return httpx.Response(200, content=response)
+        return httpx.Response(200, content=path.read_bytes()) if path.exists() else httpx.Response(404)
+    reader = HistoryReader(lambda: httpx.Client(transport=httpx.MockTransport(handler)), 'https://example.test/data/')
+    forecast, _ = reader.weather(now)
+    assert forecast['sha256'] == old['sha256']

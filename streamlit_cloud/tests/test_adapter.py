@@ -238,7 +238,8 @@ def test_durable_history_feeds_overview_and_map_is_rendered(offline_history):
 def test_old_collector_status_warns(offline_history):
     from streamlit.testing.v1 import AppTest
     status = {'last_success_at': (NOW - timedelta(hours=8)).isoformat()}
-    with patch('history.HistoryReader.status', return_value=status):
+    with patch('history.HistoryReader.status', return_value=status), \
+         patch('data.SourceCache.snapshot', return_value=SourceCache(transport()).snapshot(NOW)):
         at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
         at.sidebar.radio[1].set_value('ისტორია').run()
         assert not at.exception

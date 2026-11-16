@@ -3,8 +3,8 @@ name: Collect GSE wind data
 # Durable history for the Streamlit edition (streamlit_cloud/README.md, "Persistence").
 # Runs only trusted code from the default branch (schedule/dispatch; never on pull requests) and
 # writes daily CSV files to the separate `data` branch. GitHub may delay or skip scheduled runs;
-# each run backfills the last 12 hours, and GSE keeps files for at least 48 hours, so delays do
-# not create gaps. Pushes made with GITHUB_TOKEN do not trigger other workflows.
+# each run attempts bounded recovery within the last 12 hours. Longer outages, abandoned 404s
+# and unavailable upstream files can leave gaps. Pushes made with GITHUB_TOKEN do not trigger other workflows.
 on:
   schedule:
     - cron: "7,22,37,52 * * * *"
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write  # push to the data branch only
+      contents: write  # repository-scoped permission; the script targets the data branch
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -64,7 +64,7 @@ jobs:
           LOOKBACK: ${{ github.event.inputs.lookback_hours || '12' }}
         run: |
           case "$LOOKBACK" in ''|*[!0-9]*) echo "lookback must be an integer"; exit 1;; esac
-          [ "$LOOKBACK" -le 48 ] || { echo "lookback above 48 h"; exit 1; }
+          [ "$LOOKBACK" -ge 1 ] && [ "$LOOKBACK" -le 48 ] || { echo "lookback above 48 h"; exit 1; }
           set +e
           venv/bin/python code/streamlit_cloud/collector.py --data-dir data \
             --lookback-hours "$LOOKBACK" --max-requests 1000 --weather

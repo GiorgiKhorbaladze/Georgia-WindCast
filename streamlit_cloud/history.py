@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from collections.abc import Callable
@@ -77,25 +78,43 @@ class HistoryReader:
 
         with self._lock:
             if self._weather is None or now - self._weather[0] >= timedelta(minutes=10):
-                forecast = archive = None
-                try:
-                    with self._client_factory() as client:
-                        meta = self._get(client, "weather/forecast_meta.json")
-                        body = self._get(client, "weather/forecast.json")
-                        if meta and body:
+                old = self._weather
+                packets = [old[1], old[2]] if old else [None, None]
+                for index, product in enumerate(("forecast", "era5")):
+                    try:
+                        with self._client_factory() as client:
+                            meta = self._get(client, f"weather/{product}_meta.json")
+                            if not meta:
+                                continue
                             m = json.loads(meta)
-                            forecast = src.forecast_packet(
-                                body.encode(), datetime.fromisoformat(m["run"]),
-                                datetime.fromisoformat(m["retrieved"]), m["url"], "collector")
-                        meta = self._get(client, "weather/era5_meta.json")
-                        body = self._get(client, "weather/era5.json")
-                        if meta and body:
-                            m = json.loads(meta)
-                            archive = src.archive_packet(
-                                body.encode(), datetime.fromisoformat(m["retrieved"]), m["url"], "collector")
-                except (httpx.HTTPError, ValueError, KeyError):
-                    old = self._weather
-                    forecast, archive = (old[1], old[2]) if old else (None, None)
+                            digest = m["sha256"]
+                            if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                                raise ValueError("invalid payload hash")
+                            # New manifests name an immutable content-addressed payload.
+                            # Legacy manifests remain supported, but must also match byte-for-byte.
+                            path = f"weather/payloads/{digest}.json" if m.get("content_addressed") else f"weather/{product}.json"
+                            response = client.get(self._base + path)
+                            response.raise_for_status()
+                            body = response.content
+                            if hashlib.sha256(body).hexdigest() != digest:
+                                raise ValueError("weather payload hash mismatch")
+                            retrieved = datetime.fromisoformat(m["retrieved"])
+                            if retrieved.utcoffset() is None or retrieved > now:
+                                raise ValueError("invalid retrieval time")
+                            if product == "forecast":
+                                run = datetime.fromisoformat(m["run"])
+                                if run.utcoffset() is None or run > retrieved:
+                                    raise ValueError("invalid model run")
+                                packet = src.forecast_packet(body, run, retrieved, m["url"], "collector")
+                                key = "run"
+                            else:
+                                packet = src.archive_packet(body, retrieved, m["url"], "collector")
+                                key = "retrieved"
+                            if packets[index] is None or packet[key] >= packets[index][key]:
+                                packets[index] = packet
+                    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+                        pass  # keep this product's last validated copy independently
+                forecast, archive = packets
                 self._weather = (now, forecast, archive)
             return self._weather[1], self._weather[2]
 

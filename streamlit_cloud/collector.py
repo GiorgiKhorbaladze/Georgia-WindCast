@@ -2,13 +2,12 @@
 
 Each run backfills every 3-minute period of the last ``--lookback-hours`` that is not yet stored,
 newest first. GSE keeps published files for at least 48 h (checked 2026-11-16, docs/sources/gse.md),
-so irregular or delayed scheduled runs do not create gaps as long as one run succeeds within the
-lookback window. Periods GSE never published stay gaps: after ``--missing-attempts`` runs with 404
+but automatic recovery is bounded by the lookback and request budget; gaps remain possible. Periods GSE never published stay gaps: after ``--missing-attempts`` runs with 404
 they are no longer requested.
 
 Exit codes: 0 ok (including "nothing new" and transient source errors); 1 data-integrity refusal
-(schema drift, label mismatch, future label) so the workflow fails visibly; 2 source unreachable
-and no reading newer than ``--alert-after-hours``.
+(schema drift, label mismatch, future label) so the workflow fails visibly; 2 no reading newer
+than WINDCAST_ALERT_AFTER_HOURS (default 6), including all-404 responses.
 """
 
 from __future__ import annotations
@@ -55,6 +54,7 @@ def due_labels(now: datetime, hours: float) -> list[datetime]:
 @dataclass
 class RunReport:
     requested: int = 0
+    acquired: int = 0
     inserted: int = 0
     revised: int = 0
     not_published: int = 0
@@ -117,15 +117,26 @@ class Collector:
             if datetime.fromisoformat(k) >= oldest
         }
         stored = {
-            r.period_label_utc
+            r.period_label_utc: r
             for day in {lb.date() for lb in labels}
             for r in self._load(day)
         }
+        checked = {
+            k: v for k, v in status.get("revalidated_at", {}).items()
+            if datetime.fromisoformat(k) >= oldest
+        }
+        # Reserve at most 20 requests (and 1/4 of the run budget) for revisions.
+        # Recheck each stored period at most hourly; non-ACT and recent rows first.
+        revisions = sorted(
+            (lb for lb in labels if lb in stored and
+             now - datetime.fromisoformat(checked.get(lb.isoformat(), stored[lb].retrieved_at_utc.isoformat())) >= timedelta(hours=1)),
+            key=lambda lb: (stored[lb].quality == "ACT", -lb.timestamp()),
+        )[:min(20, self.max_requests // 4)]
         wanted = [
             lb for lb in labels
             if lb not in stored
             and (lb == labels[0] or misses.get(lb.isoformat(), 0) < self.missing_attempts)
-        ][: self.max_requests]
+        ][: self.max_requests - len(revisions)] + revisions
 
         if wanted:
             with self.client_factory() as client, ThreadPoolExecutor(self.concurrency) as pool:
@@ -133,17 +144,19 @@ class Collector:
             for label, result in results:
                 report.requested += 1
                 self._apply(label, result, now, report, misses)
+                checked[label.isoformat()] = now.isoformat()
 
         latest = max(
             (r.period_label_utc for d in self._days.values() for r in d), default=None
         )
         if latest is None and status.get("latest_label_utc"):
             latest = datetime.fromisoformat(status["latest_label_utc"])
-        ok = report.integrity_error is None and (report.failures == 0 or report.inserted > 0)
+        ok = report.integrity_error is None and report.acquired > 0
         status.update(
             last_run_at=now.isoformat(),
             last_run=dict(
                 requested=report.requested,
+                acquired=report.acquired,
                 inserted=report.inserted,
                 revised=report.revised,
                 not_published=report.not_published,
@@ -153,6 +166,7 @@ class Collector:
             ),
             lookback_hours=self.lookback_hours,
             parser_version=PARSER_VERSION,
+            revalidated_at=checked,
             missing_attempts=dict(sorted(misses.items())),
         )
         if latest is not None:
@@ -165,7 +179,7 @@ class Collector:
             return report, 1
         stale = latest is None or now - latest > timedelta(hours=float(
             os.environ.get("WINDCAST_ALERT_AFTER_HOURS", "6")))
-        if report.failures and report.inserted == 0 and stale:
+        if stale:
             return report, 2
         return report, 0
 
@@ -193,6 +207,7 @@ class Collector:
             report.integrity_error = f"{exc.code}: {label.isoformat()}"
             print(f"refused {self.url(label)}: {exc}", file=sys.stderr)
             return
+        report.acquired += 1
         record = Record(
             period_label_utc=reading.period_label_utc,
             period_label_local=reading.period_label_local,
@@ -263,6 +278,10 @@ def collect_weather(data_dir: Path, client_factory: Callable[[], httpx.Client], 
                     body = get(url)
                     packet = src.archive_packet(body, now, url, "collector")
                     new_meta = dict(retrieved=now.isoformat(), url=url, sha256=packet["sha256"])
+                payloads = wdir / "payloads"
+                payloads.mkdir(exist_ok=True)
+                (payloads / f"{new_meta['sha256']}.json").write_bytes(body)
+                new_meta["content_addressed"] = True
                 (wdir / f"{product}.json").write_bytes(body)
                 (wdir / f"{product}_meta.json").write_text(json.dumps(new_meta, indent=2) + "\n", "utf-8")
                 status[product] = "updated"

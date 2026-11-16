@@ -105,9 +105,13 @@ def main():
 def collector_note(tr, reader, now):
     status = reader.status(now)
     age = collector_age(status, now)
+    latest = datetime.fromisoformat(status["latest_label_utc"]) if status and status.get("latest_label_utc") else None
+    if status and (latest is None or now - latest > timedelta(hours=6)):
+        st.warning(tr('შემგროვებელს ბოლო 6 საათის მონაცემები არ აქვს.',
+                      'The collector has no data from the last 6 hours.'))
     if age is None:
-        st.caption(tr('მუდმივი შემგროვებელი ჯერ არ გაშვებულა; ისტორია მხოლოდ ცოცხალი შემოწმებიდანაა.',
-                      'The durable collector has not run yet; history comes from live checks only.'))
+        st.caption(tr('მუდმივი შემგროვებლის მიერ მონაცემების წარმატებით მიღება ჯერ არ დასტურდება.',
+                      'Successful data acquisition by the durable collector is not yet confirmed.'))
     else:
         text = tr(f'მუდმივი შემგროვებლის ბოლო წარმატებული გაშვება: {local(now - age)}',
                   f'Durable collector last succeeded: {local(now - age)}')

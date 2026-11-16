@@ -24,11 +24,13 @@ Community Cloud has no persistent storage, and apps sleep after 12 h without vis
 | Free managed Postgres (e.g. Neon, Supabase) | Good | Needs its own collector anyway | Quotas, project pausing on inactivity, terms change; credentials in Streamlit/GitHub secrets | new owner account + secrets | Viable later; not needed now |
 | Actions artifacts / caches | Expire (≤ 90 days / evicted) | - | - | none | Rejected |
 
-**Why gaps do not appear when GitHub delays runs:** GSE keeps published 3-minute files for at least 48 h (checked 2026-11-16: files 1, 3, 6, 12, 24 and 48 h old all answered 200). Every collector run backfills all missing periods of the last 12 h, newest first. One successful run per 12 h therefore gives a complete record. A period GSE never published stays a gap: after 4 runs with 404 it is no longer requested.
+**Recovery limits:** each run requests missing periods within the last 12 h, subject to the request budget. A longer interruption can leave older gaps even if the source still retains those files; use an explicit backfill (up to 48 h). Retention was observed on 2026-11-16 and is not a provider guarantee. After four 404 responses a missing period is abandoned (except the newest due period), so late publication can also leave gaps. No gap-free continuity is guaranteed.
+
+**Source revisions:** each run reserves at most 20 requests and one quarter of its request budget to revalidate stored periods within the lookback, prioritising non-ACT and recent records. Each period is rechecked at most hourly. Corrected bytes update the record and revision counter; identical bytes do not. Corrections outside the window or beyond the bounded budget may remain undiscovered.
 
 **Freshness between runs:** the app still checks the newest GSE periods live (at most 4 requests per 3 minutes for all visitors, last hour only) and merges them with the durable rows. Each row keeps its source label, quality code and SHA-256.
 
-**Open-Meteo second path:** Open-Meteo limits free use per IP address (10,000 requests/day). Cloud hosts share egress IPs, and during testing this project's environment received `429 Daily API request limit exceeded` from the archive API. The collector therefore also stores the validated raw forecast once per new model run (run time checked before and after the download) and ERA5 once per day under `weather/`. The app uses the stored copy when its own request fails or when the stored run is newer, and labels it "collector copy". The same strict parser and time-axis checks apply to both paths.
+**Open-Meteo second path:** Open-Meteo limits free use per IP address (10,000 requests/day). Cloud hosts share egress IPs, and during testing this project's environment received `429 Daily API request limit exceeded` from the archive API. The collector therefore also stores the validated raw forecast once per new model run (run time checked before and after the download) and ERA5 once per day under `weather/`. The app uses the stored copy when its own request fails or when the stored run is newer, and labels it "collector copy". The same strict parser and time-axis checks apply to both paths. New manifests reference immutable SHA-256-addressed payloads; readers verify the raw-byte digest and aware, non-future timestamps before adoption. Legacy mutable copies also require a matching digest. Invalid or missing copies retain the last validated product independently.
 
 ### Data branch format
 
@@ -40,15 +42,15 @@ period_label_utc,period_label_local,value_mw,quality,retrieved_at_utc,payload_sh
 
 `weather/forecast.json`, `weather/era5.json` (raw Open-Meteo payloads) with `*_meta.json` (run, retrieval time, URL, SHA-256) and `weather/status.json`.
 
-`status/gse_collector.json` holds the last run, last success, latest label and pending 404 retries. The app shows the collector's last success and warns when it is older than 6 h.
+`status/gse_collector.json` holds the last run, last successful acquisition, latest label, revalidation times and pending 404 retries. The app shows the last successful acquisition and warns if no source reading is newer than 6 h, including all-404 outages.
 
 ### Failure behaviour
 
 | Event | Behaviour |
 | --- | --- |
 | GSE outage | Run records the failure; history keeps the last rows; the workflow fails (email to the owner) only when no reading is newer than 6 h |
-| Schema drift, label mismatch, future label | Nothing is written; the workflow fails visibly |
-| GitHub skips scheduled runs | Next run backfills 12 h; beyond 48 h GSE retention is irregular, so a longer stop can leave gaps |
+| Schema drift, label mismatch, future label | Invalid records are refused; valid records from the same run may be saved; the workflow fails visibly |
+| GitHub skips scheduled runs | Next run backfills only 12 h by default; longer stops can leave gaps; manual recovery up to 48 h is bounded and not guaranteed |
 | Scheduled workflow disabled (60 days inactivity) | The app warns that the collector is stale; re-enable in Actions |
 | Open-Meteo `429` (shared cloud IPs) | Last good forecast is kept with its run and retrieval time, and the status degrades to stale or unavailable; retries back off |
 
@@ -62,7 +64,7 @@ The collector starts automatically once `.github/workflows/collect-gse.yml` is o
 
 ## Limits that remain
 
-- GitHub cron is best effort: runs can be delayed by tens of minutes or skipped. The live check covers the newest hour, and the 12 h backfill covers missed runs.
+- GitHub cron is best effort: runs can be delayed by tens of minutes or skipped. The live check covers the newest hour, and the bounded 12 h backfill can recover some missed runs.
 - History starts when collection starts (plus up to 48 h of backfill). There is no older archive.
 - Link previews (LinkedIn, Open Graph) use Streamlit's generic page metadata; Community Cloud does not allow custom meta tags.
 - Edge protection (TLS, rate limiting) is provided by Streamlit's hosting, not by the Caddy configuration of the main stack.
