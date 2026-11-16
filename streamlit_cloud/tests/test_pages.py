@@ -80,7 +80,7 @@ def test_analytics_page_stats_and_download(lang):
 def test_forecast_page_insufficient_history_is_explicit(lang):
     at = run("forecast", lang, durable_two_days())
     infos = " ".join(i.value for i in at.info)
-    assert ("168" in infos) and ("სთ" in infos if lang == "ka" else "h" in infos)
+    assert ("168" in infos) and ("საათი" in infos if lang == "ka" else "h" in infos)
     assert ("არაოფიციალური" if lang == "ka" else "Unofficial") in page_text(at)
 
 
@@ -113,7 +113,7 @@ def test_accuracy_page_scores_archive(lang):
     for p in runs:
         p["series"] = p["series"] * 3  # three sites
     at = run("accuracy", lang, archive=runs)
-    assert ("წინსწრება" if lang == "ka" else "Lead time") in page_text(at)
+    assert ("წინსწრების დრო" if lang == "ka" else "Lead time") in page_text(at)
     assert at.get("plotly_chart")
 
 
@@ -142,7 +142,7 @@ def test_data_page_stale_collector():
 
 def test_kpi_labels_say_wind_generation_not_consumption():
     text = page_text(run("overview", "ka", durable_two_days()))
-    assert "ქარის გენერაციის მაქსიმუმი დღეს" in text and "3-წუთიანი საშუალო" in text and "ხარისხი: ACT" in text
+    assert "ქარის გენერაციის მაქსიმუმი დღეს" in text and "3-წუთიანი საშუალო" in text and "ხარისხის კოდი: ACT" in text
     assert "ქარის გამომუშავება დღეს" in text and "ქარის გამომუშავება გუშინ" in text
     assert "დღის პიკი" not in text  # ambiguous (reads as demand peak)
 
@@ -166,7 +166,9 @@ def test_balance_page_renders_mix_profiles_and_derived_import(lang):
     text = page_text(at)
     assert "2 050" in text and "2 000" in text  # consumption and generation now
     assert ("იმპორტი (გამოთვლილი)" if lang == "ka" else "import (derived)") in text  # 50 MW derived net import
-    assert len(at.get("plotly_chart")) >= 3 and at.get("download_button")
+    assert len(at.get("plotly_chart")) >= 4 and at.get("download_button")
+    assert ("ქარის წილი მოხმარებაში" if lang == "ka" else "Wind share of consumption") in text
+    assert "9.8%" in text  # 200 / 2050 MW
 
 
 def test_overview_has_separate_balance_chart():
@@ -195,3 +197,15 @@ def test_cached_reader_is_recreated_after_a_code_reload():
     with patch("history.HistoryReader", Reloaded):
         at2 = run("accuracy", "en")
     assert not at2.exception
+
+
+def test_balance_page_shows_import_and_export_separately():
+    from store import BalanceRecord
+    rows = [BalanceRecord(NOW - timedelta(minutes=3 * k), "x", 1500.0, 300.0, 200.0, 0.0, 2000.0, 2010.0, "q", NOW, f"g{k}",
+                          "gse-balance-03m/2", import_mw=34.71, export_mw=24.71) for k in range(1, 60)]
+    with patch("history.HistoryReader.balance", side_effect=lambda s, e, n: [r for r in rows if s <= r.period_label_utc <= e]):
+        at = run("balance", "ka")
+    text = page_text(at)
+    assert "იმპორტი ახლა" in text and "34.71" in text
+    assert "ექსპორტი ახლა" in text and "24.71" in text
+    assert "წმინდა იმპორტი (გამოთვლილი)" not in text  # gross flows, not the derived net

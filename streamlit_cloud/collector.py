@@ -131,7 +131,8 @@ class Collector:
 
     def _has_both(self, label: datetime) -> bool:
         return (any(r.period_label_utc == label for r in self._load(label.date()))
-                and any(r.period_label_utc == label for r in self._load_balance(label.date())))
+                and any(r.period_label_utc == label and r.import_mw is not None
+                        for r in self._load_balance(label.date())))
 
     def _status(self) -> dict:
         path = self.data_dir / STATUS_PATH
@@ -172,10 +173,10 @@ class Collector:
             for day in {lb.date() for lb in labels}
             for r in self._load(day)
         }
-        bstored = {
+        bstored = {  # rows without gross import/export (older parser) count as missing
             r.period_label_utc
             for day in {lb.date() for lb in labels}
-            for r in self._load_balance(day)
+            for r in self._load_balance(day) if r.import_mw is not None
         }
         checked = {
             k: v for k, v in status.get("revalidated_at", {}).items()
@@ -352,7 +353,8 @@ class Collector:
             print(f"balance refused {self.url(label)}: {exc}", file=sys.stderr)
             return
         rec = BalanceRecord(label, b.period_label_local, b.hydro, b.thermal, b.wind, b.solar, b.generation,
-                            b.consumption, b.quality, now, digest, BALANCE_PARSER_VERSION)
+                            b.consumption, b.quality, now, digest, BALANCE_PARSER_VERSION,
+                            import_mw=b.imports, export_mw=b.exports)
         merged, changed = merge_balance(self._load_balance(label.date()), rec)
         if changed:
             self._bdays[label.date()] = merged
