@@ -34,7 +34,7 @@ st.set_page_config(page_title='Georgia WindCast', page_icon='🌬️', layout='w
 TZ = ZoneInfo('Asia/Tbilisi')
 BASEMAP = 'https://tiles.openfreemap.org/styles/dark'  # same basemap as the main product
 COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
-PAGES = ('overview', 'analytics', 'forecast', 'accuracy', 'data')
+PAGES = ('overview', 'balance', 'analytics', 'forecast', 'accuracy', 'data')
 STATE_KEY = {'fresh': 'st_fresh', 'stale': 'st_stale', 'unavailable': 'st_unavailable', 'unverified': 'st_unverified'}
 
 
@@ -95,7 +95,7 @@ def main():
         for name, error in data['errors'].items():
             if name == 'gse' or not shown.get(name):  # a stored copy with its timestamp is shown instead
                 st.warning(tr('source_warning', lang, name=name, code=error))
-        {'overview': overview, 'analytics': analytics, 'forecast': forecast,
+        {'overview': overview, 'balance': balance_page, 'analytics': analytics, 'forecast': forecast,
          'accuracy': accuracy, 'data': data_page}[page](lang, data, reader, now)
         st.caption(f"{tr('last_check', lang)}: {local(now)} · {tr('auto_refresh', lang)}")
 
@@ -155,6 +155,14 @@ def overview(lang, data, reader, now):
 
     st.subheader(tr('last24', lang))
     generation_chart(lang, rows, pd.Timestamp(now) - pd.Timedelta(hours=24), pd.Timestamp(now), height=280)
+
+    st.subheader(tr('bal_last24', lang))
+    brows = reader.balance(now - timedelta(hours=24), now, now)
+    if brows:
+        balance_chart(lang, brows, height=320)
+        ui.note(tr('bal_intro', lang), ui.tag('GSE', 'off'))
+    else:
+        st.info(tr('bal_none', lang))
 
     st.subheader(tr('sites', lang))
     site_map(lang, data, now)
@@ -222,6 +230,93 @@ def site_map(lang, data, now):
         ui.cards([ui.card(f"{r['num']}. {r['name']}", r['wind'].split(',')[0] if r['wind'] != '-' else '-', '',
                           f"80 m · {r['wind'].split(', ', 1)[1] if ', ' in r['wind'] else ''} · {r['status']}") for r in records])
     ui.note(tr('site_note', lang, model=FORECAST.label), ui.tag(tr('model_wind', lang), 'mdl'))
+
+
+# ----------------------------------------------------------------------------------------- balance
+
+SRC_COLORS = {'hydro': '#38bdf8', 'thermal': '#f97316', 'wind': ui.C['accent'], 'solar': '#facc15'}
+
+
+def balance_frame(rows):
+    df = pd.DataFrame([dict(time=r.period_label_utc, hydro=r.hydro_mw, thermal=r.thermal_mw, wind=r.wind_mw, solar=r.solar_mw,
+                            generation=r.generation_mw, consumption=r.consumption_mw) for r in rows])
+    df['time'] = pd.to_datetime(df['time'], utc=True)
+    df = df.set_index('time').sort_index()
+    df['net'] = df['consumption'] - df['generation']
+    return df
+
+
+def balance_chart(lang, rows, height=360):
+    df = balance_frame(rows)
+    df = df.reindex(pd.date_range(df.index.min(), df.index.max(), freq='3min'))  # gaps stay empty
+    x = [wall(t) for t in df.index]
+    fig = go.Figure()
+    for src in ('hydro', 'thermal', 'wind', 'solar'):
+        fig.add_scatter(x=x, y=df[src], name=tr(f'src_{src}', lang), mode='lines', stackgroup='gen',
+                        line=dict(width=0.6, color=SRC_COLORS[src]), hovertemplate='%{y:.0f} MW')
+    fig.add_scatter(x=x, y=df['net'].clip(lower=0), name=tr('src_import', lang), mode='lines', stackgroup='gen',
+                    line=dict(width=0.6, color=ui.C['model']), hovertemplate='%{y:.0f} MW')
+    if (df['net'] < 0).any():
+        fig.add_scatter(x=x, y=df['net'].clip(upper=0), name=tr('src_export', lang), mode='lines', stackgroup='exp',
+                        line=dict(width=0.6, color='#f472b6'), hovertemplate='%{y:.0f} MW')
+    fig.add_scatter(x=x, y=df['consumption'], name=tr('consumption', lang), mode='lines',
+                    line=dict(color='#ffffff', width=2.2), hovertemplate='%{y:.0f} MW')
+    ui.chart(ui.style(fig, height, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
+
+
+def balance_page(lang, data, reader, now):
+    ui.hero(tr('page_balance', lang), tr('bal_title', lang))
+    nowt = pd.Timestamp(now)
+    span = st.radio(tr('range', lang), ['24h', '48h', '7d', '30d'], horizontal=True)
+    start = nowt - {'24h': pd.Timedelta(hours=24), '48h': pd.Timedelta(hours=48), '7d': pd.Timedelta(days=7), '30d': pd.Timedelta(days=30)}[span]
+    rows = reader.balance(start.to_pydatetime(), now, now)
+    if not rows:
+        st.info(tr('bal_none', lang))
+        return
+    df = balance_frame(rows)
+    last = df.iloc[-1]
+    net = last['net']
+    ui.cards([
+        ui.card(tr('bal_now', lang), ui.fmt(last['consumption'], 0), 'MW', local(df.index[-1], '%d.%m %H:%M'), accent=True),
+        ui.card(tr('bal_gen_now', lang), ui.fmt(last['generation'], 0), 'MW',
+                ' · '.join(f"{tr(f'src_{k}', lang)} {last[k]:.0f}" for k in ('hydro', 'thermal', 'wind', 'solar'))),
+        ui.card(tr('bal_net_now', lang), ui.fmt(abs(net), 0), 'MW', tr('bal_net_sub_imp' if net >= 0 else 'bal_net_sub_exp', lang)),
+    ])
+    balance_chart(lang, rows)
+    ui.note(tr('bal_intro', lang), ui.tag('GSE', 'off'))
+
+    energy = df[['hydro', 'thermal', 'wind', 'solar', 'generation', 'consumption']].sum() * an.PERIOD_HOURS
+    st.subheader(tr('bal_mix', lang))
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        srcs = ['hydro', 'thermal', 'wind', 'solar']
+        fig = go.Figure(go.Pie(labels=[tr(f'src_{k}', lang) for k in srcs], values=[max(energy[k], 0) for k in srcs], hole=0.55,
+                               marker=dict(colors=[SRC_COLORS[k] for k in srcs]), sort=False, textinfo='percent'))
+        ui.chart(ui.style(fig, 300).update_layout(hovermode='closest'))
+        ui.note(tr('bal_mix_sub', lang))
+    with c2:
+        imp = max(float(df['net'].clip(lower=0).sum()) * an.PERIOD_HOURS, 0.0)
+        exp = max(float(-df['net'].clip(upper=0).sum()) * an.PERIOD_HOURS, 0.0)
+        expected = len(an.grid(max(start, df.index.min()), df.index.max()))
+        cov = f"{tr('s_complete', lang)}: {pct(len(df) / expected) if expected else '-'} · {len(df)}/{expected}"
+        ui.cards([
+            ui.card(tr('consumption', lang), ui.fmt(energy['consumption'], 0), 'MWh', cov),
+            ui.card(tr('generation', lang), ui.fmt(energy['generation'], 0), 'MWh', cov),
+            ui.card(tr('src_import', lang), ui.fmt(imp, 0), 'MWh', f"{tr('src_export', lang)}: {ui.fmt(exp, 0)} MWh"),
+        ])
+    st.subheader(tr('bal_profiles', lang))
+    hours = (df.index.tz_convert(TZ) - pd.Timedelta(minutes=3)).hour
+    prof = df.groupby(hours)[['hydro', 'thermal', 'wind', 'solar', 'consumption', 'net']].mean()
+    fig = go.Figure()
+    for src in ('hydro', 'thermal', 'wind', 'solar'):
+        fig.add_scatter(x=prof.index, y=prof[src], name=tr(f'src_{src}', lang), mode='lines+markers', line=dict(color=SRC_COLORS[src], width=2.4))
+    fig.add_scatter(x=prof.index, y=prof['net'], name=tr('src_import', lang), mode='lines', line=dict(color=ui.C['model'], width=1.6, dash='dot'))
+    fig.add_scatter(x=prof.index, y=prof['consumption'], name=tr('consumption', lang), mode='lines', line=dict(color='#ffffff', width=2.2))
+    ui.chart(ui.style(fig, 340, 'MW', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
+    ui.note(tr('bal_profiles_note', lang))
+    ui.note(tr('bal_quality', lang))
+    out = df.reset_index().rename(columns={'index': 'period_label_utc', 'time': 'period_label_utc'})
+    st.download_button(tr('download', lang), out.to_csv(index=False), 'windcast_gse_balance.csv', 'text/csv')
 
 
 # --------------------------------------------------------------------------------------- analytics

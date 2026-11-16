@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import httpx
 
-from store import Record, StoreFormatError, day_path, parse_day_csv
+from store import BalanceRecord, Record, StoreFormatError, balance_day_path, day_path, parse_balance_csv, parse_day_csv
 
 DATA_BASE = "https://raw.githubusercontent.com/GiorgiKhorbaladze/Georgia-WindCast/data/"
 RECENT_TTL = timedelta(minutes=2)  # today/yesterday change with every collector run
@@ -58,6 +58,25 @@ class HistoryReader:
                 r for d in days if d in self._days for r in self._days[d][1]
                 if start <= r.period_label_utc <= end
             ]
+        return sorted(out, key=lambda r: r.period_label_utc)
+
+    def balance(self, start: datetime, end: datetime, now: datetime) -> list[BalanceRecord]:
+        """System balance rows (data branch, balance/...), same caching rules as records()."""
+        days = [start.date() + timedelta(days=i) for i in range((end.date() - start.date()).days + 1)]
+        with self._lock:
+            cache = self.__dict__.setdefault("_bal", {})
+            due = [d for d in days if d not in cache or now - cache[d][0] >= (
+                RECENT_TTL if d >= now.date() - timedelta(days=1) else ARCHIVE_TTL)]
+            if due:
+                try:
+                    with self._client_factory() as client:
+                        for d in due:
+                            text = self._get(client, balance_day_path(d))
+                            cache[d] = (now, parse_balance_csv(text) if text else [])
+                    self.balance_error = None
+                except (httpx.HTTPError, StoreFormatError) as exc:
+                    self.balance_error = getattr(exc, "code", "history_unavailable")
+            out = [r for d in days if d in cache for r in cache[d][1] if start <= r.period_label_utc <= end]
         return sorted(out, key=lambda r: r.period_label_utc)
 
     def status(self, now: datetime) -> dict | None:

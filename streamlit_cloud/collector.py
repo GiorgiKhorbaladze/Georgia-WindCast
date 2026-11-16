@@ -36,7 +36,19 @@ from app.ingestion.gse_parser import (  # noqa: E402
     parse_wind_export,
 )
 from app.ingestion.http_policy import FetchKind, FetchResult, fetch  # noqa: E402
-from store import Record, day_path, merge, parse_day_csv, render_day_csv  # noqa: E402
+from balance import BALANCE_PARSER_VERSION, parse_balance  # noqa: E402
+from store import (  # noqa: E402
+    BalanceRecord,
+    Record,
+    balance_day_path,
+    day_path,
+    merge,
+    merge_balance,
+    parse_balance_csv,
+    parse_day_csv,
+    render_balance_csv,
+    render_day_csv,
+)
 
 GSE_BASE = "https://admin.gse.com.ge/storage/uploads/fact/"
 PERIOD = timedelta(minutes=3)
@@ -74,6 +86,8 @@ class RunReport:
     backfilled: int = 0  # inserted periods older than 1 h (recovered rather than fresh)
     deep_requested: int = 0
     deep_inserted: int = 0
+    balance_stored: int = 0
+    balance_errors: int = 0
 
 
 class Collector:
@@ -99,6 +113,8 @@ class Collector:
         self.concurrency = concurrency
         self._days: dict[date, list[Record]] = {}
         self._dirty: set[date] = set()
+        self._bdays: dict[date, list[BalanceRecord]] = {}
+        self._bdirty: set[date] = set()
 
     # -- storage
     def _load(self, day: date) -> list[Record]:
@@ -106,6 +122,16 @@ class Collector:
             path = self.data_dir / day_path(day)
             self._days[day] = parse_day_csv(path.read_text("utf-8")) if path.exists() else []
         return self._days[day]
+
+    def _load_balance(self, day: date) -> list[BalanceRecord]:
+        if day not in self._bdays:
+            path = self.data_dir / balance_day_path(day)
+            self._bdays[day] = parse_balance_csv(path.read_text("utf-8")) if path.exists() else []
+        return self._bdays[day]
+
+    def _has_both(self, label: datetime) -> bool:
+        return (any(r.period_label_utc == label for r in self._load(label.date()))
+                and any(r.period_label_utc == label for r in self._load_balance(label.date())))
 
     def _status(self) -> dict:
         path = self.data_dir / STATUS_PATH
@@ -116,6 +142,10 @@ class Collector:
             path = self.data_dir / day_path(day)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(render_day_csv(self._days[day]), "utf-8")
+        for day in sorted(self._bdirty):
+            path = self.data_dir / balance_day_path(day)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(render_balance_csv(self._bdays[day]), "utf-8")
         path = self.data_dir / STATUS_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", "utf-8")
@@ -142,6 +172,11 @@ class Collector:
             for day in {lb.date() for lb in labels}
             for r in self._load(day)
         }
+        bstored = {
+            r.period_label_utc
+            for day in {lb.date() for lb in labels}
+            for r in self._load_balance(day)
+        }
         checked = {
             k: v for k, v in status.get("revalidated_at", {}).items()
             if datetime.fromisoformat(k) >= oldest
@@ -159,7 +194,7 @@ class Collector:
         )[:min(REVALIDATE_PER_RUN, self.max_requests // 4)]
         wanted = [
             lb for lb in labels
-            if lb not in stored
+            if (lb not in stored or lb not in bstored)
             and (lb == labels[0] or misses.get(lb.isoformat(), 0) < self.missing_attempts)
         ][: self.max_requests - len(revisions)] + revisions
 
@@ -199,6 +234,8 @@ class Collector:
                 backfilled=report.backfilled,
                 deep_requested=report.deep_requested,
                 deep_inserted=report.deep_inserted,
+                balance_stored=report.balance_stored,
+                balance_errors=report.balance_errors,
             ),
             lookback_hours=self.lookback_hours,
             deep_backfill=deep,
@@ -228,7 +265,7 @@ class Collector:
         todo: list[datetime] = []
         label = cursor - PERIOD
         while len(todo) < self.deep_per_run and label >= horizon:
-            if not any(r.period_label_utc == label for r in self._load(label.date())):
+            if not self._has_both(label):
                 todo.append(label)
             label -= PERIOD
         processed = cursor if not todo else None
@@ -302,6 +339,25 @@ class Collector:
             report.inserted += outcome == "inserted"
             report.revised += outcome == "revised"
         misses.pop(label.isoformat(), None)
+        self._apply_balance(label, result.body, record.payload_sha256, now, report)
+
+    def _apply_balance(self, label: datetime, body: bytes, digest: str, now: datetime, report: RunReport) -> None:
+        """System balance from the same payload. A refusal here never blocks the wind record."""
+        try:
+            b_label, b = parse_balance(body)
+            if b_label != label:
+                raise GseParseError("balance label mismatch")
+        except GseParseError as exc:
+            report.balance_errors += 1
+            print(f"balance refused {self.url(label)}: {exc}", file=sys.stderr)
+            return
+        rec = BalanceRecord(label, b.period_label_local, b.hydro, b.thermal, b.wind, b.solar, b.generation,
+                            b.consumption, b.quality, now, digest, BALANCE_PARSER_VERSION)
+        merged, changed = merge_balance(self._load_balance(label.date()), rec)
+        if changed:
+            self._bdays[label.date()] = merged
+            self._bdirty.add(label.date())
+            report.balance_stored += 1
 
 
 WEATHER_DIR = "weather"

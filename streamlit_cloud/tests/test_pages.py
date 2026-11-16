@@ -145,3 +145,32 @@ def test_kpi_labels_say_wind_generation_not_consumption():
     assert "ქარის გენერაციის მაქსიმუმი დღეს" in text and "3-წუთიანი საშუალო" in text and "ხარისხი: ACT" in text
     assert "ქარის გამომუშავება დღეს" in text and "ქარის გამომუშავება გუშინ" in text
     assert "დღის პიკი" not in text  # ambiguous (reads as demand peak)
+
+
+def balance_rows():
+    from store import BalanceRecord
+    start = NOW - timedelta(hours=24)
+    out, t, k = [], start, 0
+    while t <= NOW - timedelta(minutes=3):
+        out.append(BalanceRecord(t, "x", 1500.0, 300.0, 200.0, 0.0, 2000.0, 2050.0, "hydro:SUB", NOW, f"b{k}", "p"))
+        t += timedelta(minutes=3)
+        k += 1
+    return out
+
+
+@pytest.mark.parametrize("lang", ["ka", "en"])
+def test_balance_page_renders_mix_profiles_and_derived_import(lang):
+    rows = balance_rows()
+    with patch("history.HistoryReader.balance", side_effect=lambda s, e, n: [r for r in rows if s <= r.period_label_utc <= e]):
+        at = run("balance", lang)
+    text = page_text(at)
+    assert "2 050" in text and "2 000" in text  # consumption and generation now
+    assert ("იმპორტი (გამოთვლილი)" if lang == "ka" else "import (derived)") in text  # 50 MW derived net import
+    assert len(at.get("plotly_chart")) >= 3 and at.get("download_button")
+
+
+def test_overview_has_separate_balance_chart():
+    rows = balance_rows()
+    with patch("history.HistoryReader.balance", side_effect=lambda s, e, n: [r for r in rows if s <= r.period_label_utc <= e]):
+        at = run("overview", "ka", durable_two_days())
+    assert any("ბალანსი" in h.value for h in at.subheader)
