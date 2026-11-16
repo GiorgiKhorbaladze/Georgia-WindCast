@@ -125,7 +125,7 @@ def overview(lang, data, reader, now):
                 tr('so_far', lang, time=local(due, '%H:%M'), pct=pct(t.completeness))),
         ui.card(tr('yesterday_energy', lang), ui.fmt(y.energy_mwh, 0), 'MWh', y_sub),
         ui.card(tr('peak_today', lang), ui.fmt(t.peak_mw, 1), 'MW',
-                tr('at_time', lang, time=local(t.peak_time, '%H:%M')) if t.peak_time is not None else ''),
+                tr('at_time', lang, time=local(t.peak_time, '%H:%M'), q=df.loc[t.peak_time, 'quality']) if t.peak_time is not None else ''),
     ])
     ui.note(f"{tr('official', lang)} · {tr('cmp_note', lang)}", ui.tag('GSE', 'off'))
 

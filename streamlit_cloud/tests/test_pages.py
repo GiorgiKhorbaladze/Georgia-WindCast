@@ -138,3 +138,10 @@ def test_data_page_health_and_gaps(lang):
 def test_data_page_stale_collector():
     status = {"last_success_at": (NOW - timedelta(hours=9)).isoformat(), "latest_label_utc": (NOW - timedelta(hours=9)).isoformat()}
     assert "ყურადღება" in page_text(run("data", "ka", status=status))
+
+
+def test_kpi_labels_say_wind_generation_not_consumption():
+    text = page_text(run("overview", "ka", durable_two_days()))
+    assert "ქარის გენერაციის მაქსიმუმი დღეს" in text and "3-წუთიანი საშუალო" in text and "ხარისხი: ACT" in text
+    assert "ქარის გამომუშავება დღეს" in text and "ქარის გამომუშავება გუშინ" in text
+    assert "დღის პიკი" not in text  # ambiguous (reads as demand peak)
