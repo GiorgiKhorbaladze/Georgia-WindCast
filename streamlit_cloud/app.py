@@ -268,7 +268,16 @@ def site_map(lang, data, now):
 
 # ----------------------------------------------------------------------------------------- balance
 
-SRC_COLORS = {'hydro': '#38bdf8', 'thermal': '#f97316', 'wind': ui.C['accent'], 'solar': '#facc15'}
+# Distinct hues with high contrast on the dark theme; wind is a saturated green so it never blends
+# into hydro blue. Stack order puts wind at the bottom so its profile is read against zero.
+SRC_COLORS = {'wind': '#22c55e', 'solar': '#facc15', 'hydro': '#3b82f6', 'thermal': '#f97316',
+              'import': '#a78bfa', 'export': '#f472b6'}
+STACK_ORDER = ('wind', 'solar', 'hydro', 'thermal')
+
+
+def _fill(hex_color, alpha=0.82):
+    h = hex_color.lstrip('#')
+    return f'rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{alpha})'
 
 
 def balance_frame(rows):
@@ -285,14 +294,17 @@ def balance_chart(lang, rows, height=360):
     df = df.reindex(pd.date_range(df.index.min(), df.index.max(), freq='3min'))  # gaps stay empty
     x = [wall(t) for t in df.index]
     fig = go.Figure()
-    for src in ('hydro', 'thermal', 'wind', 'solar'):
+    for src in STACK_ORDER:
         fig.add_scatter(x=x, y=df[src], name=tr(f'src_{src}', lang), mode='lines', stackgroup='gen',
-                        line=dict(width=0.6, color=SRC_COLORS[src]), hovertemplate='%{y:.0f} MW')
+                        line=dict(width=1, color=SRC_COLORS[src]), fillcolor=_fill(SRC_COLORS[src]),
+                        hovertemplate='%{y:.0f} MW')
     fig.add_scatter(x=x, y=df['net'].clip(lower=0), name=tr('src_import', lang), mode='lines', stackgroup='gen',
-                    line=dict(width=0.6, color=ui.C['model']), hovertemplate='%{y:.0f} MW')
+                    line=dict(width=1, color=SRC_COLORS['import']), fillcolor=_fill(SRC_COLORS['import'], 0.55),
+                    hovertemplate='%{y:.0f} MW')
     if (df['net'] < 0).any():
         fig.add_scatter(x=x, y=df['net'].clip(upper=0), name=tr('src_export', lang), mode='lines', stackgroup='exp',
-                        line=dict(width=0.6, color='#f472b6'), hovertemplate='%{y:.0f} MW')
+                        line=dict(width=1, color=SRC_COLORS['export']), fillcolor=_fill(SRC_COLORS['export'], 0.55),
+                        hovertemplate='%{y:.0f} MW')
     fig.add_scatter(x=x, y=df['consumption'], name=tr('consumption', lang), mode='lines',
                     line=dict(color='#ffffff', width=2.2), hovertemplate='%{y:.0f} MW')
     ui.chart(ui.style(fig, height, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
@@ -313,7 +325,7 @@ def balance_page(lang, data, reader, now):
     ui.cards([
         ui.card(tr('bal_now', lang), ui.fmt(last['consumption'], 0), 'MW', local(df.index[-1], '%d.%m %H:%M'), accent=True),
         ui.card(tr('bal_gen_now', lang), ui.fmt(last['generation'], 0), 'MW',
-                ' · '.join(f"{tr(f'src_{k}', lang)} {last[k]:.0f}" for k in ('hydro', 'thermal', 'wind', 'solar'))),
+                ' · '.join(f"{tr(f'src_{k}', lang)} {last[k]:.0f}" for k in STACK_ORDER)),
         ui.card(tr('bal_net_now', lang), ui.fmt(abs(net), 0), 'MW', tr('bal_net_sub_imp' if net >= 0 else 'bal_net_sub_exp', lang)),
     ])
     balance_chart(lang, rows)
@@ -323,9 +335,10 @@ def balance_page(lang, data, reader, now):
     st.subheader(tr('bal_mix', lang))
     c1, c2 = st.columns([1, 1])
     with c1:
-        srcs = ['hydro', 'thermal', 'wind', 'solar']
+        srcs = list(STACK_ORDER)
         fig = go.Figure(go.Pie(labels=[tr(f'src_{k}', lang) for k in srcs], values=[max(energy[k], 0) for k in srcs], hole=0.55,
-                               marker=dict(colors=[SRC_COLORS[k] for k in srcs]), sort=False, textinfo='percent'))
+                               marker=dict(colors=[SRC_COLORS[k] for k in srcs], line=dict(color=ui.C['bg'], width=2)),
+                               sort=False, textinfo='percent', textfont=dict(color='#0b1220', size=13)))
         ui.chart(ui.style(fig, 300).update_layout(hovermode='closest'))
         ui.note(tr('bal_mix_sub', lang))
     with c2:
@@ -342,9 +355,9 @@ def balance_page(lang, data, reader, now):
     hours = (df.index.tz_convert(TZ) - pd.Timedelta(minutes=3)).hour
     prof = df.groupby(hours)[['hydro', 'thermal', 'wind', 'solar', 'consumption', 'net']].mean()
     fig = go.Figure()
-    for src in ('hydro', 'thermal', 'wind', 'solar'):
+    for src in STACK_ORDER:
         fig.add_scatter(x=prof.index, y=prof[src], name=tr(f'src_{src}', lang), mode='lines+markers', line=dict(color=SRC_COLORS[src], width=2.4))
-    fig.add_scatter(x=prof.index, y=prof['net'], name=tr('src_import', lang), mode='lines', line=dict(color=ui.C['model'], width=1.6, dash='dot'))
+    fig.add_scatter(x=prof.index, y=prof['net'], name=tr('src_import', lang), mode='lines', line=dict(color=SRC_COLORS['import'], width=1.6, dash='dot'))
     fig.add_scatter(x=prof.index, y=prof['consumption'], name=tr('consumption', lang), mode='lines', line=dict(color='#ffffff', width=2.2))
     ui.chart(ui.style(fig, 340, 'MW', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
     ui.note(tr('bal_profiles_note', lang))

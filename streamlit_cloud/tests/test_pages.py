@@ -80,7 +80,7 @@ def test_analytics_page_stats_and_download(lang):
 def test_forecast_page_insufficient_history_is_explicit(lang):
     at = run("forecast", lang, durable_two_days())
     infos = " ".join(i.value for i in at.info)
-    assert ("168" in infos) and ("სთ" in infos if lang == "ka" else "h" in infos)
+    assert ("168" in infos) and ("საათი" in infos if lang == "ka" else "h" in infos)
     assert ("არაოფიციალური" if lang == "ka" else "Unofficial") in page_text(at)
 
 
@@ -113,7 +113,7 @@ def test_accuracy_page_scores_archive(lang):
     for p in runs:
         p["series"] = p["series"] * 3  # three sites
     at = run("accuracy", lang, archive=runs)
-    assert ("წინსწრება" if lang == "ka" else "Lead time") in page_text(at)
+    assert ("წინსწრების დრო" if lang == "ka" else "Lead time") in page_text(at)
     assert at.get("plotly_chart")
 
 
@@ -142,7 +142,7 @@ def test_data_page_stale_collector():
 
 def test_kpi_labels_say_wind_generation_not_consumption():
     text = page_text(run("overview", "ka", durable_two_days()))
-    assert "ქარის გენერაციის მაქსიმუმი დღეს" in text and "3-წუთიანი საშუალო" in text and "ხარისხი: ACT" in text
+    assert "ქარის გენერაციის მაქსიმუმი დღეს" in text and "3-წუთიანი საშუალო" in text and "ხარისხის კოდი: ACT" in text
     assert "ქარის გამომუშავება დღეს" in text and "ქარის გამომუშავება გუშინ" in text
     assert "დღის პიკი" not in text  # ambiguous (reads as demand peak)
 
