@@ -44,6 +44,14 @@ PUBLICATION_LAG = timedelta(seconds=75)
 FUTURE_TOLERANCE = timedelta(seconds=60)
 STATUS_PATH = "status/gse_collector.json"
 REVALIDATE_PER_RUN = 4
+# Adaptive catch-up: if the last stored label is older than the normal lookback (GitHub skipped or
+# delayed runs), the run widens its window up to this limit. GSE keeps files >= 48 h (verified).
+MAX_AUTO_LOOKBACK_HOURS = 48
+# Deep backfill: a small number of extra requests per run walk backwards from the oldest stored
+# period until DEEP_HORIZON_DAYS or a full day of 404s (GSE retention end). Temporary extra load,
+# about DEEP_PER_RUN x 96 requests/day until done; each deep period is tried once.
+DEEP_PER_RUN = 20
+DEEP_HORIZON_DAYS = 30
 
 
 def due_labels(now: datetime, hours: float) -> list[datetime]:
@@ -62,6 +70,10 @@ class RunReport:
     failures: int = 0
     integrity_error: str | None = None
     failure_kinds: dict[str, int] = field(default_factory=dict)
+    lookback_used_hours: float = 0.0
+    backfilled: int = 0  # inserted periods older than 1 h (recovered rather than fresh)
+    deep_requested: int = 0
+    deep_inserted: int = 0
 
 
 class Collector:
@@ -75,7 +87,9 @@ class Collector:
         max_requests: int = 300,
         missing_attempts: int = 4,
         concurrency: int = 4,
+        deep_per_run: int = DEEP_PER_RUN,
     ) -> None:
+        self.deep_per_run = deep_per_run
         self.data_dir = data_dir
         self.client_factory = client_factory
         self.base_url = base_url.rstrip("/") + "/"
@@ -111,7 +125,13 @@ class Collector:
         now = now or datetime.now(UTC)
         report = RunReport()
         status = self._status()
-        labels = due_labels(now, self.lookback_hours)
+        lookback = self.lookback_hours
+        if status.get("latest_label_utc"):
+            behind = (now - datetime.fromisoformat(status["latest_label_utc"])).total_seconds() / 3600
+            if behind > lookback:  # skipped or delayed runs: widen the window, bounded
+                lookback = min(float(MAX_AUTO_LOOKBACK_HOURS), max(lookback, behind + 1))
+        report.lookback_used_hours = lookback
+        labels = due_labels(now, lookback)
         oldest = labels[-1]
         misses = {
             k: v for k, v in status.get("missing_attempts", {}).items()
@@ -148,8 +168,15 @@ class Collector:
                 results = list(pool.map(lambda lb: (lb, fetch(client, self.url(lb))), wanted))
             for label, result in results:
                 report.requested += 1
+                before = report.inserted
                 self._apply(label, result, now, report, misses)
                 checked[label.isoformat()] = now.isoformat()
+                if report.inserted > before and now - label > timedelta(hours=1):
+                    report.backfilled += 1
+
+        deep = status.get("deep_backfill", {})
+        if self.deep_per_run and report.failures == 0 and report.integrity_error is None and not deep.get("done"):
+            deep = self._deep_backfill(now, labels[-1], deep, report)
 
         latest = max(
             (r.period_label_utc for d in self._days.values() for r in d), default=None
@@ -168,8 +195,13 @@ class Collector:
                 failures=report.failures,
                 failure_kinds=report.failure_kinds,
                 integrity_error=report.integrity_error,
+                lookback_used_hours=report.lookback_used_hours,
+                backfilled=report.backfilled,
+                deep_requested=report.deep_requested,
+                deep_inserted=report.deep_inserted,
             ),
             lookback_hours=self.lookback_hours,
+            deep_backfill=deep,
             parser_version=PARSER_VERSION,
             revalidated_at=checked,
             missing_attempts=dict(sorted(misses.items())),
@@ -187,6 +219,46 @@ class Collector:
         if stale:
             return report, 2
         return report, 0
+
+    def _deep_backfill(self, now: datetime, window_start: datetime, deep: dict, report: RunReport) -> dict:
+        """Walk backwards from the cursor, DEEP_PER_RUN periods per run, each tried once."""
+        horizon = now - timedelta(days=DEEP_HORIZON_DAYS)
+        cursor = datetime.fromisoformat(deep["cursor"]) if deep.get("cursor") else window_start
+        streak = int(deep.get("consecutive_404", 0))
+        todo: list[datetime] = []
+        label = cursor - PERIOD
+        while len(todo) < self.deep_per_run and label >= horizon:
+            if not any(r.period_label_utc == label for r in self._load(label.date())):
+                todo.append(label)
+            label -= PERIOD
+        processed = cursor if not todo else None
+        if todo:
+            with self.client_factory() as client, ThreadPoolExecutor(self.concurrency) as pool:
+                results = list(pool.map(lambda lb: (lb, fetch(client, self.url(lb))), todo))
+            for lb, result in results:  # newest first: the streak counts consecutive older 404s
+                report.deep_requested += 1
+                if result.kind is FetchKind.NOT_PUBLISHED:
+                    streak += 1
+                    processed = lb
+                    continue
+                if result.kind is not FetchKind.OK:
+                    report.failures += 1
+                    break
+                before = report.inserted
+                self._apply(lb, result, now, report, {})
+                if report.integrity_error:
+                    break
+                report.deep_inserted += report.inserted - before
+                report.backfilled += report.inserted - before
+                streak = 0
+                processed = lb
+        # Only periods actually processed move the cursor; unfetched ones are retried next run.
+        cursor = processed if processed is not None else cursor
+        if not todo:
+            cursor = max(label, horizon)
+        done = cursor <= horizon or streak >= 480  # horizon reached or a full day of 404s
+        return dict(cursor=cursor.isoformat(), consecutive_404=streak, done=done,
+                    horizon_days=DEEP_HORIZON_DAYS, updated_at=now.isoformat())
 
     def url(self, label: datetime) -> str:
         return self.base_url + export_file_name(label)
@@ -233,6 +305,8 @@ class Collector:
 
 
 WEATHER_DIR = "weather"
+HIST_FORECAST_DAYS = 31  # training window for the MW model (past ICON forecasts)
+RUN_ARCHIVE_DAYS = 60  # forecast runs listed for the accuracy evaluation
 
 
 def collect_weather(data_dir: Path, client_factory: Callable[[], httpx.Client], now: datetime) -> tuple[dict, int]:
@@ -258,7 +332,7 @@ def collect_weather(data_dir: Path, client_factory: Callable[[], httpx.Client], 
                 raise src.SourceError(result.kind.value)
             return result.body
 
-        for product in ("forecast", "era5"):
+        for product in ("forecast", "era5", "hist_forecast"):
             try:
                 meta = load(f"{product}_meta.json")
                 if product == "forecast":
@@ -275,7 +349,7 @@ def collect_weather(data_dir: Path, client_factory: Callable[[], httpx.Client], 
                         raise src.SourceError("model_run_changed_during_fetch")
                     packet = src.forecast_packet(body, run, now, url, "collector")
                     new_meta = dict(run=run.isoformat(), retrieved=now.isoformat(), url=url, sha256=packet["sha256"])
-                else:
+                elif product == "era5":
                     if meta.get("retrieved", "")[:10] == now.date().isoformat():
                         status[product] = "unchanged"
                         continue
@@ -283,16 +357,35 @@ def collect_weather(data_dir: Path, client_factory: Callable[[], httpx.Client], 
                     body = get(url)
                     packet = src.archive_packet(body, now, url, "collector")
                     new_meta = dict(retrieved=now.isoformat(), url=url, sha256=packet["sha256"])
+                else:  # past ICON forecasts (best-match archive) for MW model training, daily
+                    if meta.get("retrieved", "")[:10] == now.date().isoformat():
+                        status[product] = "unchanged"
+                        continue
+                    end = now.date() - timedelta(days=1)
+                    start = end - timedelta(days=HIST_FORECAST_DAYS - 1)
+                    url = src.hist_forecast_url(start, end)
+                    body = get(url)
+                    src.hist_forecast_packet(body, now, url)  # validation only
+                    new_meta = dict(retrieved=now.isoformat(), url=url, start=start.isoformat(),
+                                    end=end.isoformat(), sha256=hashlib.sha256(body).hexdigest())
                 payloads = wdir / "payloads"
                 payloads.mkdir(exist_ok=True)
                 (payloads / f"{new_meta['sha256']}.json").write_bytes(body)
                 new_meta["content_addressed"] = True
                 (wdir / f"{product}.json").write_bytes(body)
                 (wdir / f"{product}_meta.json").write_text(json.dumps(new_meta, indent=2) + "\n", "utf-8")
+                if product == "forecast":  # archive index for the accuracy evaluation
+                    manifest = load("forecast_runs.json").get("runs", [])
+                    manifest = [m for m in manifest if m["run"] != new_meta["run"]
+                                and datetime.fromisoformat(m["run"]) >= now - timedelta(days=RUN_ARCHIVE_DAYS)]
+                    manifest.append(dict(run=new_meta["run"], sha256=new_meta["sha256"], retrieved=new_meta["retrieved"]))
+                    (wdir / "forecast_runs.json").write_text(
+                        json.dumps({"runs": sorted(manifest, key=lambda m: m["run"])}, indent=2) + "\n", "utf-8")
                 status[product] = "updated"
-            except OpenMeteoError as exc:  # schema drift: refuse and fail visibly
+            except OpenMeteoError as exc:  # schema drift: refuse; fail visibly for the live products
                 status[product] = f"refused: {exc.code}"
-                code = 1
+                if product != "hist_forecast":  # training archive: format not yet verified live
+                    code = 1
             except (src.SourceError, ValueError, httpx.HTTPError) as exc:  # transient: keep old copy
                 status[product] = f"failed: {getattr(exc, 'code', type(exc).__name__)}"
     (wdir / "status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", "utf-8")

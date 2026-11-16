@@ -212,6 +212,27 @@ def forecast_packet(body, run, retrieved, url, origin):
                 sha256=hashlib.sha256(body).hexdigest())
 
 
+HIST_FORECAST_BASE = 'https://historical-forecast-api.open-meteo.com'
+
+
+def hist_forecast_url(start, end):
+    """Past ICON forecasts (Open-Meteo historical forecast archive), same variables as the live one."""
+    from urllib.parse import urlencode
+    lats = ','.join(f'{s.latitude:.6f}' for s in SITES)
+    lons = ','.join(f'{s.longitude:.6f}' for s in SITES)
+    hourly = ','.join(f'wind_{k}_{h}m' for h in FORECAST.heights for k in ('speed', 'direction'))
+    params = dict(latitude=lats, longitude=lons, hourly=hourly, models=FORECAST.model,
+                  start_date=str(start), end_date=str(end), wind_speed_unit='ms',
+                  timeformat='unixtime', timezone='GMT')
+    return f"{HIST_FORECAST_BASE}/v1/forecast?{urlencode(params, safe=',')}"
+
+
+def hist_forecast_packet(body, retrieved, url):
+    series = parse_response(body, len(SITES), FORECAST.heights)
+    _check_axis(series)
+    return dict(series=series, retrieved=retrieved, url=url, sha256=hashlib.sha256(body).hexdigest())
+
+
 def era5_url(now):
     end = (now - timedelta(days=5)).date()
     return archive_url(ARCHIVE_BASE, SITES, str(end - timedelta(days=6)), str(end))

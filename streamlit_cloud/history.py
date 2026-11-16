@@ -119,6 +119,70 @@ class HistoryReader:
             return self._weather[1], self._weather[2]
 
 
+    def _payload(self, client: httpx.Client, digest: str) -> bytes:
+        """Content-addressed payload, verified byte-for-byte against its SHA-256 name."""
+        if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError("invalid payload hash")
+        response = client.get(self._base + f"weather/payloads/{digest}.json")
+        response.raise_for_status()
+        if hashlib.sha256(response.content).hexdigest() != digest:
+            raise ValueError("weather payload hash mismatch")
+        return response.content
+
+    def forecast_archive(self, now: datetime, days: int = 14) -> list[dict]:
+        """Archived ICON runs (collector manifest) of the last ``days`` days, validated, oldest first.
+        Cached for an hour; a bad or missing payload is skipped, never repaired."""
+        import data as src
+
+        with self._lock:
+            cached = getattr(self, "_archive", None)
+            if cached is not None and now - cached[0] < timedelta(hours=1):
+                return cached[1]
+            packets: dict[str, dict] = {p["run"].isoformat(): p for p in (cached[1] if cached else [])}
+            try:
+                with self._client_factory() as client:
+                    text = self._get(client, "weather/forecast_runs.json")
+                    runs = json.loads(text).get("runs", []) if text else []
+                    for m in runs:
+                        run = datetime.fromisoformat(m["run"])
+                        if run.utcoffset() is None or run > now or run < now - timedelta(days=days):
+                            continue
+                        if run.isoformat() in packets:
+                            continue
+                        try:
+                            body = self._payload(client, m["sha256"])
+                            packets[run.isoformat()] = src.forecast_packet(
+                                body, run, datetime.fromisoformat(m["retrieved"]), "", "collector")
+                        except (httpx.HTTPError, ValueError, KeyError):
+                            continue
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                pass
+            out = sorted((p for p in packets.values() if p["run"] >= now - timedelta(days=days)), key=lambda p: p["run"])
+            self._archive = (now, out)
+            return out
+
+    def hist_forecast(self, now: datetime) -> dict | None:
+        """Past ICON forecasts stored daily by the collector (MW model training input)."""
+        import data as src
+
+        with self._lock:
+            cached = getattr(self, "_hist", None)
+            if cached is not None and now - cached[0] < timedelta(hours=1):
+                return cached[1]
+            packet = cached[1] if cached else None
+            try:
+                with self._client_factory() as client:
+                    meta = self._get(client, "weather/hist_forecast_meta.json")
+                    if meta:
+                        m = json.loads(meta)
+                        packet = src.hist_forecast_packet(self._payload(client, m["sha256"]),
+                                                          datetime.fromisoformat(m["retrieved"]), m["url"])
+            except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                pass
+            self._hist = (now, packet)
+            return packet
+
+
 def collector_age(status: dict | None, now: datetime) -> timedelta | None:
     if not status or not status.get("last_success_at"):
         return None
