@@ -234,3 +234,5 @@ backups/
 .backup.env
 deploy/history.log
 deploy/last-attempt
+
+.venv-streamlit/
