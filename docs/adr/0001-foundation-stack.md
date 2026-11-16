@@ -16,7 +16,7 @@ specification (`docs/PROJECT.md`) asks that deviations be recorded in an ADR.
 | Frontend | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4 | `frontend/package-lock.json` |
 | Backend API | Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2 | `backend/uv.lock` |
 | Worker | Same image as API, `python -m app.worker` | `backend/uv.lock` |
-| Database | PostgreSQL 17 (`postgres:17.7-alpine3.22`), Alembic migrations | `compose.yaml`, `backend/alembic/` |
+| Database | PostgreSQL 17 (`postgres:17.12-alpine3.24`), Alembic migrations | `compose.yaml`, `backend/alembic/` |
 | Orchestration | Docker Compose, one-shot `migrate` service | `compose.yaml` |
 | CI | GitHub Actions `CI` workflow | `.github/workflows/ci.yml` |
 
@@ -65,8 +65,8 @@ bilingual UI. Four capabilities that existed only in #11 were adopted:
    a developer's local database.
 2. Migration downgrade/upgrade round trip inside the Compose stack.
 3. CI uploads the smoke transcript as an artifact.
-4. Exactly pinned base images (`postgres:17.7-alpine3.22`, `python:3.12.12-slim`,
-   `node:22.21.1-alpine3.22`) and PostgreSQL 17 instead of 16 (longer support window; no data
+4. Exactly pinned base images (`postgres:17.12-alpine3.24`, `python:3.12.16-slim`,
+   `node:22.23.5-alpine3.24`) and PostgreSQL 17 instead of 16 (longer support window; no data
    existed yet, so no migration cost).
 
 Not adopted from #11: unprefixed health paths (`/health/*`; this API keeps everything under

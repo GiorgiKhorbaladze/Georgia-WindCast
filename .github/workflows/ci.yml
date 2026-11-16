@@ -26,10 +26,12 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          node-version: 22.21.1
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.23.5
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci --no-audit --no-fund
@@ -49,7 +51,7 @@ jobs:
         working-directory: backend
     services:
       postgres:
-        image: postgres:17.7-alpine3.22
+        image: postgres:17.12-alpine3.24@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
         env:
           POSTGRES_USER: windcast
           POSTGRES_PASSWORD: ci-only-password
@@ -63,8 +65,10 @@ jobs:
       WINDCAST_DATABASE_URL: postgresql+psycopg://windcast:ci-only-password@localhost:5432/windcast_test
       WINDCAST_REQUIRE_DB_TESTS: "1"
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: "0.11.32"
           enable-cache: true
@@ -88,7 +92,7 @@ jobs:
     needs: [frontend, backend]
     services:
       postgres:
-        image: postgres:17.7-alpine3.22
+        image: postgres:17.12-alpine3.24@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
         env:
           POSTGRES_USER: windcast
           POSTGRES_PASSWORD: ci-only-password
@@ -104,15 +108,17 @@ jobs:
       WINDCAST_GSE_FRESH_WITHIN_SECONDS: "3600"
       BASE_URL: http://127.0.0.1:3000
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: "0.11.32"
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: 22.21.1
+          node-version: 22.23.5
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Build and start the production frontend (API started next)
@@ -151,7 +157,7 @@ jobs:
           (cd frontend && E2E_EMPTY=1 npx playwright test e2e/empty.spec.ts --trace off)
       - name: Upload Playwright report and server logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-report
           path: |
@@ -165,13 +171,15 @@ jobs:
     timeout-minutes: 20
     needs: [frontend, backend]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Run smoke test (isolated project, random password)
         shell: bash
         run: scripts/compose-smoke.sh 2>&1 | tee compose-smoke.txt
       - name: Upload smoke transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: compose-smoke-transcript
           path: compose-smoke.txt
@@ -182,13 +190,15 @@ jobs:
     timeout-minutes: 25
     needs: [frontend, backend]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Caddy + production overlays (isolated project, internal CA, random password)
         shell: bash
         run: scripts/edge-smoke.sh 2>&1 | tee edge-smoke.txt
       - name: Upload transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: edge-smoke-transcript
           path: edge-smoke.txt
@@ -206,20 +216,27 @@ jobs:
       # Emulation only: relaxed healthcheck timeouts. Native Ampere A1 hosts do not use this file.
       SMOKE_EXTRA_COMPOSE: deploy/emulation.yaml
     steps:
-      - uses: actions/checkout@v6
-      - uses: docker/setup-qemu-action@v3
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         with:
           platforms: arm64
-      - uses: docker/setup-buildx-action@v3
-      - name: Build linux/arm64 images (backend, frontend, Caddy)
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Build linux/arm64 images (postgres, backend, frontend, Caddy)
         run: |
+          docker buildx build --platform linux/arm64 --load -t windcast-postgres:arm64 deploy/postgres
           docker buildx build --platform linux/arm64 --load -t windcast-backend:arm64 backend
           docker buildx build --platform linux/arm64 --load -t windcast-frontend:arm64 frontend
           docker buildx build --platform linux/arm64 --load -t windcast-caddy:arm64 deploy/caddy
-          for i in windcast-backend:arm64 windcast-frontend:arm64 windcast-caddy:arm64; do
+          for i in windcast-postgres:arm64 windcast-backend:arm64 windcast-frontend:arm64 windcast-caddy:arm64; do
             echo "$i $(docker image inspect "$i" --format '{{.Architecture}} {{.Size}}')"
             test "$(docker image inspect "$i" --format '{{.Architecture}}')" = arm64
           done
+      - name: Trivy on the arm64 images (same gate as the Security workflow)
+        run: |
+          scripts/security/install-tools.sh trivy
+          scripts/security/scan.sh trivy-image windcast-postgres:arm64 windcast-backend:arm64 windcast-frontend:arm64 windcast-caddy:arm64
       - name: Compose smoke on arm64 (migrations, production overlay, failing + successful restore)
         shell: bash
         env:
@@ -232,7 +249,7 @@ jobs:
         run: scripts/edge-smoke.sh 2>&1 | tee arm64-edge-smoke.txt
       - name: Upload transcripts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: arm64-transcripts
           path: arm64-*.txt
@@ -243,15 +260,16 @@ jobs:
     timeout-minutes: 30
     needs: [frontend, backend]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          persist-credentials: false
           fetch-depth: 0  # the rehearsal clones this checkout and commits test revisions on top
       - name: Deploy A, deploy B (incompatible schema), rollback; deploy C (broken), rollback
         shell: bash
         run: scripts/rollback-rehearsal.sh 2>&1 | tee rollback-rehearsal.txt
       - name: Upload transcript
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rollback-rehearsal-transcript
           path: rollback-rehearsal.txt

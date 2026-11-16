@@ -14,10 +14,15 @@ import { FORECAST_HEIGHTS } from "./WeatherCharts";
 
 const STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
 const WORKER_URL = "/vendor/maplibre/maplibre-gl-worker.mjs"; // copied by scripts/copy-maplibre-worker.mjs
-const ATTRIBUTION =
-  '<a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> ' +
-  '<a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">© OpenMapTiles</a> ' +
-  'Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>';
+function MapAttribution() {
+  return (
+    <>
+      <a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a>{" "}
+      <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">© OpenMapTiles</a>{" "}
+      Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>
+    </>
+  );
+}
 
 type SiteData = { site: SiteSummary; weather: SiteWeather | null };
 
@@ -50,10 +55,47 @@ function valueAt(points: WeatherPoint[] | undefined, t: number): WeatherPoint | 
   return points.find((p) => Date.parse(p.t) === t) ?? null;
 }
 
-function arrowSvg(dir: number | null): string {
-  if (dir === null) return "";
-  const rot = downwindBearing(dir);
-  return `<svg viewBox="-12 -12 24 24" width="22" height="22" aria-hidden="true" style="transform:rotate(${rot}deg)"><path d="M0,-10 L6,6 L0,2 L-6,6 Z" fill="currentColor"/></svg>`;
+// Wind arrows are built from numbers only, as elements/JSX - never as HTML strings, so no value
+// from the API can ever be interpreted as markup (security review, Semgrep insecure-innerhtml).
+const ARROW_PATH = "M0,-10 L6,6 L0,2 L-6,6 Z";
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Rotation in degrees for a meteorological "from" direction, or null when not a finite number. */
+export function arrowRotation(dir: unknown): number | null {
+  return typeof dir === "number" && Number.isFinite(dir) ? downwindBearing(dir) : null;
+}
+
+function WindArrow({ dir }: { dir: number | null }) {
+  const rot = arrowRotation(dir);
+  if (rot === null) return null;
+  return (
+    <svg viewBox="-12 -12 24 24" width="22" height="22" aria-hidden="true" style={{ transform: `rotate(${rot}deg)` }}>
+      <path d={ARROW_PATH} fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Marker content for the MapLibre DOM marker: elements and textContent only. */
+function renderMarkerContent(el: HTMLElement, dir: number | null, speedText: string): void {
+  const nodes: Node[] = [];
+  const rot = arrowRotation(dir);
+  if (rot !== null) {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "-12 -12 24 24");
+    svg.setAttribute("width", "22");
+    svg.setAttribute("height", "22");
+    svg.setAttribute("aria-hidden", "true");
+    svg.style.transform = `rotate(${rot}deg)`;
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", ARROW_PATH);
+    path.setAttribute("fill", "currentColor");
+    svg.appendChild(path);
+    nodes.push(svg);
+  }
+  const span = document.createElement("span");
+  span.textContent = speedText;
+  nodes.push(span);
+  el.replaceChildren(...nodes);
 }
 
 function speedColor(v: number | null): string {
@@ -177,7 +219,7 @@ export function WindMap({
         "aria-label",
         `${name}: ${sp ? `${sp} m/s` : t.unavailable}${v?.direction_deg != null ? `, ${t.weather.from} ${compass(v.direction_deg, locale)}` : ""}`,
       );
-      entry.el.innerHTML = `${arrowSvg(v?.direction_deg ?? null)}<span>${sp ?? "-"}</span>`;
+      renderMarkerContent(entry.el, v?.direction_deg ?? null, sp ?? "-");
     }
   }, [current, selected, locale, t, mapReady]);
 
@@ -288,8 +330,9 @@ export function WindMap({
               <div
                 className="wc-attribution absolute bottom-0 right-0 z-10 rounded-tl-md px-2 py-1 text-[11px]"
                 data-testid="map-attribution"
-                dangerouslySetInnerHTML={{ __html: ATTRIBUTION }}
-              />
+              >
+                <MapAttribution />
+              </div>
             </div>
           )}
         </div>
@@ -348,7 +391,7 @@ export function WindMap({
                   className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left ${selected === c.site.id ? "border-cyan-glow/50 bg-cyan-glow/5" : "border-line bg-ink-900/60"}`}>
                   <span className="text-sm text-slate-100">{locale === "ka" ? c.site.name_ka : c.site.name_en}</span>
                   <span className="flex items-center gap-2 font-mono text-sm" style={{ color: speedColor(c.value?.speed_ms ?? null) }}>
-                    <span dangerouslySetInnerHTML={{ __html: arrowSvg(c.value?.direction_deg ?? null) }} />
+                    <span><WindArrow dir={c.value?.direction_deg ?? null} /></span>
                     {formatSpeed(c.value?.speed_ms) ?? "-"} <span className="text-xs text-slate-400">m/s</span>
                   </span>
                 </button>

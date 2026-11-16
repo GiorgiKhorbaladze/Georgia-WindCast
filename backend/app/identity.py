@@ -28,7 +28,7 @@ def alive_file() -> str:
 def touch_alive(path: str | None = None) -> None:
     """Mark the worker alive (mtime = now). Called only after the DB heartbeat committed."""
     target = path or alive_file()
-    with open(target, "a"):
+    with open(target, "a", encoding="utf-8"):
         pass
     os.utime(target, None)
 

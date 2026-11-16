@@ -238,5 +238,6 @@ deploy/last-attempt
 .venv-streamlit/
 .venv-st/
 .venv-col/
+# Security tooling and reports (scripts/security/)
 .sectools/
 security-reports/

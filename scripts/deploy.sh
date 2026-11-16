@@ -72,7 +72,7 @@ env_set WINDCAST_IMAGE_TAG "$tag"
 if [[ ${DEPLOY_SKIP_BUILD:-0} == 1 ]]; then
   # Images built elsewhere (or for a rehearsal) must already carry the tag of this exact commit.
   step "Using prebuilt images tagged $tag"
-  for img in windcast-backend windcast-frontend windcast-caddy; do
+  for img in windcast-postgres windcast-backend windcast-frontend windcast-caddy; do
     [[ $img == windcast-caddy && $public == 0 ]] && continue
     docker image inspect "$img:$tag" >/dev/null || die "image $img:$tag not found"
   done

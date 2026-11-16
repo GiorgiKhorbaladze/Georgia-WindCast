@@ -25,6 +25,7 @@ Issue #18. The site is **not** public. This list keeps engineering status separa
 | Anonymous-traffic load check | Done locally | [evidence/public/load-test.md](evidence/public/load-test.md) |
 | Host setup, deploy and backup-rotation scripts; runbook | Done | `scripts/host-setup.sh`, `scripts/deploy.sh`, `scripts/backup-rotate.sh`, [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) |
 | Coordinated cross-schema rollback (paired backup, exact restore, no newer migration on recovery) | Done | `scripts/rollback.sh`; `scripts/rollback-rehearsal.sh` + CI job (incompatible and broken migrations) |
+| Security hardening: patched digest-pinned images, non-root containers without capabilities, read-only roots, segmented networks, SHA-pinned actions, scanners in CI | Done | [security/SECURITY-REPORT.md](security/SECURITY-REPORT.md), Security workflow, edge smoke |
 | Real deployment, real certificate, external-device test, TLS scan, LinkedIn unfurl test | **Blocked** | needs section D item 2 |
 | Safari/iPhone and Firefox checks | **Open** | CI covers Chromium desktop and Pixel 7 emulation only |
 
@@ -41,16 +42,16 @@ Issue #18. The site is **not** public. This list keeps engineering status separa
 
 | Source | Status | Gate |
 | --- | --- | --- |
-| GSE 3-minute XML exports | **No documented permission** for automated retrieval, storage and public redistribution; ACT/NRE meanings unconfirmed | `WINDCAST_GSE_INGESTION_ENABLED=false` until written confirmation. Draft request (unsent) in #18 |
-| Open-Meteo free API | The coordinator's reading of https://open-meteo.com/en/terms in #18: the free API is for non-commercial use, and promotional activities count as commercial. Promotion through a professional LinkedIn profile may therefore not qualify. (Claude could not open that page from the build environment.) | `WINDCAST_WEATHER_INGESTION_ENABLED=false` until written clarification or a compliant alternative. No advertising, subscriptions or tracking may be added without review |
+| GSE 3-minute XML exports | **Owner-reported authorization** for the intended WindCast use (recorded in #18, 2026-11-15). No written terms or scope have been inspected by Claude or the reviewers. | Feed enabled only in the production `.env` at deployment; code and Compose defaults stay disabled |
+| Open-Meteo free API | **Owner-reported authorization** (same record). Usage stays minimal (about 100 calls/day), attributed, with no advertising or commercial features. | Same as above |
 
-If either feed stays disabled, the site shows that state explicitly ("disabled", "unavailable"). It never shows invented values.
+If written terms are added later, record their scope (polling rate, attribution, retention, commercial limits) in #18.
 
 ## D. Owner decisions and actions
 
 1. Merge approval for PR #17, then for the #18 PR (after independent review).
 2. OCI account, card verification, instance and security-list rules ([DEPLOY-ORACLE.md](DEPLOY-ORACLE.md) §3); DuckDNS subdomain (§4); read-only deploy key (§5).
-3. GSE and Open-Meteo permissions (section C).
+3. ~~GSE and Open-Meteo permissions~~: owner-reported as granted (section C).
 4. Explicit authorisation to open the site to the public and set `WINDCAST_PUBLIC_INDEXING=true`.
 5. LinkedIn announcement (drafts in #18), only after a verified public URL exists and the screenshots used show real, timestamped data states.
 

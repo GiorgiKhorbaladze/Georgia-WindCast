@@ -77,6 +77,33 @@ pub=$(published_services)
 echo "published: $pub"
 [[ $pub == "caddy:443 caddy:80" ]] || fail "unexpected published ports: $pub"
 
+step "Network segmentation (edge cannot reach API/DB; API has no internet route)"
+must_fail() {  # must_fail <label> <service> <command...>
+  local label=$1 svc=$2; shift 2
+  if "${DC[@]}" exec -T "$svc" "$@" >/dev/null 2>&1; then fail "$label: reachable, must not be"; fi
+  echo "blocked as intended: $label"
+}
+must_fail "caddy -> api:8000" caddy wget -q -T 3 -O /dev/null http://api:8000/api/health
+must_fail "caddy -> db:5432" caddy nc -z -w 3 db 5432
+must_fail "frontend -> db:5432" frontend nc -z -w 3 db 5432
+must_fail "api -> internet (1.1.1.1:443)" api python -c \
+  'import socket; socket.create_connection(("1.1.1.1", 443), timeout=3)'
+"${DC[@]}" exec -T frontend wget -q -T 5 -O /dev/null http://api:8000/api/health ||
+  fail "frontend -> api must work"
+echo "allowed as intended: frontend -> api:8000"
+
+step "Least privilege: non-root, no effective capabilities, read-only root filesystem"
+for svc in caddy frontend api worker db; do
+  uid=$("${DC[@]}" exec -T "$svc" id -u | tr -d '\r')
+  caps=$("${DC[@]}" exec -T "$svc" sh -c "grep '^CapEff' /proc/1/status | awk '{print \$2}'" | tr -d '\r')
+  [[ $uid != 0 ]] || fail "$svc runs as root"
+  [[ $caps == 0000000000000000 ]] || fail "$svc has effective capabilities ($caps)"
+  if "${DC[@]}" exec -T "$svc" sh -c 'touch /root-write-probe' >/dev/null 2>&1; then
+    fail "$svc root filesystem is writable"
+  fi
+  echo "$svc: uid=$uid CapEff=$caps read-only root"
+done
+
 step "HTTP redirects to HTTPS"
 loc=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code} %{redirect_url}' http://localhost/map)
 echo "$loc"

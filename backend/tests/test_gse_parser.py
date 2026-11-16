@@ -130,3 +130,19 @@ def test_floor_and_due_labels():
     assert due_labels(datetime(2026, 11, 14, 20, 10, 0, tzinfo=UTC), timedelta(seconds=75), 1) == [
         datetime(2026, 11, 14, 20, 6, tzinfo=UTC)
     ]
+
+
+def test_parser_rejects_entity_expansion_and_external_entities():
+    """Security: XML bombs and XXE must be refused by the defusedxml parser, never expanded."""
+    import pytest
+
+    from app.ingestion.gse_parser import GseParseError, parse_wind_export
+
+    bomb = (
+        b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;">]>'
+        b"<root>&b;</root>"
+    )
+    xxe = b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><root>&e;</root>'
+    for payload in (bomb, xxe):
+        with pytest.raises(GseParseError):
+            parse_wind_export(payload)

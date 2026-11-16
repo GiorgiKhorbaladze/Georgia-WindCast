@@ -85,6 +85,8 @@ jobs:
           exit 1
       - name: Fail visibly on integrity refusal or prolonged outage
         if: steps.collect.outputs.code != '0'
+        env:
+          CODE: ${{ steps.collect.outputs.code }}  # via env, never interpolated into the script
         run: |
-          echo "collector exit code ${{ steps.collect.outputs.code }} (1 = data refused, 2 = source unreachable)"
+          echo "collector exit code $CODE (1 = data refused, 2 = source unreachable)"
           exit 1
