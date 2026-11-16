@@ -358,3 +358,24 @@ def test_content_addressed_reader_survives_manifest_rollover(tmp_path):
     reader = HistoryReader(lambda: httpx.Client(transport=httpx.MockTransport(handler)), 'https://example.test/data/')
     forecast, _ = reader.weather(now)
     assert forecast['sha256'] == old['sha256']
+
+
+@pytest.mark.parametrize("quality", ["ACT", "NRE"])
+def test_steady_state_load_stays_within_production_envelope(tmp_path, quality):
+    """24 h of 15-minute runs: new periods (480) plus at most 4 revalidations per run."""
+    base = ACT if quality == "ACT" else ACT.replace(b"QUALITY='ACT'", b"QUALITY='NRE'")
+
+    class Counting(Gse):
+        def handler(self, request):
+            name = request.url.path.rsplit("/", 1)[-1]
+            self.requests.append(name)
+            dd, mm, yyyy, hh, mi = NAME.search(name).groups()
+            body = relabel(f"{dd}.{mm}.{yyyy} {hh}:{mi}:00", base)
+            return httpx.Response(200, content=body, headers={"content-type": "text/xml"})
+
+    gse = Counting()
+    collector(tmp_path, gse, hours=12).run(NOW)
+    gse.requests.clear()
+    for i in range(1, 97):
+        collector(tmp_path, gse, hours=12, max_requests=1000).run(NOW + timedelta(minutes=15 * i))
+    assert 480 <= len(gse.requests) <= 480 + 4 * 96

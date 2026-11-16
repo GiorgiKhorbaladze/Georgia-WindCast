@@ -43,6 +43,7 @@ PERIOD = timedelta(minutes=3)
 PUBLICATION_LAG = timedelta(seconds=75)
 FUTURE_TOLERANCE = timedelta(seconds=60)
 STATUS_PATH = "status/gse_collector.json"
+REVALIDATE_PER_RUN = 4
 
 
 def due_labels(now: datetime, hours: float) -> list[datetime]:
@@ -125,13 +126,17 @@ class Collector:
             k: v for k, v in status.get("revalidated_at", {}).items()
             if datetime.fromisoformat(k) >= oldest
         }
-        # Reserve at most 20 requests (and 1/4 of the run budget) for revisions.
-        # Recheck each stored period at most hourly; non-ACT and recent rows first.
+        # Bounded revision discovery (published files are cache-immutable per GSE headers, so this is
+        # a safety net, not a re-crawl): only rows still worth rechecking - non-ACT codes, or labels
+        # from the last 2 hours (one recheck about an hour after collection) - each at most hourly, at most REVALIDATE_PER_RUN per run, non-ACT and
+        # newest first. Keeps steady-state load within the production worker's envelope
+        # (docs/sources/gse.md: about 500-1000 requests/day); simulated: <= 480 + 4 x 96 per day.
         revisions = sorted(
-            (lb for lb in labels if lb in stored and
-             now - datetime.fromisoformat(checked.get(lb.isoformat(), stored[lb].retrieved_at_utc.isoformat())) >= timedelta(hours=1)),
+            (lb for lb in labels if lb in stored
+             and (stored[lb].quality != "ACT" or now - lb <= timedelta(hours=2))
+             and now - datetime.fromisoformat(checked.get(lb.isoformat(), stored[lb].retrieved_at_utc.isoformat())) >= timedelta(hours=1)),
             key=lambda lb: (stored[lb].quality == "ACT", -lb.timestamp()),
-        )[:min(20, self.max_requests // 4)]
+        )[:min(REVALIDATE_PER_RUN, self.max_requests // 4)]
         wanted = [
             lb for lb in labels
             if lb not in stored
