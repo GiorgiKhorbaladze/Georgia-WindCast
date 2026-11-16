@@ -1,6 +1,5 @@
 import copy
 import json
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -10,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 from app.ingestion.openmeteo import FORECAST, parse_response  # noqa: E402  (path set in conftest)
+from conftest import page_text  # noqa: E402
 from data import SourceCache, generation_state, weather_state  # noqa: E402
 
 FIXTURES = ROOT / 'backend/tests/fixtures'
@@ -133,7 +133,7 @@ def test_empty_error_ui():
         at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
         assert not at.exception
         assert at.warning
-        assert at.metric[0].value == '-'
+        assert at.info  # "no data yet" instead of a value
 
 
 def test_late_publication_retried_at_next_tick():
@@ -187,7 +187,7 @@ def test_history_uses_elapsed_time_and_shows_gaps(offline_history):
     offline_history.return_value = NOW + timedelta(hours=3, minutes=2)
     with patch('data.SourceCache.snapshot', return_value=snapshot):
         at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run()
-        at.sidebar.radio[1].set_value('ისტორია').run()
+        at.sidebar.radio[1].set_value('analytics').run()
         assert not at.exception
         chart = json.loads(at.get('plotly_chart')[0].proto.spec)
         assert chart['layout']['xaxis']['type'] == 'date'
@@ -214,9 +214,9 @@ def test_non_act_value_is_shown_with_unverified_badge():
     with patch('data.SourceCache.snapshot', return_value=snapshot):
         at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
         assert not at.exception
-        metrics = [m.value for m in at.metric]
-        assert metrics[0] == '73.60' and metrics[2] == 'NRE'
-        assert any('დაუდასტურებელი' in m.value for m in at.markdown)
+        text = page_text(at)
+        assert '73.60' in text and 'NRE' in text  # value kept, code shown
+        assert 'დაუდასტურებელი' in text
 
 
 def test_durable_history_feeds_overview_and_map_is_rendered(offline_history):
@@ -230,7 +230,7 @@ def test_durable_history_feeds_overview_and_map_is_rendered(offline_history):
          patch('data.SourceCache.snapshot', return_value=cache.snapshot(NOW)):
         at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
         assert not at.exception
-        assert at.metric[0].value == '11.00'  # newest durable row (NOW - 3 min)
+        assert '11.00' in page_text(at)  # newest durable row (NOW - 3 min)
         assert at.get('deck_gl_json_chart'), 'site map missing'
         assert at.get('plotly_chart'), '24 h chart missing'
 
@@ -241,6 +241,6 @@ def test_old_collector_status_warns(offline_history):
     with patch('history.HistoryReader.status', return_value=status), \
          patch('data.SourceCache.snapshot', return_value=SourceCache(transport()).snapshot(NOW)):
         at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
-        at.sidebar.radio[1].set_value('ისტორია').run()
+        at.sidebar.radio[1].set_value('data').run()
         assert not at.exception
-        assert any('შემგროვებლის' in w.value for w in at.warning)
+        assert 'ყურადღება' in page_text(at)  # stale collector badge

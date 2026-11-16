@@ -33,9 +33,16 @@ def offline_history(request):
         patch("history.HistoryReader.records", side_effect=lambda s, e, n: [r for r in durable if s <= r.period_label_utc <= e]),
         patch("history.HistoryReader.status", return_value=None),
         patch("history.HistoryReader.weather", return_value=(None, None)),
+        patch("history.HistoryReader.forecast_archive", return_value=[]),
+        patch("history.HistoryReader.hist_forecast", return_value=None),
     ):
         yield clock
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "real_history: do not stub HistoryReader")
+
+
+def page_text(at) -> str:
+    """All markdown/HTML text rendered by an AppTest run (cards and badges are HTML)."""
+    return " ".join(m.value for m in at.markdown)

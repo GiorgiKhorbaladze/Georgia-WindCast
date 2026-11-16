@@ -6,12 +6,36 @@ Public, zero-cost edition of Georgia WindCast. The original Next.js/FastAPI/Post
 
 | Page | Content |
 | --- | --- |
-| Overview | Latest GSE national wind aggregate (MW, 3-minute average) with source time, quality code and freshness; last 24 h chart; map of the three verified sites with model wind at 80 m |
-| Forecast | DWD ICON (Open-Meteo) speed and direction at 10/80/120/180 m; model run, retrieval time, valid-time range and continuous forward coverage (≤ 72 h) |
-| History | 24 h / 7 d / 30 d generation history from the durable store, with gaps; CSV download (UTC); ERA5 reanalysis (10/100 m, 7 days with a 5-day lag) |
-| About data | Sources, methodology, limitations, independence, hosting and attribution |
+| Overview | Latest GSE national wind generation (MW, 3-minute average) with source time, quality code and freshness; energy today, yesterday and yesterday until the same time (MWh) with completeness; peaks; hourly profile today vs yesterday; last 24 h; map of the three verified sites with model wind at 80 m |
+| Historical analysis | 24 h / 7 d / 30 d / 90 d / custom range; filters by hour window, quality code and complete days; statistics (total MWh, mean, median, min/max, standard deviation, missing periods, completeness); daily totals with 7-day rolling mean; daily/weekly/monthly tables; weekday pattern (from 14 complete days); distribution; filtered CSV (UTC); ERA5 reanalysis, labelled as model data |
+| Forecast | Experimental national MW estimate with empirical band and held-out accuracy versus climatology and persistence; DWD ICON wind speed and direction at 10/80/120/180 m with run, valid time and continuous coverage |
+| Forecast accuracy | Archived ICON runs scored by site, height and lead time (≤6 h ... 48-72 h): MAE, RMSE, bias, circular direction error, pair counts; reference = later short-range run or ERA5 at 10 m |
+| Data and methodology | Collector health: last successful collection, latest stored period, completeness for 24 h and 7 d, missing intervals, recovered periods, search window, deep-backfill progress; sources, methodology, disclaimers |
 
-Georgian and English. Display times are Asia/Tbilisi; stored data is UTC. Production parsers and rules from `backend/app` are reused unchanged: strict defusedxml GSE parser, embedded-label validation, strict Open-Meteo parser, verified site list. Freshness follows the production API: age from the source label first (stale after 10 min), then quality (non-`ACT` = unverified, value still shown). Model wind is never presented as measured wind or as a generation forecast. No value is interpolated or invented; missing periods are gaps.
+Georgian and English, one vocabulary (`i18n.py`). Dark analytics theme (`ui.py`). Display times are Asia/Tbilisi; stored data is UTC. Official GSE values, model wind and the MW estimate carry distinct labels everywhere.
+
+### Energy and day conventions (`analytics.py`)
+
+A GSE label marks the end of its 3-minute interval. Energy = sum of stored 3-minute averages × 0.05 h. A Tbilisi day holds labels 00:03 ... 24:00 (480 periods). Missing periods are counted, never filled; a day is "complete" at ≥ 99 % of its periods; today is always "in progress". Non-ACT periods are included in totals and counted separately. MW is power, MWh is energy.
+
+### Experimental MW forecast (`mwmodel.py`)
+
+- **Target:** hourly mean of the GSE national aggregate; an hour counts only with ≥ 16 of 20 periods.
+- **Predictors:** ICON wind at 80 and 120 m at the three sites (speed, speed², speed³, capped at 30 m/s) and local hour (sin/cos). Training uses archived forecasts: the Open-Meteo historical forecast archive (stored daily by the collector) or, until that exists, the project's own short-lead archive. Neither contains measurements or future information.
+- **Model:** ridge regression on standardized predictors, fixed regularization (no tuning on test data), numpy only.
+- **Validation:** time-ordered split; the last 25 % of paired hours (≥ 24 h) are held out. Reported against climatology (training mean by hour) and persistence (value 1/6/24 h earlier) on the same hours.
+- **Output:** the model refit on all paired hours is applied to the current ICON run for the next 48 h, clipped to the observed range (+10 %). The band shows the 10-90 % quantiles of held-out residuals (empirical, not a probabilistic guarantee).
+- **Threshold:** no forecast is shown below 168 paired hours; the page states how many are available.
+- **Updates:** with every new model run (about every 6 h) and as GSE history grows.
+- **Status:** independent experimental estimate. Not official GSE data, not per-plant output, not for operational or dispatch decisions.
+
+### Forecast accuracy (`verification.py`)
+
+No anemometer measurements exist at the sites. The archived runs are therefore compared with model-based references, and the page says so:
+- the most recent later run at lead < 6 h (shares the model's biases);
+- or ERA5 at 10 m (independent model, about 25 km, 5-day lag).
+
+The reference is never taken from the run being scored. Direction errors are circular and use only hours with reference speed ≥ 3 m/s. Results accumulate as the archive grows (60 days of runs listed).
 
 ## Persistence (why and how)
 
@@ -66,6 +90,8 @@ The collector starts automatically once `.github/workflows/collect-gse.yml` is o
 
 - GitHub cron is best effort: runs can be delayed by tens of minutes or skipped. The live check covers the newest hour, and the bounded 12 h backfill can recover some missed runs.
 - History starts when collection starts (plus up to 48 h of backfill). There is no older archive.
+- The MW forecast needs at least one week of paired data. The historical forecast archive format (Open-Meteo historical forecast API) could not be verified live from the development environment, which hit Open-Meteo's daily per-IP limit; if the format differed, the collector records the refusal and the model falls back to the project's own archive.
+- Accuracy scores start empty and grow with the archive; ERA5-based scores lag by about 5 days.
 - Link previews (LinkedIn, Open Graph) use Streamlit's generic page metadata; Community Cloud does not allow custom meta tags.
 - Edge protection (TLS, rate limiting) is provided by Streamlit's hosting, not by the Caddy configuration of the main stack.
 - Safari/iOS were not tested on real devices; layout was checked in Chromium desktop and Pixel 7 emulation.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import httpx
@@ -16,7 +17,8 @@ from store import Record, StoreFormatError, day_path, merge, parse_day_csv, rend
 ROOT = Path(__file__).resolve().parents[2]
 ACT = (ROOT / "backend/tests/fixtures/gse/real_act_15112026_0009.xml").read_bytes()
 NAME = re.compile(r"_(\d\d)(\d\d)(\d{4})_(\d\d)(\d\d)\.XML$")
-NOW = datetime(2026, 11, 14, 20, 20, tzinfo=UTC)  # newest due label 20:18 UTC (00:18 Tbilisi)
+NOW = datetime(2026, 11, 14, 20, 20, tzinfo=UTC)
+TBILISI = ZoneInfo("Asia/Tbilisi")  # newest due label 20:18 UTC (00:18 Tbilisi)
 
 
 def relabel(local: str, base: bytes = ACT) -> bytes:
@@ -45,6 +47,7 @@ class Gse:
 
 
 def collector(tmp_path, gse, **kw):
+    kw.setdefault("deep_per_run", 0)  # steady-state behaviour; deep backfill has its own tests
     return Collector(tmp_path, gse.client, lookback_hours=kw.pop("hours", 1), **kw)
 
 
@@ -379,3 +382,80 @@ def test_steady_state_load_stays_within_production_envelope(tmp_path, quality):
     for i in range(1, 97):
         collector(tmp_path, gse, hours=12, max_requests=1000).run(NOW + timedelta(minutes=15 * i))
     assert 480 <= len(gse.requests) <= 480 + 4 * 96
+
+
+
+# ------------------------------------------------------------ continuity: catch-up and deep backfill
+
+def stored_labels(tmp_path):
+    out = set()
+    for path in (tmp_path / "gse").rglob("*.csv"):
+        out |= {r.period_label_utc for r in parse_day_csv(path.read_text())}
+    return out
+
+
+def test_skipped_runs_widen_the_window_beyond_12_hours(tmp_path):
+    gse = Gse()
+    collector(tmp_path, gse, hours=12).run(NOW)
+    later = NOW + timedelta(hours=20)  # GitHub skipped every run for 20 h
+    report, _ = collector(tmp_path, gse, hours=12, max_requests=1000).run(later)
+    assert report.lookback_used_hours == pytest.approx(21, abs=0.2)
+    assert set(due_labels(later, 20)) <= stored_labels(tmp_path)  # nothing lost
+    assert report.backfilled >= 380
+    status = json.loads((tmp_path / "status/gse_collector.json").read_text())
+    assert status["last_run"]["backfilled"] == report.backfilled
+
+
+def test_catch_up_is_bounded_at_48_hours(tmp_path):
+    gse = Gse()
+    collector(tmp_path, gse, hours=1).run(NOW)
+    report, _ = collector(tmp_path, gse, hours=12, max_requests=2000).run(NOW + timedelta(days=4))
+    assert report.lookback_used_hours == 48
+
+
+def test_deep_backfill_is_bounded_per_run_and_walks_backwards(tmp_path):
+    gse = Gse()
+    collector(tmp_path, gse, hours=1).run(NOW)
+    before = stored_labels(tmp_path)
+    gse.requests.clear()
+    report, _ = Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(seconds=5))
+    assert report.deep_requested == 20 and report.deep_inserted == 20
+    added = stored_labels(tmp_path) - before
+    assert len(added) == 20 and max(added) < min(before)  # strictly older than what was stored
+    deep = json.loads((tmp_path / "status/gse_collector.json").read_text())["deep_backfill"]
+    assert datetime.fromisoformat(deep["cursor"]) == min(added) and not deep["done"]
+
+
+def test_deep_backfill_stops_after_a_day_of_404s(tmp_path):
+    cutoff = NOW - timedelta(hours=2)
+
+    class Retention(Gse):
+        def handler(self, request):
+            name = request.url.path.rsplit("/", 1)[-1]
+            dd, mm, yyyy, hh, mi = NAME.search(name).groups()
+            label = datetime(int(yyyy), int(mm), int(dd), int(hh), int(mi)).replace(tzinfo=TBILISI).astimezone(UTC)
+            if label < cutoff:  # GSE retention ends here
+                return httpx.Response(404, headers={"content-type": "text/html"})
+            return super().handler(request)
+
+    gse = Retention()
+    collector(tmp_path, gse, hours=1).run(NOW)
+    done = False
+    for i in range(60):
+        Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(seconds=i + 1))
+        deep = json.loads((tmp_path / "status/gse_collector.json").read_text())["deep_backfill"]
+        if deep["done"]:
+            done = True
+            break
+    assert done and deep["consecutive_404"] >= 480
+    assert min(stored_labels(tmp_path)) >= cutoff  # nothing invented beyond retention
+    gse.requests.clear()
+    Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(minutes=5))
+    assert len(gse.requests) <= 3  # finished: no more deep requests
+
+
+def test_deep_backfill_pauses_while_the_source_fails(tmp_path):
+    collector(tmp_path, Gse(), hours=1).run(NOW)
+    bad = Gse(override=lambda name: httpx.Response(503, headers={"content-type": "text/html"}))
+    report, _ = Collector(tmp_path, bad.client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(minutes=5))
+    assert report.deep_requested == 0
