@@ -236,3 +236,7 @@ deploy/history.log
 deploy/last-attempt
 
 .venv-streamlit/
+.venv-st/
+.venv-col/
+.sectools/
+security-reports/

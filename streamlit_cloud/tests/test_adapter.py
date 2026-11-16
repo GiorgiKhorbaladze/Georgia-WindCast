@@ -9,9 +9,8 @@ import httpx
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'streamlit_cloud'))
-from data import SourceCache, generation_state, weather_state
-from app.ingestion.openmeteo import FORECAST, parse_response
+from app.ingestion.openmeteo import FORECAST, parse_response  # noqa: E402  (path set in conftest)
+from data import SourceCache, generation_state, weather_state  # noqa: E402
 
 FIXTURES = ROOT / 'backend/tests/fixtures'
 ACT = (FIXTURES / 'gse/real_act_15112026_0009.xml').read_bytes()
@@ -177,18 +176,70 @@ def test_bad_archive_retains_prior_payload():
     assert cache.errors['era5'] == 'invalid_weather_time_axis'
 
 
-def test_history_uses_elapsed_time_not_categories():
+def test_history_uses_elapsed_time_and_shows_gaps(offline_history):
+    """Two readings 3 h apart: the chart keeps elapsed time and leaves the missing periods empty."""
     from streamlit.testing.v1 import AppTest
     cache = SourceCache(transport())
     snapshot = cache.snapshot(NOW)
     later = dict(snapshot['history'][0])
     later['time'] += timedelta(hours=3)
     snapshot['history'].append(later)
+    offline_history.return_value = NOW + timedelta(hours=3, minutes=2)
     with patch('data.SourceCache.snapshot', return_value=snapshot):
         at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run()
         at.sidebar.radio[1].set_value('ისტორია').run()
+        assert not at.exception
         chart = json.loads(at.get('plotly_chart')[0].proto.spec)
         assert chart['layout']['xaxis']['type'] == 'date'
-        x = chart['data'][0]['x']
-        assert datetime.fromisoformat(x[1]) - datetime.fromisoformat(x[0]) == timedelta(hours=3)
-        assert x[0].startswith('2026-11-15T00:09')
+        x, y = chart['data'][0]['x'], chart['data'][0]['y']
+        assert x[0].startswith('2026-11-15T00:09')  # Tbilisi wall time of 20:09 UTC
+        assert datetime.fromisoformat(x[-1]) - datetime.fromisoformat(x[0]) == timedelta(hours=3)
+        assert len(x) == 61 and y[0] is not None and y[-1] is not None
+        assert all(v is None for v in y[1:-1])  # gaps, never interpolated
+
+
+# ------------------------------------------------------------- independent-review regressions
+
+def test_stale_beats_unverified_and_label_ahead_is_not_fresh():
+    item = dict(time=NOW, quality='NRE', value_mw=1.0)
+    assert generation_state(item, NOW + timedelta(minutes=11)) == 'stale'  # was "unverified"
+    assert generation_state(dict(item, quality='ACT'), NOW - timedelta(seconds=30)) == 'unverified'
+
+
+def test_non_act_value_is_shown_with_unverified_badge():
+    """Production rule: the published value and raw code stay visible (not replaced by '-')."""
+    from streamlit.testing.v1 import AppTest
+    cache = SourceCache(transport(ACT.replace(b"QUALITY='ACT'", b"QUALITY='NRE'")))
+    snapshot = cache.snapshot(NOW)
+    with patch('data.SourceCache.snapshot', return_value=snapshot):
+        at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
+        assert not at.exception
+        metrics = [m.value for m in at.metric]
+        assert metrics[0] == '73.60' and metrics[2] == 'NRE'
+        assert any('დაუდასტურებელი' in m.value for m in at.markdown)
+
+
+def test_durable_history_feeds_overview_and_map_is_rendered(offline_history):
+    from streamlit.testing.v1 import AppTest
+    from store import Record
+    durable = [Record(NOW - timedelta(minutes=3 * i), 'x', 10.0 + i, 'ACT', NOW, f's{i}', 'p') for i in range(1, 30)]
+    def gone(request):
+        return httpx.Response(404)
+    cache = SourceCache(httpx.MockTransport(gone))
+    with patch('history.HistoryReader.records', side_effect=lambda s, e, n: [r for r in durable if s <= r.period_label_utc <= e]), \
+         patch('data.SourceCache.snapshot', return_value=cache.snapshot(NOW)):
+        at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
+        assert not at.exception
+        assert at.metric[0].value == '11.00'  # newest durable row (NOW - 3 min)
+        assert at.get('deck_gl_json_chart'), 'site map missing'
+        assert at.get('plotly_chart'), '24 h chart missing'
+
+
+def test_old_collector_status_warns(offline_history):
+    from streamlit.testing.v1 import AppTest
+    status = {'last_success_at': (NOW - timedelta(hours=8)).isoformat()}
+    with patch('history.HistoryReader.status', return_value=status):
+        at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
+        at.sidebar.radio[1].set_value('ისტორია').run()
+        assert not at.exception
+        assert any('შემგროვებლის' in w.value for w in at.warning)

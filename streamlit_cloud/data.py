@@ -1,8 +1,14 @@
-"""On-demand, shared, bounded source cache. No background collector or durable archive."""
+"""Shared, bounded live source cache for the app (open pages only).
+
+Durable history comes from the scheduled collector (collector.py -> ``data`` branch, read by
+history.py). This cache only fills the minutes since the collector's last run and serves the
+weather products; it is not an archive.
+"""
 from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import sys
 import threading
 from datetime import UTC, datetime, timedelta
@@ -10,6 +16,7 @@ from pathlib import Path
 
 import httpx
 
+# Backend first: this directory's app.py (the Streamlit entrypoint) must not shadow backend/app.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 from app.ingestion.gse_parser import export_file_name, parse_wind_export
 from app.ingestion.http_policy import BackoffPolicy, FetchKind, fetch
@@ -23,13 +30,30 @@ WEATHER_BASE = 'https://api.open-meteo.com'
 ARCHIVE_BASE = 'https://archive-api.open-meteo.com'
 
 
+def utcnow():
+    """Single clock for the app (patched in tests)."""
+    return datetime.now(UTC)
+
+
+FRESH_WITHIN = timedelta(seconds=600)
+LIVE_LOOKBACK_PERIODS = 20  # last hour; older periods come from the collector
+LIVE_MAX_REQUESTS = 4  # per poll, newest first
+LIVE_RETENTION = timedelta(days=2)
+
+
 def generation_state(reading, now):
+    """Production rules (backend/app/api/v1.py): age from the source label first, then quality.
+
+    stale beats unverified, so an old non-ACT value is never reported as merely "unverified";
+    a label ahead of this clock (accepted skew) is unverified, never fresh.
+    """
     if reading is None:
         return 'unavailable'
-    if reading['quality'] != 'ACT':
+    if now - reading['time'] > FRESH_WITHIN:
+        return 'stale'
+    if reading['time'] > now or reading['quality'] != 'ACT':
         return 'unverified'
-    age = (now - reading['time']).total_seconds()
-    return 'fresh' if 0 <= age <= 600 else 'stale'
+    return 'fresh'
 
 
 def weather_state(packet, now, site_index, height):
@@ -67,8 +91,11 @@ class SourceCache:
         self.requested_labels = {}
 
     def client(self):
+        # No User-Agent override by default (same as the production worker); an operator may set
+        # WINDCAST_USER_AGENT to identify the deployment to the providers.
+        headers = {'User-Agent': ua} if (ua := os.environ.get('WINDCAST_USER_AGENT')) else {}
         return httpx.Client(timeout=10, follow_redirects=False, transport=self.transport,
-                            headers={'User-Agent': 'Georgia-WindCast/Streamlit (informational)'})
+                            headers=headers)
 
     def get(self, client, url, kind):
         result = fetch(client, url, expect=kind)
@@ -96,7 +123,10 @@ class SourceCache:
     def generation(self, client, now):
         due = (now - timedelta(seconds=75)).replace(second=0, microsecond=0)
         due -= timedelta(minutes=due.minute % 3)
-        for offset in range(3):
+        requests = 0
+        for offset in range(LIVE_LOOKBACK_PERIODS):
+            if requests >= LIVE_MAX_REQUESTS:
+                break
             label = due - timedelta(minutes=3 * offset)
             if label in self.history:
                 continue
@@ -106,19 +136,19 @@ class SourceCache:
             self.requested_labels[label] = dict(count=(attempt['count'] if attempt else 0) + 1,
                                                  next_due=now + timedelta(seconds=180))
             url = GSE_BASE + export_file_name(label)
+            requests += 1
             result = fetch(client, url)
             if result.kind == FetchKind.NOT_PUBLISHED:
                 continue
             if result.kind != FetchKind.OK:
                 raise SourceError(result.kind.value, result.retry_after)
             reading = parse_wind_export(result.body)
-            if reading.period_label_utc != label or reading.period_label_utc > now:
+            if reading.period_label_utc != label or reading.period_label_utc > now + timedelta(seconds=60):
                 raise SourceError('source_timestamp_mismatch')
             self.history[label] = dict(time=label, value_mw=reading.value_mw,
                                        quality=reading.quality, retrieved=now, url=url,
                                        sha256=hashlib.sha256(result.body).hexdigest())
-            break
-        cutoff = now - timedelta(days=7)
+        cutoff = now - LIVE_RETENTION
         self.history = {k: v for k, v in self.history.items() if k >= cutoff}
         self.requested_labels = {k: v for k, v in self.requested_labels.items() if k >= cutoff}
 

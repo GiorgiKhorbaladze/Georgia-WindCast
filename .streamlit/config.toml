@@ -7,6 +7,7 @@ textColor = "#edf5fa"
 font = "sans serif"
 [client]
 showErrorDetails = "none"
+toolbarMode = "viewer"
 [server]
 headless = true
 
