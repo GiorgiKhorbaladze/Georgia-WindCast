@@ -49,14 +49,16 @@ Severity is the project-specific risk after triage, not the raw scanner label.
 
 ## 3. Image results after the fixes (Trivy 0.76.2, amd64)
 
-| Image | Before | After |
-| --- | --- | --- |
-| postgres | 3 CRITICAL / 53 HIGH | **0 findings** |
-| backend | 7 CRITICAL / 120 HIGH | **0 CRITICAL**; 49 HIGH, of which 2 (zlib) have a Debian fix that the strict `apt-get upgrade` applies in CI (this sandbox could not reach the Debian mirror) |
-| frontend | 5 CRITICAL / 60 HIGH | **1 MEDIUM** |
-| caddy | 2 HIGH | 1 HIGH without an upstream fix (`go-jose` v3.0.5, DoS via crafted RSA parameter; reachable only through ACME/JWS handling with Let's Encrypt) |
+"After" is the CI run on PR #20 head `af1b51d` (Security run 43813434032, OS updates applied fail-closed). The local sandbox run could not reach the Debian/Alpine mirrors and showed slightly higher counts.
 
-The arm64 images are scanned with the same gate in the CI job **ARM64 images**.
+| Image | Before | After (CI) | Fixable now |
+| --- | --- | --- | --- |
+| postgres | 3 CRITICAL / 53 HIGH | **0 findings** | 0 |
+| backend | 7 CRITICAL / 120 HIGH | **0 CRITICAL**, 47 HIGH, 97 MEDIUM, 66 LOW, 5 UNKNOWN (Debian 13.7 packages without a released fix) | 5 MEDIUM, 1 LOW; **no fixable HIGH/CRITICAL** (the zlib HIGH seen locally is fixed by the strict `apt-get upgrade`) |
+| frontend | 5 CRITICAL / 60 HIGH | **0 findings** | 0 |
+| caddy | 2 HIGH | 1 HIGH, 5 MEDIUM, 1 UNKNOWN | 3 MEDIUM, 1 UNKNOWN; the HIGH (`go-jose` v3.0.5, DoS via crafted RSA parameter, reachable only through ACME/JWS handling) has no upstream fix |
+
+The arm64 images pass the same gate (no fixable CRITICAL) in the CI job **ARM64 images**, which also runs the full edge smoke (segmentation, non-root, `CapEff=0`, read-only roots) on emulated arm64. Fixable MEDIUM findings are below the gate and are picked up by base-image refreshes.
 
 ## 4. Runtime verification (ephemeral localhost stack, all three overlays)
 
