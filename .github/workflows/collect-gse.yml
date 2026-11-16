@@ -67,7 +67,7 @@ jobs:
           [ "$LOOKBACK" -le 48 ] || { echo "lookback above 48 h"; exit 1; }
           set +e
           venv/bin/python code/streamlit_cloud/collector.py --data-dir data \
-            --lookback-hours "$LOOKBACK" --max-requests 1000
+            --lookback-hours "$LOOKBACK" --max-requests 1000 --weather
           echo "code=$?" >> "$GITHUB_OUTPUT"
       - name: Commit and push (only when something changed)
         env:

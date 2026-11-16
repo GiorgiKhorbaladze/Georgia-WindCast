@@ -26,6 +26,7 @@ class HistoryReader:
         self._lock = threading.Lock()
         self._days: dict[date, tuple[datetime, list[Record]]] = {}
         self._status: tuple[datetime, dict | None] | None = None
+        self._weather: tuple[datetime, dict | None, dict | None] | None = None
         self.error: str | None = None
 
     def _get(self, client: httpx.Client, path: str) -> str | None:
@@ -68,6 +69,35 @@ class HistoryReader:
                 except (httpx.HTTPError, ValueError):
                     self._status = (now, self._status[1] if self._status else None)
             return self._status[1]
+
+
+    def weather(self, now: datetime) -> tuple[dict | None, dict | None]:
+        """Collector's stored Open-Meteo copies, validated exactly like live responses."""
+        import data as src  # local import: data adds backend/ to sys.path
+
+        with self._lock:
+            if self._weather is None or now - self._weather[0] >= timedelta(minutes=10):
+                forecast = archive = None
+                try:
+                    with self._client_factory() as client:
+                        meta = self._get(client, "weather/forecast_meta.json")
+                        body = self._get(client, "weather/forecast.json")
+                        if meta and body:
+                            m = json.loads(meta)
+                            forecast = src.forecast_packet(
+                                body.encode(), datetime.fromisoformat(m["run"]),
+                                datetime.fromisoformat(m["retrieved"]), m["url"], "collector")
+                        meta = self._get(client, "weather/era5_meta.json")
+                        body = self._get(client, "weather/era5.json")
+                        if meta and body:
+                            m = json.loads(meta)
+                            archive = src.archive_packet(
+                                body.encode(), datetime.fromisoformat(m["retrieved"]), m["url"], "collector")
+                except (httpx.HTTPError, ValueError, KeyError):
+                    old = self._weather
+                    forecast, archive = (old[1], old[2]) if old else (None, None)
+                self._weather = (now, forecast, archive)
+            return self._weather[1], self._weather[2]
 
 
 def collector_age(status: dict | None, now: datetime) -> timedelta | None:

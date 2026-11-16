@@ -32,6 +32,7 @@ def offline_history(request):
         patch("data.utcnow", return_value=CLOCK) as clock,
         patch("history.HistoryReader.records", side_effect=lambda s, e, n: [r for r in durable if s <= r.period_label_utc <= e]),
         patch("history.HistoryReader.status", return_value=None),
+        patch("history.HistoryReader.weather", return_value=(None, None)),
     ):
         yield clock
 

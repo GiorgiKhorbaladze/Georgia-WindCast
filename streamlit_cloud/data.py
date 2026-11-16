@@ -160,35 +160,25 @@ class SourceCache:
         if self.forecast is not None and run < self.forecast['run']:
             raise SourceError('model_run_regressed')
         if self.forecast is not None and self.forecast['run'] == run:
-            return
+            return  # same run already held (live or from the collector's stored copy)
         url = forecast_url(WEATHER_BASE, SITES, 4)
         body = self.get(client, url, 'json')
-        series = parse_response(body, len(SITES), FORECAST.heights)
         after = parse_run_time(self.get(client, metadata_url, 'json'))
         if after != run:
             raise SourceError('model_run_changed_during_fetch')
-        for location in series:
-            for height, values in location.by_height.items():
-                stamps = [v.valid_at for v in values]
-                if len(stamps) != len(set(stamps)) or stamps != sorted(stamps) or any(t.minute or t.second or t.microsecond for t in stamps):
-                    raise SourceError('invalid_weather_time_axis')
-                location.by_height[height] = [v for v in values if v.valid_at >= run]
-        self.forecast = dict(run=run, retrieved=now, series=series, url=url,
-                             sha256=hashlib.sha256(body).hexdigest())
+        self.forecast = forecast_packet(body, run, now, url, 'live')
 
     def reanalysis(self, client, now):
-        end = (now - timedelta(days=5)).date()
-        start = end - timedelta(days=6)
-        url = archive_url(ARCHIVE_BASE, SITES, str(start), str(end))
-        body = self.get(client, url, 'json')
-        series = parse_response(body, len(SITES), REANALYSIS.heights)
-        for location in series:
-            for values in location.by_height.values():
-                stamps = [v.valid_at for v in values]
-                if len(stamps) != len(set(stamps)) or stamps != sorted(stamps) or any(t.minute or t.second or t.microsecond for t in stamps):
-                    raise SourceError('invalid_weather_time_axis')
-        self.archive = dict(retrieved=now, series=series, url=url,
-                            sha256=hashlib.sha256(body).hexdigest())
+        url = era5_url(now)
+        self.archive = archive_packet(self.get(client, url, 'json'), now, url, 'live')
+
+    def adopt_stored(self, forecast=None, archive=None):
+        """Use the collector's stored copies when they are newer than (or replace missing) live data."""
+        with self.lock:
+            if forecast is not None and (self.forecast is None or forecast['run'] > self.forecast['run']):
+                self.forecast = forecast
+            if archive is not None and (self.archive is None or archive['retrieved'] > self.archive['retrieved']):
+                self.archive = archive
 
     def snapshot(self, now=None, include_archive=False):
         now = now or datetime.now(UTC)
@@ -200,6 +190,38 @@ class SourceCache:
             return copy.deepcopy(dict(history=sorted(self.history.values(), key=lambda x: x['time']),
                                       forecast=self.forecast, archive=self.archive,
                                       errors=self.errors, checked=self.checked, started=self.started))
+
+
+def _check_axis(series):
+    for location in series:
+        for values in location.by_height.values():
+            stamps = [v.valid_at for v in values]
+            if (len(stamps) != len(set(stamps)) or stamps != sorted(stamps)
+                    or any(t.minute or t.second or t.microsecond for t in stamps)):
+                raise SourceError('invalid_weather_time_axis')
+
+
+def forecast_packet(body, run, retrieved, url, origin):
+    """Strictly parsed forecast; hours before the model run are dropped (not part of the run)."""
+    series = parse_response(body, len(SITES), FORECAST.heights)
+    _check_axis(series)
+    for location in series:
+        for height, values in location.by_height.items():
+            location.by_height[height] = [v for v in values if v.valid_at >= run]
+    return dict(run=run, retrieved=retrieved, series=series, url=url, origin=origin,
+                sha256=hashlib.sha256(body).hexdigest())
+
+
+def era5_url(now):
+    end = (now - timedelta(days=5)).date()
+    return archive_url(ARCHIVE_BASE, SITES, str(end - timedelta(days=6)), str(end))
+
+
+def archive_packet(body, retrieved, url, origin):
+    series = parse_response(body, len(SITES), REANALYSIS.heights)
+    _check_axis(series)
+    return dict(retrieved=retrieved, series=series, url=url, origin=origin,
+                sha256=hashlib.sha256(body).hexdigest())
 
 
 class SourceError(ValueError):

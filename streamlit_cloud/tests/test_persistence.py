@@ -180,3 +180,78 @@ def test_reader_missing_day_is_empty_not_error(tmp_path):
     reader = reader_for(tmp_path)
     assert reader.records(NOW - timedelta(days=3), NOW, NOW) == [] and reader.error is None
     assert reader.status(NOW) is None and collector_age(None, NOW) is None
+
+
+# ---------------------------------------------------------------- Open-Meteo copies (second path)
+
+FIX = ROOT / "backend/tests/fixtures/openmeteo"
+FORECAST_BODY = (FIX / "real_forecast_icon_global_3sites.json").read_bytes()
+ARCHIVE_BODY = (FIX / "real_archive_era5_3sites_20261106.json").read_bytes()
+META = (FIX / "real_meta_dwd_icon_before.json").read_bytes()  # run 2026-11-14T18:00Z
+RUN = datetime(2026, 11, 14, 18, tzinfo=UTC)
+
+
+class Weather:
+    def __init__(self, metas=None, forecast=FORECAST_BODY, status=200):
+        self.metas, self.forecast, self.status, self.calls = list(metas or [META]), forecast, status, []
+
+    def handler(self, request):
+        self.calls.append(request.url.path)
+        if self.status != 200:
+            return httpx.Response(self.status, headers={"content-type": "application/json"}, content=b"{}")
+        if request.url.path.endswith("meta.json"):
+            body = self.metas.pop(0) if len(self.metas) > 1 else self.metas[0]
+            return httpx.Response(200, content=body, headers={"content-type": "application/json"})
+        body = self.forecast if request.url.path == "/v1/forecast" else ARCHIVE_BODY
+        return httpx.Response(200, content=body, headers={"content-type": "application/json"})
+
+    def client(self):
+        return httpx.Client(transport=httpx.MockTransport(self.handler))
+
+
+def test_weather_copies_stored_once_per_run_and_day(tmp_path):
+    from collector import collect_weather
+    w = Weather()
+    status, code = collect_weather(tmp_path, w.client, RUN + timedelta(hours=1))
+    assert code == 0 and status == {**status, "forecast": "updated", "era5": "updated"}
+    assert (tmp_path / "weather/forecast.json").read_bytes() == FORECAST_BODY
+    meta = json.loads((tmp_path / "weather/forecast_meta.json").read_text())
+    assert meta["run"] == RUN.isoformat()
+    w.calls.clear()
+    status, _ = collect_weather(tmp_path, w.client, RUN + timedelta(hours=2))
+    assert status["forecast"] == "unchanged" and status["era5"] == "unchanged"
+    assert w.calls == ["/data/dwd_icon/static/meta.json"]  # only the run check
+
+
+def test_weather_run_change_and_rate_limit_keep_old_copy(tmp_path):
+    from collector import collect_weather
+    newer = json.dumps({"last_run_initialisation_time": int(RUN.timestamp()) + 6 * 3600}).encode()
+    status, code = collect_weather(tmp_path, Weather(metas=[META, newer]).client, RUN + timedelta(hours=7))
+    assert status["forecast"] == "failed: model_run_changed_during_fetch" and code == 0
+    assert not (tmp_path / "weather/forecast.json").exists()
+    status, code = collect_weather(tmp_path, Weather(status=429).client, RUN + timedelta(hours=7))
+    assert status["forecast"] == "failed: rate_limited" and code == 0
+
+
+def test_weather_schema_drift_is_refused(tmp_path):
+    from collector import collect_weather
+    status, code = collect_weather(tmp_path, Weather(forecast=b'{"hourly": {}}').client, RUN + timedelta(hours=1))
+    assert status["forecast"].startswith("refused") and code == 1
+    assert not (tmp_path / "weather/forecast.json").exists()
+
+
+@pytest.mark.real_history
+def test_reader_serves_stored_weather_and_cache_prefers_newer_run(tmp_path):
+    from collector import collect_weather
+    from data import SourceCache
+    collect_weather(tmp_path, Weather().client, RUN + timedelta(hours=1))
+    forecast, archive = reader_for(tmp_path).weather(RUN + timedelta(hours=1))
+    assert forecast["run"] == RUN and forecast["origin"] == "collector" and len(forecast["series"]) == 3
+    assert archive["origin"] == "collector"
+    cache = SourceCache()
+    older = dict(forecast, run=RUN - timedelta(hours=6), origin="live")
+    cache.forecast = older
+    cache.adopt_stored(forecast, archive)
+    assert cache.forecast["run"] == RUN and cache.archive is archive
+    cache.adopt_stored(dict(forecast, run=RUN - timedelta(hours=12)), None)
+    assert cache.forecast["run"] == RUN  # never replaced by an older run

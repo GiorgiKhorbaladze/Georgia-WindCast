@@ -83,8 +83,10 @@ def main():
     @st.fragment(run_every=180)
     def dashboard():
         now = source.utcnow()
-        data = source_cache().snapshot(now, include_archive=page == tr('ისტორია', 'History'))
         reader = history_reader()
+        cache = source_cache()
+        cache.adopt_stored(*reader.weather(now))  # second path when Open-Meteo limits this host
+        data = cache.snapshot(now, include_archive=page == tr('ისტორია', 'History'))
         for name, error in data['errors'].items():
             st.warning(tr(f'{name}: განახლება ვერ შესრულდა ({error}). ნაჩვენებია ბოლო მიღებული მონაცემები მათი დროით.',
                           f'{name}: refresh failed ({error}). Showing the last data received, with its time.'))
@@ -191,7 +193,8 @@ def forecast(tr, ka, states, data, now):
         return
     values = [v for v in packet['series'][idx].by_height[height]
               if now.replace(minute=0, second=0, microsecond=0) <= v.valid_at <= now + timedelta(hours=72)]
-    st.caption(tr('მოდელის გაშვება: ', 'Model run: ') + local(packet['run']) + ' · ' + tr('მიღებულია: ', 'Retrieved: ') + local(packet['retrieved']))
+    via = tr(' (შემგროვებლის ასლი)', ' (collector copy)') if packet.get('origin') == 'collector' else ''
+    st.caption(tr('მოდელის გაშვება: ', 'Model run: ') + local(packet['run']) + ' · ' + tr('მიღებულია: ', 'Retrieved: ') + local(packet['retrieved']) + via)
     if values:
         st.caption(tr(f'მოქმედების დრო: {local(values[0].valid_at)} - {local(values[-1].valid_at)} · უწყვეტი დაფარვა წინ: {hours} სთ (მაქს. 72).',
                       f'Valid time: {local(values[0].valid_at)} - {local(values[-1].valid_at)} · continuous forward coverage: {hours} h (max 72).'))

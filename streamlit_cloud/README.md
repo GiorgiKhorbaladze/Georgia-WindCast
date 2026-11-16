@@ -28,6 +28,8 @@ Community Cloud has no persistent storage, and apps sleep after 12 h without vis
 
 **Freshness between runs:** the app still checks the newest GSE periods live (at most 4 requests per 3 minutes for all visitors, last hour only) and merges them with the durable rows. Each row keeps its source label, quality code and SHA-256.
 
+**Open-Meteo second path:** Open-Meteo limits free use per IP address (10,000 requests/day). Cloud hosts share egress IPs, and during testing this project's environment received `429 Daily API request limit exceeded` from the archive API. The collector therefore also stores the validated raw forecast once per new model run (run time checked before and after the download) and ERA5 once per day under `weather/`. The app uses the stored copy when its own request fails or when the stored run is newer, and labels it "collector copy". The same strict parser and time-axis checks apply to both paths.
+
 ### Data branch format
 
 `gse/YYYY/MM/YYYY-MM-DD.csv` (UTC date of the label):
@@ -35,6 +37,8 @@ Community Cloud has no persistent storage, and apps sleep after 12 h without vis
 ```
 period_label_utc,period_label_local,value_mw,quality,retrieved_at_utc,payload_sha256,parser_version,revision
 ```
+
+`weather/forecast.json`, `weather/era5.json` (raw Open-Meteo payloads) with `*_meta.json` (run, retrieval time, URL, SHA-256) and `weather/status.json`.
 
 `status/gse_collector.json` holds the last run, last success, latest label and pending 404 retries. The app shows the collector's last success and warns when it is older than 6 h.
 

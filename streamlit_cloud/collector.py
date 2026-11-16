@@ -212,11 +212,75 @@ class Collector:
         misses.pop(label.isoformat(), None)
 
 
+WEATHER_DIR = "weather"
+
+
+def collect_weather(data_dir: Path, client_factory: Callable[[], httpx.Client], now: datetime) -> tuple[dict, int]:
+    """Stores validated Open-Meteo payloads as a second path for the app (shared cloud IPs hit the
+    provider's per-IP limits). Forecast: once per new model run, run time checked before and after.
+    ERA5: once per UTC day. Returns (status, exit code: 1 only for a schema refusal)."""
+    import data as src  # same validation as the app's live path
+    from app.ingestion.openmeteo import OpenMeteoError
+
+    wdir = data_dir / WEATHER_DIR
+    wdir.mkdir(parents=True, exist_ok=True)
+
+    def load(name: str) -> dict:
+        path = wdir / name
+        return json.loads(path.read_text("utf-8")) if path.exists() else {}
+
+    status: dict = {"last_run_at": now.isoformat()}
+    code = 0
+    with client_factory() as client:
+        def get(url: str) -> bytes:
+            result = fetch(client, url, expect="json")
+            if result.kind is not FetchKind.OK:
+                raise src.SourceError(result.kind.value)
+            return result.body
+
+        for product in ("forecast", "era5"):
+            try:
+                meta = load(f"{product}_meta.json")
+                if product == "forecast":
+                    murl = src.meta_url(src.WEATHER_BASE, src.FORECAST.meta_model)
+                    run = src.parse_run_time(get(murl))
+                    if run > now:
+                        raise src.SourceError("future_model_run")
+                    if meta.get("run") == run.isoformat():
+                        status[product] = "unchanged"
+                        continue
+                    url = src.forecast_url(src.WEATHER_BASE, src.SITES, 4)
+                    body = get(url)
+                    if src.parse_run_time(get(murl)) != run:
+                        raise src.SourceError("model_run_changed_during_fetch")
+                    packet = src.forecast_packet(body, run, now, url, "collector")
+                    new_meta = dict(run=run.isoformat(), retrieved=now.isoformat(), url=url, sha256=packet["sha256"])
+                else:
+                    if meta.get("retrieved", "")[:10] == now.date().isoformat():
+                        status[product] = "unchanged"
+                        continue
+                    url = src.era5_url(now)
+                    body = get(url)
+                    packet = src.archive_packet(body, now, url, "collector")
+                    new_meta = dict(retrieved=now.isoformat(), url=url, sha256=packet["sha256"])
+                (wdir / f"{product}.json").write_bytes(body)
+                (wdir / f"{product}_meta.json").write_text(json.dumps(new_meta, indent=2) + "\n", "utf-8")
+                status[product] = "updated"
+            except OpenMeteoError as exc:  # schema drift: refuse and fail visibly
+                status[product] = f"refused: {exc.code}"
+                code = 1
+            except (src.SourceError, ValueError, httpx.HTTPError) as exc:  # transient: keep old copy
+                status[product] = f"failed: {getattr(exc, 'code', type(exc).__name__)}"
+    (wdir / "status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n", "utf-8")
+    return status, code
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--data-dir", type=Path, required=True)
     p.add_argument("--lookback-hours", type=float, default=12)
     p.add_argument("--max-requests", type=int, default=300)
+    p.add_argument("--weather", action="store_true", help="also store Open-Meteo forecast/ERA5 copies")
     args = p.parse_args(argv)
     headers = {"Accept": "application/xml, text/xml"}
     if ua := os.environ.get("WINDCAST_GSE_USER_AGENT"):
@@ -229,6 +293,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     report, code = collector.run()
     print(json.dumps(report.__dict__, sort_keys=True))
+    if args.weather:
+        wheaders = {"Accept": "application/json", **({"User-Agent": ua} if ua else {})}
+        wstatus, wcode = collect_weather(
+            args.data_dir,
+            lambda: httpx.Client(timeout=httpx.Timeout(20.0), headers=wheaders, follow_redirects=False),
+            datetime.now(UTC),
+        )
+        print(json.dumps(wstatus, sort_keys=True))
+        code = code or wcode
     return code
 
 
