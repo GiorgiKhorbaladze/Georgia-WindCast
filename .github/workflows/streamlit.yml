@@ -1,0 +1,36 @@
+name: Streamlit edition
+
+on:
+  push:
+    branches: [main, work/streamlit-cloud]
+    paths: ['streamlit_cloud/**', 'backend/app/**', '.streamlit/**', '.github/workflows/streamlit.yml', '.github/workflows/collect-gse.yml']
+  pull_request:
+    paths: ['streamlit_cloud/**', 'backend/app/**', '.streamlit/**', '.github/workflows/streamlit.yml', '.github/workflows/collect-gse.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  streamlit:
+    name: Streamlit edition (app, collector, store; offline tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.11.32"
+      - name: Install the exact Community Cloud and collector requirements
+        run: |
+          uv venv -p 3.12 .venv-st
+          uv pip install -p .venv-st -r streamlit_cloud/requirements.txt -r streamlit_cloud/collector-requirements.txt pytest==8.4.2
+      - name: Tests (recorded payloads; no upstream or data-branch request)
+        run: .venv-st/bin/python -m pytest -q streamlit_cloud/tests
+      - name: Collector runs with only its own requirements
+        run: |
+          uv venv -p 3.12 .venv-col
+          uv pip install -p .venv-col -r streamlit_cloud/collector-requirements.txt
+          .venv-col/bin/python streamlit_cloud/collector.py --help >/dev/null
