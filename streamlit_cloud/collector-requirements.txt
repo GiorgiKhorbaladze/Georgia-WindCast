@@ -1,0 +1,5 @@
+# Collector only (GitHub Actions). Pinned; update in a reviewed PR.
+httpx==0.28.1
+defusedxml==0.7.1
+tzdata==2026.6
+pydantic==2.12.4

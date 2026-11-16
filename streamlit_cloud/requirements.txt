@@ -1,0 +1,15 @@
+# Streamlit Community Cloud installs this file (next to the entrypoint). Pinned; every version was
+# released at least two weeks before it was pinned. The last block pins transitive packages to
+# releases that fix HIGH/CRITICAL advisories found by Trivy (2026-11-16); update in a reviewed PR.
+streamlit==1.66.1
+plotly==6.4.0
+pandas==2.3.3
+httpx==0.28.1
+pydantic==2.12.4
+defusedxml==0.7.1
+pydeck==0.9.3
+# transitive security pins
+pillow==13.0.0
+pyarrow==23.0.1
+msgpack==1.2.3
+urllib3==2.8.0

@@ -19,8 +19,10 @@ T="${SECTOOLS_DIR:-.sectools}"
 OUT=security-reports
 mkdir -p "$OUT"
 export TRIVY_CACHE_DIR="${TRIVY_CACHE_DIR:-$T/trivy-cache}"
-EXCLUDES=(node_modules .venv .next .mypy_cache .sectools security-reports frontend/public/vendor
-  playwright-report test-results)
+# .git: history is scanned by the `trufflehog git` pass (reachable commits); the filesystem pass
+# must not read raw object files, which can hold unreachable local leftovers that were never pushed.
+EXCLUDES=(.git node_modules .venv .venv-st .venv-col .next .mypy_cache .sectools security-reports
+  frontend/public/vendor playwright-report test-results)
 
 secrets() {
   # --no-verification: candidate secrets are never sent to any third-party API.
