@@ -10,6 +10,8 @@ An informational web application that shows:
 
 Both data sources ship **disabled** (`WINDCAST_GSE_INGESTION_ENABLED`, `WINDCAST_WEATHER_INGESTION_ENABLED`) until the owner confirms the reuse/licence terms. While a source is off or failing, the UI shows explicit unavailable or stale states, never placeholder values. No per-plant MW and no MW forecast exist anywhere in the application. Operations: [docs/OPERATIONS.md](docs/OPERATIONS.md). Public HTTPS deployment on Oracle Cloud Always Free: [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md); launch gates: [docs/PUBLIC-LAUNCH-CHECKLIST.md](docs/PUBLIC-LAUNCH-CHECKLIST.md).
 
+**Streamlit demo edition:** `streamlit_app/` is a separate, database-free demo for Streamlit Community Cloud (latest GSE value plus a 3-hour in-memory window, and the current Open-Meteo forecast). Unlike the Docker stack, it contacts GSE and Open-Meteo whenever it runs (owner decision, 2026-11-16). Deployment and limits: [docs/STREAMLIT.md](docs/STREAMLIT.md).
+
 ## Repository layout
 
 | Path | Contents |
@@ -26,6 +28,7 @@ Both data sources ship **disabled** (`WINDCAST_GSE_INGESTION_ENABLED`, `WINDCAST
 | `scripts/host-setup.sh`, `scripts/deploy.sh`, `scripts/rollback.sh`, `scripts/backup-rotate.sh` | Host preparation, exact-SHA deploy, coordinated rollback (code + paired backup), daily backups |
 | `scripts/rollback-rehearsal.sh` | Cross-schema rollback rehearsal (CI job) |
 | `frontend/e2e/` | Playwright browser tests (desktop + mobile, axe accessibility) |
+| `streamlit_app/`, `.streamlit/` | Database-free Streamlit demo edition ([docs/STREAMLIT.md](docs/STREAMLIT.md)) |
 | `docs/` | Specification, ADRs, evidence |
 
 ## Run the full stack

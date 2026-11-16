@@ -25,11 +25,16 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.ingestion.gse_parser import (
     PARSER_VERSION,
-    GseFutureLabelError,
-    GseLabelError,
     GseParseError,
     export_file_name,
     parse_wind_export,
+)
+from app.ingestion.gse_periods import (  # re-exported for callers
+    FUTURE_LABEL_TOLERANCE,
+    PERIOD,
+    due_labels,
+    floor_period,
+    validate_label,
 )
 from app.ingestion.http_policy import BackoffPolicy, FetchKind, FetchResult, fetch
 from app.models import GenerationReading, SourceStatusRecord
@@ -39,19 +44,14 @@ log = logging.getLogger("windcast.ingestion.gse")
 
 SOURCE_ID = "gse"
 METRIC_WIND = "wind_total"
-PERIOD = timedelta(minutes=3)
-
-
-def floor_period(t: datetime) -> datetime:
-    """Floor an aware datetime to the 3-minute grid (GSE labels fall on :00, :03, ...)."""
-    t = t.replace(second=0, microsecond=0)
-    return t - timedelta(minutes=t.minute % 3)
-
-
-def due_labels(now: datetime, lag: timedelta, count: int) -> list[datetime]:
-    """Period labels that should be published by ``now``, newest first."""
-    newest = floor_period(now - lag)
-    return [newest - i * PERIOD for i in range(count)]
+__all__ = [
+    "FUTURE_LABEL_TOLERANCE",
+    "PERIOD",
+    "GseIngestionJob",
+    "due_labels",
+    "floor_period",
+    "validate_label",
+]
 
 
 @dataclass
@@ -69,21 +69,6 @@ class TickReport:
 class StoreOutcome:
     inserted: bool
     revised: bool
-
-
-# Clock skew allowance between this host and GSE before a label counts as "in the future".
-FUTURE_LABEL_TOLERANCE = timedelta(seconds=60)
-
-
-def validate_label(reading_label: datetime, expected_label: datetime | None, now: datetime) -> None:
-    """Refuse a payload whose embedded period does not match the requested file, or lies ahead."""
-    if expected_label is not None and reading_label != expected_label:
-        raise GseLabelError(
-            f"embedded period {reading_label.isoformat()} does not match requested "
-            f"{expected_label.isoformat()}"
-        )
-    if reading_label > now + FUTURE_LABEL_TOLERANCE:
-        raise GseFutureLabelError(f"embedded period {reading_label.isoformat()} is in the future")
 
 
 def store_reading(

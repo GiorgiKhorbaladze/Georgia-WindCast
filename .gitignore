@@ -238,3 +238,4 @@ deploy/last-attempt
 # Security tooling and reports (scripts/security/)
 .sectools/
 security-reports/
+.demo-venv/

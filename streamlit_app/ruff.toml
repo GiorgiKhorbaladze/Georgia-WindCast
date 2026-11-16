@@ -1,0 +1,9 @@
+extend = "../backend/pyproject.toml"
+
+[lint.isort]
+known-first-party = ["app", "conftest", "windcast_demo"]
+
+[lint.per-file-ignores]
+# Long Georgian/English UI strings: wrapping them would only hurt readability of the copy.
+"streamlit_app.py" = ["E501"]
+"tests/**" = ["S311"]

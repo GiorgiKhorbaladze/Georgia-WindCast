@@ -1,0 +1,12 @@
+# Streamlit settings for the demo (streamlit_app/). Community Cloud reads this file from the
+# repository root.
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "viewer"
+showErrorDetails = "none"  # visitors see a generic message; details stay in the app log
+
+[theme]
+base = "light"
+primaryColor = "#0b63c5"
