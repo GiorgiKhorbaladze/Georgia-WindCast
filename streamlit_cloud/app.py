@@ -38,15 +38,48 @@ PAGES = ('overview', 'balance', 'analytics', 'forecast', 'accuracy', 'data')
 STATE_KEY = {'fresh': 'st_fresh', 'stale': 'st_stale', 'unavailable': 'st_unavailable', 'unverified': 'st_unverified'}
 
 
+# Shared objects are cached per code version: on a redeploy Streamlit reloads the modules but keeps
+# cache_resource entries, so an instance of the OLD class (without newer methods) would survive and
+# raise AttributeError. Keying by the class identity creates a fresh instance after every reload.
 @st.cache_resource
-def source_cache():
+def _source_cache(code_version: str):
     return SourceCache()
 
 
 @st.cache_resource
-def history_reader():
+def _history_reader(code_version: str):
     base = os.environ.get('WINDCAST_DATA_BASE_URL', DATA_BASE)
     return HistoryReader(lambda: httpx.Client(timeout=10, follow_redirects=False), base)
+
+
+def source_cache():
+    return _source_cache(f'{SourceCache.__module__}:{id(SourceCache)}')
+
+
+def history_reader():
+    return _history_reader(f'{HistoryReader.__module__}:{id(HistoryReader)}')
+
+
+AUTHOR_LINKEDIN = 'https://www.linkedin.com/in/dr-giorgi-khorbaladze-academician-b1b744103'
+AUTHOR_PHOTO = Path(__file__).resolve().parent / 'assets' / 'author.jpg'
+
+
+@st.cache_data
+def _author_photo_b64():
+    import base64
+    return base64.b64encode(AUTHOR_PHOTO.read_bytes()).decode('ascii') if AUTHOR_PHOTO.exists() else ''
+
+
+def author_block(lang):
+    photo = _author_photo_b64()
+    img = (f'<img src="data:image/jpeg;base64,{photo}" alt="" style="width:56px;height:56px;border-radius:50%;'
+           f'border:2px solid {ui.C["accent"]};object-fit:cover">') if photo else ''
+    st.sidebar.markdown(
+        f'<div style="display:flex;align-items:center;gap:.7rem;margin-top:1rem;padding:.7rem;border:1px solid {ui.C["border"]};'
+        f'border-radius:12px;background:{ui.C["panel2"]}">{img}<div><div class="wc-label">{ui.esc(tr("author_label", lang))}</div>'
+        f'<div style="font-weight:600">{ui.esc(tr("author_name", lang))}</div>'
+        f'<a href="{AUTHOR_LINKEDIN}" target="_blank" rel="noopener noreferrer" style="color:{ui.C["accent2"]};font-size:.85rem">LinkedIn ↗</a>'
+        f'</div></div>', unsafe_allow_html=True)
 
 
 def local(value, fmt='%d.%m.%Y %H:%M'):
@@ -82,6 +115,7 @@ def main():
     page = st.sidebar.radio(tr('nav', lang), PAGES, format_func=lambda p: tr(f'page_{p}', lang))
     st.sidebar.caption(tr('tz_note', lang))
     st.sidebar.caption(tr('independent', lang))
+    author_block(lang)
     ui.inject()
 
     @st.fragment(run_every=180)

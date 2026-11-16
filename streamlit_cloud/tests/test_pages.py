@@ -174,3 +174,24 @@ def test_overview_has_separate_balance_chart():
     with patch("history.HistoryReader.balance", side_effect=lambda s, e, n: [r for r in rows if s <= r.period_label_utc <= e]):
         at = run("overview", "ka", durable_two_days())
     assert any("ბალანსი" in h.value for h in at.subheader)
+
+
+def test_author_block_with_photo_and_linkedin():
+    at = run("overview", "en", durable_two_days())
+    side = " ".join(m.value for m in at.sidebar.markdown)
+    assert "Dr. Giorgi Khorbaladze" in side and "data:image/jpeg;base64," in side
+    assert "linkedin.com/in/dr-giorgi-khorbaladze-academician-b1b744103" in side
+
+
+def test_cached_reader_is_recreated_after_a_code_reload():
+    """Regression: an instance of an older HistoryReader class (missing new methods) must not survive."""
+    import history
+    at = run("forecast", "en", durable_two_days())
+    assert not at.exception
+
+    class Reloaded(history.HistoryReader):  # stands in for the class after a redeploy reload
+        pass
+
+    with patch("history.HistoryReader", Reloaded):
+        at2 = run("accuracy", "en")
+    assert not at2.exception
