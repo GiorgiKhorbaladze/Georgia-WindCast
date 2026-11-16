@@ -169,3 +169,17 @@ def run(target: pd.Series, train_weather: pd.DataFrame, live_weather: pd.DataFra
         model=_metrics(y_test, p_test), climatology=_metrics(y_test, p_clim), persistence=persistence,
         forecast=forecast, test_frame=pd.DataFrame({"actual": y_test, "model": p_test}, index=test.index),
     )
+
+
+def fair_baseline(res: ModelResult) -> tuple[str, float] | None:
+    """Best baseline available at a day-ahead lead: ("climatology" | "persistence24", MAE).
+
+    Persistence of 1 h or 6 h is reported in the table but is not a fair yardstick for a 24-48 h
+    forecast, so it does not decide whether the model is described as skilful.
+    """
+    cands = []
+    if res.climatology:
+        cands.append(("climatology", res.climatology["mae"]))
+    if 24 in res.persistence:
+        cands.append(("persistence24", res.persistence[24]["mae"]))
+    return min(cands, key=lambda c: c[1]) if cands else None
