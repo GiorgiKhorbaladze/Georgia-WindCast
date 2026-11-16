@@ -1,10 +1,14 @@
 """Power-system balance blocks of the GSE 3-minute export (same file as the wind aggregate).
 
 Verified on a recorded file (15.11.2026 00:09): hydro + thermal + wind + solar = total generation,
-and consumption - total generation = sum of all tie-line flows (positive = into Georgia). The
-per-country "IntchSum" rows are NOT used: in the recorded file the Russia sum reads 0 while its
-individual lines carry 32.6 MW, so a per-country split would be misleading. Net interchange is
-therefore derived as consumption - total generation and labelled as derived.
+and consumption - total generation = sum of all tie-line flows (positive = into Georgia).
+
+Import and export are shown separately, as on GSE's own website: import = sum of positive line
+flows, export = sum of negative line flows (absolute). Per tie-line block the individual
+"Intercha" lines are used when present, otherwise the block's "IntchSum": in the Russia block the
+sum reads 0 while its lines (Java, Nakaduli) carry the flow. On 16.11.2026 22:39 this gave import
+34.7 MW (Java + Nakaduli) and export 24.1 MW (Azerbaijan), matching GSE's site within rounding/time.
+The closure import - export = consumption - generation is checked by the tests.
 
 Strict like the wind parser: defusedxml, embedded period checked by the caller, every required
 block exactly once, finite values within broad bounds. Quality codes are kept verbatim per block.
@@ -33,7 +37,7 @@ BLOCKS = {  # field -> block name prefix (GSE pads names with spaces)
 }
 SOURCES = ("hydro", "thermal", "wind", "solar")
 MIN_MW, MAX_MW = -500.0, 10000.0
-BALANCE_PARSER_VERSION = "gse-balance-03m/1"
+BALANCE_PARSER_VERSION = "gse-balance-03m/2"  # /2 adds gross import and export
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +49,8 @@ class Balance:
     solar: float
     generation: float
     consumption: float
+    imports: float
+    exports: float
     quality: str  # e.g. "hydro:SUB;thermal:SUB;wind:ACT;solar:SUB;generation:SUB;consumption:SUB"
 
     @property
@@ -87,4 +93,29 @@ def parse_balance(payload: bytes):
             raise GseValueError(f"implausible {field} {v}")
         values[field] = 0.0 if v == 0.0 else v
         quality.append(f"{field}:{(rows[0].get('QUALITY') or '').strip() or '?'}")
-    return label_utc, Balance(period_label_local=label_local, quality=";".join(quality), **values)
+    imports, exports = _tie_flows(areas)
+    return label_utc, Balance(period_label_local=label_local, quality=";".join(quality),
+                              imports=imports, exports=exports, **values)
+
+
+def _tie_flows(areas) -> tuple[float, float]:
+    """Gross import and export (MW) over all tie-line blocks; individual lines preferred."""
+    blocks = [b for b in areas if "TIE LINES" in (b.get("Name") or "")]
+    if not blocks:
+        raise GseSchemaError("no tie-line blocks")
+    flows: list[float] = []
+    for b in blocks:
+        rows = [ta for ta in b.iterfind("TA")
+                if (ta.get("EL") or "").strip() == "P" and (ta.get("IN") or "").strip() == "MvAvr03m"]
+        lines = [ta for ta in rows if (ta.get("B2") or "").strip() == "Intercha"]
+        sums = [ta for ta in rows if (ta.get("B2") or "").strip() == "IntchSum"]
+        for ta in (lines or sums):
+            raw = (ta.get("VALUE") or "").strip()
+            try:
+                v = float(raw)
+            except ValueError as exc:
+                raise GseValueError(f"non-numeric tie flow {raw!r}") from exc
+            if not math.isfinite(v) or abs(v) > MAX_MW:
+                raise GseValueError(f"implausible tie flow {v}")
+            flows.append(v)
+    return float(sum(v for v in flows if v > 0)), float(-sum(v for v in flows if v < 0))

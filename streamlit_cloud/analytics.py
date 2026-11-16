@@ -283,7 +283,7 @@ def windy_vs_calm(bal: pd.DataFrame, min_periods: int = 40) -> dict | None:
     """
     if bal is None or len(bal) < min_periods:
         return None
-    net = bal["consumption"] - bal["generation"]
+    net = (bal["imp"] - bal["exp"]) if {"imp", "exp"} <= set(bal.columns) else bal["consumption"] - bal["generation"]
     hi, lo = bal["wind"].quantile(0.75), bal["wind"].quantile(0.25)
     windy, calm = bal[bal["wind"] >= hi], bal[bal["wind"] <= lo]
     if windy.empty or calm.empty:

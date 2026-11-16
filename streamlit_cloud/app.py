@@ -282,10 +282,16 @@ def _fill(hex_color, alpha=0.82):
 
 def balance_frame(rows):
     df = pd.DataFrame([dict(time=r.period_label_utc, hydro=r.hydro_mw, thermal=r.thermal_mw, wind=r.wind_mw, solar=r.solar_mw,
-                            generation=r.generation_mw, consumption=r.consumption_mw) for r in rows])
+                            generation=r.generation_mw, consumption=r.consumption_mw,
+                            imports=r.import_mw if r.import_mw is not None else np.nan,
+                            exports=r.export_mw if r.export_mw is not None else np.nan) for r in rows])
     df['time'] = pd.to_datetime(df['time'], utc=True)
     df = df.set_index('time').sort_index()
     df['net'] = df['consumption'] - df['generation']
+    # Gross flows where parsed (as on GSE's website); older rows fall back to the derived net value.
+    df['gross'] = df['imports'].notna()
+    df['imp'] = df['imports'].where(df['gross'], df['net'].clip(lower=0))
+    df['exp'] = df['exports'].where(df['gross'], (-df['net']).clip(lower=0))
     return df
 
 
@@ -298,13 +304,14 @@ def balance_chart(lang, rows, height=360):
         fig.add_scatter(x=x, y=df[src], name=tr(f'src_{src}', lang), mode='lines', stackgroup='gen',
                         line=dict(width=1, color=SRC_COLORS[src]), fillcolor=_fill(SRC_COLORS[src]),
                         hovertemplate='%{y:.0f} MW')
-    fig.add_scatter(x=x, y=df['net'].clip(lower=0), name=tr('src_import', lang), mode='lines', stackgroup='gen',
-                    line=dict(width=1, color=SRC_COLORS['import']), fillcolor=_fill(SRC_COLORS['import'], 0.55),
+    gross = bool(df['gross'].dropna().iloc[-1]) if df['gross'].notna().any() else False  # label follows the latest data
+    fig.add_scatter(x=x, y=df['imp'], name=tr('src_import' if gross else 'src_import_net', lang), mode='lines', stackgroup='gen',
+                    line=dict(width=1, color=SRC_COLORS['import']), fillcolor=_fill(SRC_COLORS['import'], 0.7),
                     hovertemplate='%{y:.0f} MW')
-    if (df['net'] < 0).any():
-        fig.add_scatter(x=x, y=df['net'].clip(upper=0), name=tr('src_export', lang), mode='lines', stackgroup='exp',
-                        line=dict(width=1, color=SRC_COLORS['export']), fillcolor=_fill(SRC_COLORS['export'], 0.55),
-                        hovertemplate='%{y:.0f} MW')
+    if (df['exp'] > 0).any():
+        fig.add_scatter(x=x, y=-df['exp'], name=tr('src_export' if gross else 'src_export_net', lang), mode='lines', stackgroup='exp',
+                        line=dict(width=1, color=SRC_COLORS['export']), fillcolor=_fill(SRC_COLORS['export'], 0.7),
+                        customdata=df['exp'], hovertemplate='%{customdata:.0f} MW')
     fig.add_scatter(x=x, y=df['consumption'], name=tr('consumption', lang), mode='lines',
                     line=dict(color='#ffffff', width=2.2), hovertemplate='%{y:.0f} MW')
     ui.chart(ui.style(fig, height, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
@@ -358,14 +365,22 @@ def balance_page(lang, data, reader, now):
     df = balance_frame(rows)
     last = df.iloc[-1]
     net = last['net']
-    ui.cards([
+    cards = [
         ui.card(tr('bal_now', lang), ui.fmt(last['consumption'], 0), 'MW', local(df.index[-1], '%d.%m %H:%M'), accent=True),
         ui.card(tr('bal_gen_now', lang), ui.fmt(last['generation'], 0), 'MW',
                 ' · '.join(f"{tr(f'src_{k}', lang)} {last[k]:.0f}" for k in STACK_ORDER)),
-        ui.card(tr('bal_net_now', lang), ui.fmt(abs(net), 0), 'MW', tr('bal_net_sub_imp' if net >= 0 else 'bal_net_sub_exp', lang)),
-    ])
+    ]
+    if last['gross']:
+        cards += [ui.card(tr('bal_imp_now', lang), ui.fmt(last['imp'], 2), 'MW'),
+                  ui.card(tr('bal_exp_now', lang), ui.fmt(last['exp'], 2), 'MW')]
+    else:
+        cards.append(ui.card(tr('bal_net_now', lang), ui.fmt(abs(net), 0), 'MW', tr('bal_net_sub_imp' if net >= 0 else 'bal_net_sub_exp', lang)))
+    ui.cards(cards)
     balance_chart(lang, rows)
     ui.note(tr('bal_intro', lang), ui.tag('GSE', 'off'))
+    ui.note(tr('bal_flows_note', lang))
+    if not df['gross'].all():
+        ui.note(tr('bal_net_old', lang))
 
     energy = df[['hydro', 'thermal', 'wind', 'solar', 'generation', 'consumption']].sum() * an.PERIOD_HOURS
     st.subheader(tr('bal_mix', lang))
@@ -378,8 +393,8 @@ def balance_page(lang, data, reader, now):
         ui.chart(ui.style(fig, 300).update_layout(hovermode='closest'))
         ui.note(tr('bal_mix_sub', lang))
     with c2:
-        imp = max(float(df['net'].clip(lower=0).sum()) * an.PERIOD_HOURS, 0.0)
-        exp = max(float(-df['net'].clip(upper=0).sum()) * an.PERIOD_HOURS, 0.0)
+        imp = max(float(df['imp'].sum()) * an.PERIOD_HOURS, 0.0)
+        exp = max(float(df['exp'].sum()) * an.PERIOD_HOURS, 0.0)
         expected = len(an.grid(max(start, df.index.min()), df.index.max()))
         cov = f"{tr('s_complete', lang)}: {pct(len(df) / expected) if expected else '-'} · {len(df)}/{expected}"
         ui.cards([
@@ -391,11 +406,12 @@ def balance_page(lang, data, reader, now):
 
     st.subheader(tr('bal_profiles', lang))
     hours = (df.index.tz_convert(TZ) - pd.Timedelta(minutes=3)).hour
-    prof = df.groupby(hours)[['hydro', 'thermal', 'wind', 'solar', 'consumption', 'net']].mean()
+    prof = df.groupby(hours)[['hydro', 'thermal', 'wind', 'solar', 'consumption', 'imp', 'exp']].mean()
     fig = go.Figure()
     for src in STACK_ORDER:
         fig.add_scatter(x=prof.index, y=prof[src], name=tr(f'src_{src}', lang), mode='lines+markers', line=dict(color=SRC_COLORS[src], width=2.4))
-    fig.add_scatter(x=prof.index, y=prof['net'], name=tr('src_import', lang), mode='lines', line=dict(color=SRC_COLORS['import'], width=1.6, dash='dot'))
+    fig.add_scatter(x=prof.index, y=prof['imp'], name=tr('src_import', lang), mode='lines', line=dict(color=SRC_COLORS['import'], width=1.8, dash='dot'))
+    fig.add_scatter(x=prof.index, y=prof['exp'], name=tr('src_export', lang), mode='lines', line=dict(color=SRC_COLORS['export'], width=1.8, dash='dot'))
     fig.add_scatter(x=prof.index, y=prof['consumption'], name=tr('consumption', lang), mode='lines', line=dict(color='#ffffff', width=2.2))
     ui.chart(ui.style(fig, 340, 'MW', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
     ui.note(tr('bal_profiles_note', lang))

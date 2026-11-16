@@ -111,10 +111,11 @@ def merge(existing: list[Record], new: Record) -> tuple[list[Record], str]:
 
 # ---------------------------------------------------------------------------- system balance
 
-BALANCE_COLUMNS = (
+BALANCE_COLUMNS_V1 = (
     "period_label_utc", "period_label_local", "hydro_mw", "thermal_mw", "wind_mw", "solar_mw",
     "generation_mw", "consumption_mw", "quality", "retrieved_at_utc", "payload_sha256", "parser_version",
 )
+BALANCE_COLUMNS = BALANCE_COLUMNS_V1[:8] + ("import_mw", "export_mw") + BALANCE_COLUMNS_V1[8:]
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +132,8 @@ class BalanceRecord:
     retrieved_at_utc: datetime
     payload_sha256: str
     parser_version: str
+    import_mw: float | None = None  # None: stored before gross flows were parsed (v1 rows)
+    export_mw: float | None = None
 
 
 def balance_day_path(day: date) -> str:
@@ -139,16 +142,17 @@ def balance_day_path(day: date) -> str:
 
 def parse_balance_csv(text: str) -> list[BalanceRecord]:
     reader = csv.DictReader(io.StringIO(text))
-    if tuple(reader.fieldnames or ()) != BALANCE_COLUMNS:
+    if tuple(reader.fieldnames or ()) not in (BALANCE_COLUMNS, BALANCE_COLUMNS_V1):
         raise StoreFormatError(f"unexpected balance columns {reader.fieldnames!r}")
     out = []
     for row in reader:
         try:
+            flows = {k: (float(row[k]) if row.get(k) not in (None, "") else None) for k in ("import_mw", "export_mw")}
             out.append(BalanceRecord(
                 period_label_utc=_ts(row["period_label_utc"]), period_label_local=row["period_label_local"],
                 **{k: float(row[k]) for k in ("hydro_mw", "thermal_mw", "wind_mw", "solar_mw", "generation_mw", "consumption_mw")},
                 quality=row["quality"], retrieved_at_utc=_ts(row["retrieved_at_utc"]),
-                payload_sha256=row["payload_sha256"], parser_version=row["parser_version"]))
+                payload_sha256=row["payload_sha256"], parser_version=row["parser_version"], **flows))
         except (KeyError, ValueError) as exc:
             raise StoreFormatError(f"bad balance row {row!r}: {exc}") from exc
     labels = [r.period_label_utc for r in out]
@@ -167,6 +171,8 @@ def render_balance_csv(records: list[BalanceRecord]) -> str:
         row["retrieved_at_utc"] = r.retrieved_at_utc.isoformat()
         for k in ("hydro_mw", "thermal_mw", "wind_mw", "solar_mw", "generation_mw", "consumption_mw"):
             row[k] = repr(row[k])
+        for k in ("import_mw", "export_mw"):
+            row[k] = "" if row[k] is None else repr(row[k])
         writer.writerow(row)
     return buf.getvalue()
 
@@ -175,7 +181,7 @@ def merge_balance(existing: list[BalanceRecord], new: BalanceRecord) -> tuple[li
     """Upsert by label; returns (records, changed). Same bytes = unchanged; new bytes replace."""
     by_label = {r.period_label_utc: r for r in existing}
     old = by_label.get(new.period_label_utc)
-    if old is not None and old.payload_sha256 == new.payload_sha256:
+    if old is not None and old.payload_sha256 == new.payload_sha256 and old.parser_version == new.parser_version:
         return existing, False
     by_label[new.period_label_utc] = new
     return sorted(by_label.values(), key=lambda r: r.period_label_utc), True

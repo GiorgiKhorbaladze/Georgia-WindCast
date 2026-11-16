@@ -197,3 +197,15 @@ def test_cached_reader_is_recreated_after_a_code_reload():
     with patch("history.HistoryReader", Reloaded):
         at2 = run("accuracy", "en")
     assert not at2.exception
+
+
+def test_balance_page_shows_import_and_export_separately():
+    from store import BalanceRecord
+    rows = [BalanceRecord(NOW - timedelta(minutes=3 * k), "x", 1500.0, 300.0, 200.0, 0.0, 2000.0, 2010.0, "q", NOW, f"g{k}",
+                          "gse-balance-03m/2", import_mw=34.71, export_mw=24.71) for k in range(1, 60)]
+    with patch("history.HistoryReader.balance", side_effect=lambda s, e, n: [r for r in rows if s <= r.period_label_utc <= e]):
+        at = run("balance", "ka")
+    text = page_text(at)
+    assert "იმპორტი ახლა" in text and "34.71" in text
+    assert "ექსპორტი ახლა" in text and "24.71" in text
+    assert "წმინდა იმპორტი (გამოთვლილი)" not in text  # gross flows, not the derived net
