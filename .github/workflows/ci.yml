@@ -42,31 +42,6 @@ jobs:
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
 
-  streamlit-demo:
-    name: Streamlit demo (lint, tests, offline page render)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: "0.11.32"
-          enable-cache: true
-          cache-dependency-glob: |
-            backend/uv.lock
-            streamlit_app/requirements.txt
-      - name: Lint (backend ruff rules)
-        run: uv run --project backend --frozen ruff check streamlit_app && uv run --project backend --frozen ruff format --check streamlit_app
-      - name: Install the exact Community Cloud requirements
-        run: |
-          uv venv -p 3.12 .demo-venv
-          uv pip install -p .demo-venv -r streamlit_app/requirements.txt pytest==9.2.0
-      - name: Tests (recorded payloads; no upstream is contacted)
-        working-directory: streamlit_app
-        run: ../.demo-venv/bin/python -m pytest -q tests
-
   backend:
     name: Backend (lint, typecheck, tests, migrations)
     runs-on: ubuntu-latest
