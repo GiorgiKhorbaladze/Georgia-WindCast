@@ -239,3 +239,58 @@ def gaps(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> list[tuple
         else:
             out.append((t, t, 1))
     return out
+
+
+# --------------------------------------------------------------------------- wind and solar share
+
+def renewable_shares(bal: pd.DataFrame) -> dict | None:
+    """Energy shares of consumption over the stored balance periods (no filling).
+
+    bal: columns hydro, thermal, wind, solar, generation, consumption (MW, 3-minute averages).
+    Returns shares of consumption and the stored-period count, or None without data.
+    """
+    if bal is None or bal.empty:
+        return None
+    e = bal[["hydro", "thermal", "wind", "solar", "consumption"]].sum() * PERIOD_HOURS
+    if e["consumption"] <= 0:
+        return None
+    return dict(
+        periods=int(len(bal)),
+        wind=float(e["wind"] / e["consumption"]),
+        solar=float(e["solar"] / e["consumption"]),
+        wind_solar=float((e["wind"] + e["solar"]) / e["consumption"]),
+        renewable=float((e["wind"] + e["solar"] + e["hydro"]) / e["consumption"]),
+        wind_mwh=float(e["wind"]),
+    )
+
+
+def wind_share_by_hour(bal: pd.DataFrame) -> pd.DataFrame:
+    """Mean wind share of consumption per local hour (interval start), with period counts."""
+    if bal is None or bal.empty:
+        return pd.DataFrame(columns=["hour", "wind_share", "periods"])
+    share = (bal["wind"] / bal["consumption"]).where(bal["consumption"] > 0)
+    hours = (bal.index.tz_convert(TZ) - PERIOD).hour
+    out = share.groupby(hours).agg(["mean", "size"]).reset_index()
+    out.columns = ["hour", "wind_share", "periods"]
+    return out
+
+
+def windy_vs_calm(bal: pd.DataFrame, min_periods: int = 40) -> dict | None:
+    """Mean imports and thermal output in the windiest vs calmest quarter of stored periods.
+
+    A factual comparison of co-occurring values, not a causal effect: hydro dispatch, demand and
+    exchange schedules also differ between these periods.
+    """
+    if bal is None or len(bal) < min_periods:
+        return None
+    net = bal["consumption"] - bal["generation"]
+    hi, lo = bal["wind"].quantile(0.75), bal["wind"].quantile(0.25)
+    windy, calm = bal[bal["wind"] >= hi], bal[bal["wind"] <= lo]
+    if windy.empty or calm.empty:
+        return None
+    return dict(
+        windy_wind=float(windy["wind"].mean()), calm_wind=float(calm["wind"].mean()),
+        windy_import=float(net[windy.index].mean()), calm_import=float(net[calm.index].mean()),
+        windy_thermal=float(windy["thermal"].mean()), calm_thermal=float(calm["thermal"].mean()),
+        windy_n=int(len(windy)), calm_n=int(len(calm)),
+    )

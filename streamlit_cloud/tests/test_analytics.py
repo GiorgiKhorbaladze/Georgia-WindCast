@@ -216,3 +216,33 @@ def test_hourly_target_requires_most_periods():
     df = an.frame(series("2026-11-15 00:03", 40, 1.0, skip=set(range(25, 40))))  # 2nd hour: 5/20 periods
     target = mwmodel.hourly_target(df)
     assert len(target) == 1
+
+
+# ------------------------------------------------------------------------ renewable shares
+
+def balance_frame(n=200, wind=lambda i: 100.0 + (i % 40) * 5):
+    idx = pd.date_range("2026-11-15 00:03", periods=n, freq="3min", tz=TZ).tz_convert("UTC")
+    w = np.array([wind(i) for i in range(n)])
+    df = pd.DataFrame({"hydro": 1500.0, "thermal": 300.0 - w * 0.2, "wind": w, "solar": 10.0}, index=idx)
+    df["generation"] = df[["hydro", "thermal", "wind", "solar"]].sum(axis=1)
+    df["consumption"] = 2000.0
+    return df
+
+
+def test_renewable_shares_are_energy_ratios():
+    df = balance_frame(n=100, wind=lambda i: 200.0)
+    s = an.renewable_shares(df)
+    assert s["wind"] == pytest.approx(0.10) and s["solar"] == pytest.approx(0.005)
+    assert s["wind_solar"] == pytest.approx(0.105) and s["renewable"] == pytest.approx((200 + 10 + 1500) / 2000)
+    assert s["wind_mwh"] == pytest.approx(200 * 100 * 0.05)
+    assert an.renewable_shares(df.iloc[0:0]) is None
+
+
+def test_wind_share_by_hour_and_windy_vs_calm():
+    df = balance_frame()
+    byh = an.wind_share_by_hour(df)
+    assert byh["periods"].sum() == len(df) and byh["wind_share"].between(0, 1).all()
+    c = an.windy_vs_calm(df)
+    assert c["windy_wind"] > c["calm_wind"]
+    assert c["windy_thermal"] < c["calm_thermal"]  # by construction of the synthetic input
+    assert an.windy_vs_calm(df.iloc[:10]) is None  # too few periods

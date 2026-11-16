@@ -166,7 +166,9 @@ def test_balance_page_renders_mix_profiles_and_derived_import(lang):
     text = page_text(at)
     assert "2 050" in text and "2 000" in text  # consumption and generation now
     assert ("იმპორტი (გამოთვლილი)" if lang == "ka" else "import (derived)") in text  # 50 MW derived net import
-    assert len(at.get("plotly_chart")) >= 3 and at.get("download_button")
+    assert len(at.get("plotly_chart")) >= 4 and at.get("download_button")
+    assert ("ქარის წილი მოხმარებაში" if lang == "ka" else "Wind share of consumption") in text
+    assert "9.8%" in text  # 200 / 2050 MW
 
 
 def test_overview_has_separate_balance_chart():

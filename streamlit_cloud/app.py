@@ -310,6 +310,42 @@ def balance_chart(lang, rows, height=360):
     ui.chart(ui.style(fig, height, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
 
 
+def renewable_section(lang, df):
+    """Factual wind/solar shares from stored GSE balance data; no model involved."""
+    st.subheader(tr('ren_title', lang))
+    shares = an.renewable_shares(df)
+    if shares is None:
+        st.info(tr('bal_none', lang))
+        return
+    ui.cards([
+        ui.card(tr('ren_wind', lang), pct(shares['wind']), '', f"{tr('ren_sub', lang)} · {ui.fmt(shares['wind_mwh'], 0)} MWh", accent=True),
+        ui.card(tr('ren_ws', lang), pct(shares['wind_solar']), '', tr('ren_sub', lang)),
+        ui.card(tr('ren_all', lang), pct(shares['renewable']), '', tr('ren_sub', lang)),
+    ])
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        byh = an.wind_share_by_hour(df)
+        fig = go.Figure(go.Bar(x=byh['hour'], y=byh['wind_share'] * 100, marker_color=SRC_COLORS['wind'],
+                               customdata=byh['periods'], hovertemplate='%{y:.1f}% · n=%{customdata}<extra></extra>'))
+        ui.chart(ui.style(fig, 280, '%', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]).update_layout(hovermode='closest'))
+        ui.note(tr('ren_hour', lang))
+    with c2:
+        st.markdown(f"**{tr('ren_cmp', lang)}**")
+        cmp = an.windy_vs_calm(df)
+        if cmp is None:
+            ui.note(tr('ren_wait', lang))
+        else:
+            ui.cards([
+                ui.card(tr('ren_windy', lang), ui.fmt(cmp['windy_import'], 0), 'MW',
+                        tr('ren_cmp_sub', lang, q=tr('ren_top', lang), w=ui.fmt(cmp['windy_wind'], 0),
+                           t=ui.fmt(cmp['windy_thermal'], 0), n=cmp['windy_n'])),
+                ui.card(tr('ren_calm', lang), ui.fmt(cmp['calm_import'], 0), 'MW',
+                        tr('ren_cmp_sub', lang, q=tr('ren_bottom', lang), w=ui.fmt(cmp['calm_wind'], 0),
+                           t=ui.fmt(cmp['calm_thermal'], 0), n=cmp['calm_n'])),
+            ])
+            ui.note(tr('ren_caveat', lang))
+
+
 def balance_page(lang, data, reader, now):
     ui.hero(tr('page_balance', lang), tr('bal_title', lang))
     nowt = pd.Timestamp(now)
@@ -351,6 +387,8 @@ def balance_page(lang, data, reader, now):
             ui.card(tr('generation', lang), ui.fmt(energy['generation'], 0), 'MWh', cov),
             ui.card(tr('src_import', lang), ui.fmt(imp, 0), 'MWh', f"{tr('src_export', lang)}: {ui.fmt(exp, 0)} MWh"),
         ])
+    renewable_section(lang, df)
+
     st.subheader(tr('bal_profiles', lang))
     hours = (df.index.tz_convert(TZ) - pd.Timedelta(minutes=3)).hour
     prof = df.groupby(hours)[['hydro', 'thermal', 'wind', 'solar', 'consumption', 'net']].mean()
