@@ -1,0 +1,8 @@
+{
+  "retrieved": "2026-11-16T17:29:48.732985+00:00",
+  "url": "https://historical-forecast-api.open-meteo.com/v1/forecast?latitude=42.055596,41.895560,42.022423&longitude=43.985914,44.370612,44.047890&hourly=wind_speed_10m,wind_direction_10m,wind_speed_80m,wind_direction_80m,wind_speed_120m,wind_direction_120m,wind_speed_180m,wind_direction_180m&models=icon_global&start_date=2026-10-16&end_date=2026-11-15&wind_speed_unit=ms&timeformat=unixtime&timezone=GMT",
+  "start": "2026-10-16",
+  "end": "2026-11-15",
+  "sha256": "15fad200a32fd4af28d7dace4755e71e1eb959c8da2e39ad28648eb630f906e1",
+  "content_addressed": true
+}
