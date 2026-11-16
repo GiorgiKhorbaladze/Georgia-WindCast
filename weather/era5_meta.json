@@ -1,0 +1,6 @@
+{
+  "retrieved": "2026-11-16T16:08:14.314390+00:00",
+  "url": "https://archive-api.open-meteo.com/v1/archive?latitude=42.055596,41.895560,42.022423&longitude=43.985914,44.370612,44.047890&hourly=wind_speed_10m,wind_direction_10m,wind_speed_100m,wind_direction_100m&models=era5&start_date=2026-11-05&end_date=2026-11-11&wind_speed_unit=ms&timeformat=unixtime&timezone=GMT",
+  "sha256": "2cf0f2cc8667e4297c9947c03c2d64a2933a475666c90534fe6fca77bf0fbb86",
+  "content_addressed": true
+}
