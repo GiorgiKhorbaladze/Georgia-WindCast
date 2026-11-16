@@ -14,6 +14,14 @@ Public, zero-cost edition of Georgia WindCast. The original Next.js/FastAPI/Post
 
 Georgian and English, one vocabulary (`i18n.py`). Dark analytics theme (`ui.py`). Display times are Asia/Tbilisi; stored data is UTC. Official GSE values, model wind and the MW estimate carry distinct labels everywhere.
 
+### Power system balance (`balance.py`)
+
+The same GSE 3-minute file also carries total hydro, thermal, wind and solar generation, total generation and national consumption. The collector stores them in `balance/YYYY/MM/DATE.csv` with no extra requests, and the app shows:
+- a separate stacked chart (sources plus derived net import/export, with consumption as a line) on the overview, for the last 24 h;
+- a dedicated page with 24 h/48 h/7 d/30 d ranges, current values, generation mix, energy totals with completeness, generation profiles by hour of day, and CSV.
+
+On the recorded file, hydro + thermal + wind + solar = total generation, and consumption − generation = the sum of all tie-line flows. The per-country tie-line sums are not used: the Russia sum read 0 while its individual lines carried 32.6 MW. Net interchange is therefore derived and labelled as derived. A balance refusal never blocks the wind record. Quality codes are kept per block; their meaning is unpublished.
+
 ### Energy and day conventions (`analytics.py`)
 
 A GSE label marks the end of its 3-minute interval. Energy = sum of stored 3-minute averages × 0.05 h. A Tbilisi day holds labels 00:03 ... 24:00 (480 periods). Missing periods are counted, never filled; a day is "complete" at ≥ 99 % of its periods; today is always "in progress". Non-ACT periods are included in totals and counted separately. MW is power, MWh is energy.

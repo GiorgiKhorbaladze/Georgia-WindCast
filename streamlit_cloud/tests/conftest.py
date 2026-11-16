@@ -34,6 +34,7 @@ def offline_history(request):
         patch("history.HistoryReader.status", return_value=None),
         patch("history.HistoryReader.weather", return_value=(None, None)),
         patch("history.HistoryReader.forecast_archive", return_value=[]),
+        patch("history.HistoryReader.balance", return_value=[]),
         patch("history.HistoryReader.hist_forecast", return_value=None),
     ):
         yield clock

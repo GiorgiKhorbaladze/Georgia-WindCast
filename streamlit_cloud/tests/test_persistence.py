@@ -459,3 +459,61 @@ def test_deep_backfill_pauses_while_the_source_fails(tmp_path):
     bad = Gse(override=lambda name: httpx.Response(503, headers={"content-type": "text/html"}))
     report, _ = Collector(tmp_path, bad.client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(minutes=5))
     assert report.deep_requested == 0
+
+
+# ------------------------------------------------------------------------------- system balance
+
+def test_balance_parser_on_recorded_file_closes_the_balance():
+    from balance import parse_balance
+    label, b = parse_balance(ACT)
+    assert label == datetime(2026, 11, 14, 20, 9, tzinfo=UTC)
+    assert (b.hydro, b.thermal, b.wind, b.solar) == (1075.829346, 313.713287, 73.599297, 0.0)
+    assert b.hydro + b.thermal + b.wind + b.solar == pytest.approx(b.generation, abs=0.01)
+    assert b.net_interchange == pytest.approx(1536.5354 - 1463.141968, abs=0.01)  # = sum of all tie lines
+    assert "wind:ACT" in b.quality and "hydro:SUB" in b.quality
+
+
+def test_balance_parser_is_strict():
+    from app.ingestion.gse_parser import GseParseError
+    from balance import parse_balance
+    with pytest.raises(GseParseError):
+        parse_balance(ACT.replace(b"TOTAL CONSUMPTION", b"TOTAL SOMETHING"))
+    with pytest.raises(GseParseError):
+        parse_balance(ACT.replace(b"VALUE='1536.535400'", b"VALUE='nan'"))
+    with pytest.raises(GseParseError):
+        parse_balance(b"<!DOCTYPE x [<!ENTITY a 'b'>]><GSE>&a;</GSE>")
+
+
+def test_collector_stores_balance_without_extra_requests(tmp_path):
+    from store import parse_balance_csv
+    gse = Gse()
+    report, _ = collector(tmp_path, gse).run(NOW)
+    assert report.balance_stored == report.inserted == 20 and report.balance_errors == 0
+    assert len(gse.requests) == 20  # same files as the wind aggregate
+    rows = parse_balance_csv((tmp_path / "balance/2026/11/2026-11-14.csv").read_text())
+    assert len(rows) == 20 and rows[0].consumption_mw == pytest.approx(1536.5354)
+
+
+def test_balance_refusal_never_blocks_wind(tmp_path):
+    broken = ACT.replace(b"TOTAL CONSUMPTION", b"TOTAL SOMETHING")
+    gse = Gse()
+    gse.base = broken
+
+    def handler(request):
+        name = request.url.path.rsplit("/", 1)[-1]
+        gse.requests.append(name)
+        dd, mm, yyyy, hh, mi = NAME.search(name).groups()
+        return httpx.Response(200, content=relabel(f"{dd}.{mm}.{yyyy} {hh}:{mi}:00", broken), headers={"content-type": "text/xml"})
+
+    c = Collector(tmp_path, lambda: httpx.Client(transport=httpx.MockTransport(handler)), lookback_hours=1, deep_per_run=0)
+    report, code = c.run(NOW)
+    assert report.inserted == 20 and report.balance_errors == 20 and report.balance_stored == 0 and code == 0
+
+
+def test_stored_wind_without_balance_is_requested_again(tmp_path):
+    import shutil
+    collector(tmp_path, Gse()).run(NOW)
+    shutil.rmtree(tmp_path / "balance")
+    gse = Gse()
+    report, _ = collector(tmp_path, gse).run(NOW + timedelta(seconds=10))
+    assert report.balance_stored == 20 and report.inserted == 0  # wind unchanged, balance filled
