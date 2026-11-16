@@ -1,0 +1,17 @@
+{
+  "last_run": {
+    "failure_kinds": {},
+    "failures": 0,
+    "inserted": 5,
+    "integrity_error": null,
+    "not_published": 0,
+    "requested": 5,
+    "revised": 0
+  },
+  "last_run_at": "2026-11-16T10:15:47.465983+00:00",
+  "last_success_at": "2026-11-16T10:15:47.465983+00:00",
+  "latest_label_utc": "2026-11-16T10:12:00+00:00",
+  "lookback_hours": 12.0,
+  "missing_attempts": {},
+  "parser_version": "gse-xml-03m/1"
+}
