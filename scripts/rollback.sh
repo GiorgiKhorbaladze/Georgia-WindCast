@@ -65,7 +65,7 @@ step "Resolving target revision $to"
 git fetch --quiet origin || true
 sha="$(git rev-parse --verify "$to^{commit}")" || die "unknown revision $to"
 tag="${sha:0:12}"
-for img in windcast-backend windcast-frontend; do
+for img in windcast-postgres windcast-backend windcast-frontend; do
   docker image inspect "$img:$tag" >/dev/null 2>&1 ||
     die "image $img:$tag is not on this host; rebuild it first: git worktree add /tmp/wc-$tag $sha && (cd /tmp/wc-$tag && WINDCAST_IMAGE_TAG=$tag docker compose build)"
 done

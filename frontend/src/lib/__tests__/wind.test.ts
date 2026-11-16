@@ -37,3 +37,13 @@ describe("wind direction convention", () => {
     expect(formatSpeed(null)).toBeNull();
   });
 });
+
+describe("arrowRotation (map markers render only numbers)", () => {
+  it("rotates finite directions and refuses anything else", async () => {
+    const { arrowRotation } = await import("@/components/WindMap");
+    expect(arrowRotation(270)).toBe(90);
+    for (const bad of [null, undefined, Number.NaN, Number.POSITIVE_INFINITY, "90", '"><img src=x onerror=alert(1)>']) {
+      expect(arrowRotation(bad)).toBeNull();
+    }
+  });
+});

@@ -4,37 +4,79 @@
 # - Log rotation and memory limits; images pinned by WINDCAST_IMAGE_TAG (use a git SHA) so a
 #   rollback is "set the previous tag and up -d". Put a TLS reverse proxy (e.g. Caddy/nginx) in
 #   front of the frontend port; do not expose PostgreSQL.
+# - Hardening (docs/security/THREAT-MODEL.md): every service drops all Linux capabilities and runs as
+#   a non-root user, no-new-privileges, read-only root filesystems
+#   with tmpfs where a process must write, and segmented networks:
+#     data    (internal)  db <-> api, worker, migrate
+#     app     (internal)  frontend <-> api
+#     egress              worker only: outbound to GSE / Open-Meteo
+#     edge                frontend (and Caddy in compose.public.yaml)
+#   so the edge cannot reach the API or database, and the API has no internet access.
 x-logging: &logging
   driver: json-file
   options:
     max-size: "10m"
     max-file: "5"
 
+x-hardened: &hardened
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs:
+    - /tmp
+
 services:
   db:
     logging: *logging
+    # deploy/postgres runs as "postgres" from the start: no capability is needed at all.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql:uid=70,gid=70,mode=0775
+    networks: !override [data]
     deploy:
       resources:
         limits:
           memory: 1g
   migrate:
+    <<: *hardened
     logging: *logging
+    networks: !override [data]
   api:
+    <<: *hardened
     ports: !reset []
     logging: *logging
+    networks: !override [data, app]
     deploy:
       resources:
         limits:
           memory: 512m
   worker:
+    <<: *hardened
     logging: *logging
+    networks: !override [data, egress]
     deploy:
       resources:
         limits:
           memory: 384m
   frontend:
+    <<: *hardened
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:uid=10001,gid=10001,mode=0700
     logging: *logging
+    networks: !override [app, edge]
     deploy:
       resources:
         limits:
           memory: 512m
+
+networks:
+  data:
+    internal: true
+  app:
+    internal: true
+  egress: {}
+  edge: {}

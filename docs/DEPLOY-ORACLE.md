@@ -13,7 +13,7 @@ Issue #18. This runbook takes Georgia WindCast from a merged commit to a public 
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| All base images publish `linux/arm64` | Yes: `postgres:17.7-alpine3.22`, `python:3.12.12-slim`, `node:22.21.1-alpine3.22`, `caddy:2.11.9-(builder-)alpine` | Image manifests checked 2026-11-15 |
+| All base images publish `linux/arm64` | Yes: `postgres:17.12-alpine3.24`, `python:3.12.16-slim`, `node:22.23.5-alpine3.24`, `caddy:2.11.9-(builder-)alpine` | Image manifests checked 2026-11-15 |
 | Backend image builds for arm64 (all Python wheels available) | Yes, in about 1 min | Local buildx run plus CI job **ARM64 images** |
 | Frontend image builds for arm64 (Next.js standalone, Node 22) | Yes | Same |
 | Caddy with the rate-limit module builds for arm64 | Yes. The build cross-compiles with Go, so it needs no emulation | Same |

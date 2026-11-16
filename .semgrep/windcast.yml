@@ -1,0 +1,66 @@
+# Project-specific Semgrep rules: invariants WindCast relies on (docs/security/THREAT-MODEL.md).
+# ERROR severity = release blocker in .github/workflows/security.yml.
+rules:
+  - id: windcast-python-unsafe-xml-parse
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Parse untrusted XML (GSE exports) only with defusedxml; stdlib/lxml parsers allow entity
+      expansion and external entities.
+    pattern-either:
+      - pattern: xml.etree.ElementTree.fromstring(...)
+      - pattern: xml.etree.ElementTree.parse(...)
+      - pattern: xml.etree.ElementTree.XMLParser(...)
+      - pattern: xml.dom.minidom.parseString(...)
+      - pattern: xml.sax.parseString(...)
+      - pattern: lxml.etree.fromstring(...)
+      - pattern: lxml.etree.parse(...)
+
+  - id: windcast-python-sql-string-building
+    languages: [python]
+    severity: ERROR
+    message: SQL must use bound parameters, never string formatting.
+    pattern-either:
+      - pattern: sqlalchemy.text(f"...")
+      - pattern: sqlalchemy.text("..." % ...)
+      - pattern: sqlalchemy.text("...".format(...))
+      - pattern: $SESSION.exec_driver_sql(f"...")
+      - pattern: $SESSION.exec_driver_sql("..." % ...)
+
+  - id: windcast-python-tls-verify-disabled
+    languages: [python]
+    severity: ERROR
+    message: TLS verification must stay on for upstream sources (GSE, Open-Meteo).
+    pattern-either:
+      - pattern: httpx.Client(..., verify=False, ...)
+      - pattern: httpx.get(..., verify=False, ...)
+      - pattern: requests.$M(..., verify=False, ...)
+
+  - id: windcast-python-shell-true
+    languages: [python]
+    severity: ERROR
+    message: No shell=True subprocess calls.
+    pattern: subprocess.$F(..., shell=True, ...)
+
+  - id: windcast-route-leaks-upstream-error
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Public /api/data routes must answer through publicError()/publicJson() (generic codes,
+      no internal detail), never echo the upstream error.
+    paths:
+      include: ["frontend/src/app/api/**"]
+    pattern-either:
+      - pattern: 'Response.json({ error: $R.error }, ...)'
+      - pattern: 'Response.json({ error: $R.error })'
+      - pattern: 'Response.json({ detail: $X }, ...)'
+
+  - id: windcast-public-status-not-allowlisted
+    languages: [typescript]
+    severity: ERROR
+    message: The public status route must pass data through toPublicStatus() (allow-list).
+    paths:
+      include: ["frontend/src/app/api/data/status/route.ts"]
+    patterns:
+      - pattern: publicJson($X)
+      - pattern-not: publicJson(toPublicStatus(...))

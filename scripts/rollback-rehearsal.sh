@@ -12,7 +12,7 @@
 #           API and database unpublished.
 # Scenario 2: deploy C fails at its migration -> rollback.sh -> same expectations.
 #
-# Images are built here (only the backend differs between A, B and C) and deploy.sh runs with
+# Images are built here (only the backend differs between A, B and C; frontend and postgres once) and deploy.sh runs with
 # DEPLOY_SKIP_BUILD=1. REHEARSAL_BUILD_FLAGS adds docker build flags (e.g. proxy secrets).
 # Usage: scripts/rollback-rehearsal.sh        (KEEP=1 keeps the clone and stack for inspection)
 set -euo pipefail
@@ -97,12 +97,17 @@ echo "A=$A"; echo "B=$B"; echo "C=$C"
 
 step "Building images (frontend once, backend per revision)"
 # REHEARSAL_FRONTEND_IMAGE reuses an existing frontend image (the frontend is identical in A/B/C).
-frontend_id="${REHEARSAL_FRONTEND_IMAGE:-$(docker build -q "${build_flags[@]}" ${NODE_IMAGE:+--build-arg NODE_IMAGE=$NODE_IMAGE} frontend)}"
+node_arg=(); [[ -n ${NODE_IMAGE:-} ]] && node_arg=(--build-arg "NODE_IMAGE=$NODE_IMAGE")
+py_arg=(); [[ -n ${PYTHON_IMAGE:-} ]] && py_arg=(--build-arg "PYTHON_IMAGE=$PYTHON_IMAGE")
+frontend_id="${REHEARSAL_FRONTEND_IMAGE:-$(docker build -q "${build_flags[@]}" "${node_arg[@]}" frontend)}"
+pg_arg=(); [[ -n ${POSTGRES_IMAGE:-} ]] && pg_arg=(--build-arg "POSTGRES_IMAGE=$POSTGRES_IMAGE")
+postgres_id="$(docker build -q "${build_flags[@]}" "${pg_arg[@]}" deploy/postgres)"
 for rev in "$A" "$B" "$C"; do
   git checkout --quiet --detach "$rev"
-  docker build -q "${build_flags[@]}" ${PYTHON_IMAGE:+--build-arg PYTHON_IMAGE=$PYTHON_IMAGE} \
+  docker build -q "${build_flags[@]}" "${py_arg[@]}" \
     -t "windcast-backend:${rev:0:12}" backend >/dev/null
   docker tag "$frontend_id" "windcast-frontend:${rev:0:12}"
+  docker tag "$postgres_id" "windcast-postgres:${rev:0:12}"
 done
 git checkout --quiet --detach "$A"
 

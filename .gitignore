@@ -234,3 +234,7 @@ backups/
 .backup.env
 deploy/history.log
 deploy/last-attempt
+
+# Security tooling and reports (scripts/security/)
+.sectools/
+security-reports/

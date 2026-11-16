@@ -73,6 +73,8 @@ test("security headers are set on pages", async ({ request }) => {
   expect(h["x-content-type-options"]).toBe("nosniff");
   expect(h["referrer-policy"]).toBe("strict-origin-when-cross-origin");
   expect(h["x-powered-by"]).toBeUndefined();
+  expect(h["cross-origin-opener-policy"]).toBe("same-origin");
+  expect(h["x-permitted-cross-domain-policies"]).toBe("none");
 });
 
 test("about page states independence and privacy", async ({ page }) => {
@@ -101,4 +103,15 @@ test("mobile menu is a keyboard-operable disclosure", async ({ page, isMobile })
   await forecast.click();
   await expect(page).toHaveURL(/\/forecast$/);
   await expect(page.getByRole("navigation").getByRole("link", { name: "Map" })).toBeHidden();
+});
+
+test("language cookie is HttpOnly, SameSite=Lax and holds only an allow-listed code", async ({ page, context }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "English" }).first().click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  const cookie = (await context.cookies()).find((c) => c.name === "windcast_lang");
+  expect(cookie?.value).toBe("en");
+  expect(cookie?.httpOnly).toBe(true);
+  expect(cookie?.sameSite).toBe("Lax");
+  expect(await page.evaluate(() => document.cookie)).not.toContain("windcast_lang");
 });

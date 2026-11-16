@@ -19,11 +19,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from xml.etree.ElementTree import Element
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from defusedxml import ElementTree as SafeET
 from defusedxml.common import DefusedXmlException
+
+if TYPE_CHECKING:  # type hints only: all parsing goes through defusedxml (security review)
+    # Triaged false positive (use-defused-xml): imported for the type hint only, never parses.
+    from xml.etree.ElementTree import Element  # nosemgrep
 
 PARSER_VERSION = "gse-xml-03m/1"
 SOURCE_TZ = ZoneInfo("Asia/Tbilisi")
