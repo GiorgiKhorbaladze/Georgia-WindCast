@@ -21,6 +21,8 @@ T: dict[str, dict[str, str]] = {
     "page_accuracy": {"ka": "სიზუსტის შეფასება", "en": "Forecast accuracy"},
     "page_data": {"ka": "მონაცემები და მეთოდოლოგია", "en": "Data and methodology"},
     "tz_note": {"ka": "დრო: თბილისი (UTC+4)", "en": "Times: Tbilisi (UTC+4)"},
+    "author_label": {"ka": "ავტორი", "en": "Created by"},
+    "author_name": {"ka": "დოქტ. გიორგი ხორბალაძე", "en": "Dr. Giorgi Khorbaladze"},
     "independent": {"ka": "დამოუკიდებელი საინფორმაციო პროექტი", "en": "Independent informational project"},
     "last_check": {"ka": "განახლების დრო", "en": "Updated"},
     "auto_refresh": {"ka": "გვერდი ავტომატურად ახლდება ყოველ 3 წუთში.", "en": "The page refreshes automatically every 3 minutes."},
