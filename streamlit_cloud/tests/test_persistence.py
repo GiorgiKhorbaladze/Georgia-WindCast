@@ -517,3 +517,31 @@ def test_stored_wind_without_balance_is_requested_again(tmp_path):
     gse = Gse()
     report, _ = collector(tmp_path, gse).run(NOW + timedelta(seconds=10))
     assert report.balance_stored == 20 and report.inserted == 0  # wind unchanged, balance filled
+
+
+def test_gross_import_export_like_gse_website():
+    from balance import parse_balance
+    _, b = parse_balance(ACT)
+    assert b.imports == pytest.approx(40.792889 + 18.299999 + 14.300695)  # AZ + Russia-block lines
+    assert b.exports == 0.0
+    assert b.imports - b.exports == pytest.approx(b.consumption - b.generation, abs=0.01)  # closure
+    # Azerbaijan flowing out (as on 16.11.2026 22:39): export, while Java + Nakaduli stay import
+    _, b2 = parse_balance(ACT.replace(b"VALUE='40.792889'", b"VALUE='-24.123554'"))
+    assert b2.exports == pytest.approx(24.123554)
+    assert b2.imports == pytest.approx(18.299999 + 14.300695)  # Russia sum 0 is ignored, lines used
+
+
+def test_v1_balance_rows_are_read_and_refetched(tmp_path):
+    from store import BALANCE_COLUMNS_V1, parse_balance_csv
+    collector(tmp_path, Gse()).run(NOW)
+    path = tmp_path / "balance/2026/11/2026-11-14.csv"
+    rows = parse_balance_csv(path.read_text())
+    v1 = [",".join(BALANCE_COLUMNS_V1)] + [
+        ",".join([r.period_label_utc.isoformat(), r.period_label_local, *(repr(x) for x in (r.hydro_mw, r.thermal_mw, r.wind_mw, r.solar_mw, r.generation_mw, r.consumption_mw)),
+                  r.quality, r.retrieved_at_utc.isoformat(), r.payload_sha256, "gse-balance-03m/1"]) for r in rows]
+    path.write_text("\n".join(v1) + "\n")
+    old = parse_balance_csv(path.read_text())
+    assert len(old) == 20 and all(r.import_mw is None for r in old)
+    report, _ = collector(tmp_path, Gse()).run(NOW + timedelta(seconds=10))
+    assert report.balance_stored == 20  # same payloads, now with gross flows
+    assert all(r.import_mw is not None for r in parse_balance_csv(path.read_text()))

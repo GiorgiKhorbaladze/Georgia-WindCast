@@ -268,15 +268,30 @@ def site_map(lang, data, now):
 
 # ----------------------------------------------------------------------------------------- balance
 
-SRC_COLORS = {'hydro': '#38bdf8', 'thermal': '#f97316', 'wind': ui.C['accent'], 'solar': '#facc15'}
+# Distinct hues with high contrast on the dark theme; wind is a saturated green so it never blends
+# into hydro blue. Stack order puts wind at the bottom so its profile is read against zero.
+SRC_COLORS = {'wind': '#22c55e', 'solar': '#facc15', 'hydro': '#3b82f6', 'thermal': '#f97316',
+              'import': '#a78bfa', 'export': '#f472b6'}
+STACK_ORDER = ('wind', 'solar', 'hydro', 'thermal')
+
+
+def _fill(hex_color, alpha=0.82):
+    h = hex_color.lstrip('#')
+    return f'rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{alpha})'
 
 
 def balance_frame(rows):
     df = pd.DataFrame([dict(time=r.period_label_utc, hydro=r.hydro_mw, thermal=r.thermal_mw, wind=r.wind_mw, solar=r.solar_mw,
-                            generation=r.generation_mw, consumption=r.consumption_mw) for r in rows])
+                            generation=r.generation_mw, consumption=r.consumption_mw,
+                            imports=r.import_mw if r.import_mw is not None else np.nan,
+                            exports=r.export_mw if r.export_mw is not None else np.nan) for r in rows])
     df['time'] = pd.to_datetime(df['time'], utc=True)
     df = df.set_index('time').sort_index()
     df['net'] = df['consumption'] - df['generation']
+    # Gross flows where parsed (as on GSE's website); older rows fall back to the derived net value.
+    df['gross'] = df['imports'].notna()
+    df['imp'] = df['imports'].where(df['gross'], df['net'].clip(lower=0))
+    df['exp'] = df['exports'].where(df['gross'], (-df['net']).clip(lower=0))
     return df
 
 
@@ -285,17 +300,57 @@ def balance_chart(lang, rows, height=360):
     df = df.reindex(pd.date_range(df.index.min(), df.index.max(), freq='3min'))  # gaps stay empty
     x = [wall(t) for t in df.index]
     fig = go.Figure()
-    for src in ('hydro', 'thermal', 'wind', 'solar'):
+    for src in STACK_ORDER:
         fig.add_scatter(x=x, y=df[src], name=tr(f'src_{src}', lang), mode='lines', stackgroup='gen',
-                        line=dict(width=0.6, color=SRC_COLORS[src]), hovertemplate='%{y:.0f} MW')
-    fig.add_scatter(x=x, y=df['net'].clip(lower=0), name=tr('src_import', lang), mode='lines', stackgroup='gen',
-                    line=dict(width=0.6, color=ui.C['model']), hovertemplate='%{y:.0f} MW')
-    if (df['net'] < 0).any():
-        fig.add_scatter(x=x, y=df['net'].clip(upper=0), name=tr('src_export', lang), mode='lines', stackgroup='exp',
-                        line=dict(width=0.6, color='#f472b6'), hovertemplate='%{y:.0f} MW')
+                        line=dict(width=1, color=SRC_COLORS[src]), fillcolor=_fill(SRC_COLORS[src]),
+                        hovertemplate='%{y:.0f} MW')
+    gross = bool(df['gross'].dropna().iloc[-1]) if df['gross'].notna().any() else False  # label follows the latest data
+    fig.add_scatter(x=x, y=df['imp'], name=tr('src_import' if gross else 'src_import_net', lang), mode='lines', stackgroup='gen',
+                    line=dict(width=1, color=SRC_COLORS['import']), fillcolor=_fill(SRC_COLORS['import'], 0.7),
+                    hovertemplate='%{y:.0f} MW')
+    if (df['exp'] > 0).any():
+        fig.add_scatter(x=x, y=-df['exp'], name=tr('src_export' if gross else 'src_export_net', lang), mode='lines', stackgroup='exp',
+                        line=dict(width=1, color=SRC_COLORS['export']), fillcolor=_fill(SRC_COLORS['export'], 0.7),
+                        customdata=df['exp'], hovertemplate='%{customdata:.0f} MW')
     fig.add_scatter(x=x, y=df['consumption'], name=tr('consumption', lang), mode='lines',
                     line=dict(color='#ffffff', width=2.2), hovertemplate='%{y:.0f} MW')
     ui.chart(ui.style(fig, height, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
+
+
+def renewable_section(lang, df):
+    """Factual wind/solar shares from stored GSE balance data; no model involved."""
+    st.subheader(tr('ren_title', lang))
+    shares = an.renewable_shares(df)
+    if shares is None:
+        st.info(tr('bal_none', lang))
+        return
+    ui.cards([
+        ui.card(tr('ren_wind', lang), pct(shares['wind']), '', f"{tr('ren_sub', lang)} · {ui.fmt(shares['wind_mwh'], 0)} MWh", accent=True),
+        ui.card(tr('ren_ws', lang), pct(shares['wind_solar']), '', tr('ren_sub', lang)),
+        ui.card(tr('ren_all', lang), pct(shares['renewable']), '', tr('ren_sub', lang)),
+    ])
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        byh = an.wind_share_by_hour(df)
+        fig = go.Figure(go.Bar(x=byh['hour'], y=byh['wind_share'] * 100, marker_color=SRC_COLORS['wind'],
+                               customdata=byh['periods'], hovertemplate='%{y:.1f}% · n=%{customdata}<extra></extra>'))
+        ui.chart(ui.style(fig, 280, '%', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]).update_layout(hovermode='closest'))
+        ui.note(tr('ren_hour', lang))
+    with c2:
+        st.markdown(f"**{tr('ren_cmp', lang)}**")
+        cmp = an.windy_vs_calm(df)
+        if cmp is None:
+            ui.note(tr('ren_wait', lang))
+        else:
+            ui.cards([
+                ui.card(tr('ren_windy', lang), ui.fmt(cmp['windy_import'], 0), 'MW',
+                        tr('ren_cmp_sub', lang, q=tr('ren_top', lang), w=ui.fmt(cmp['windy_wind'], 0),
+                           t=ui.fmt(cmp['windy_thermal'], 0), n=cmp['windy_n'])),
+                ui.card(tr('ren_calm', lang), ui.fmt(cmp['calm_import'], 0), 'MW',
+                        tr('ren_cmp_sub', lang, q=tr('ren_bottom', lang), w=ui.fmt(cmp['calm_wind'], 0),
+                           t=ui.fmt(cmp['calm_thermal'], 0), n=cmp['calm_n'])),
+            ])
+            ui.note(tr('ren_caveat', lang))
 
 
 def balance_page(lang, data, reader, now):
@@ -310,27 +365,36 @@ def balance_page(lang, data, reader, now):
     df = balance_frame(rows)
     last = df.iloc[-1]
     net = last['net']
-    ui.cards([
+    cards = [
         ui.card(tr('bal_now', lang), ui.fmt(last['consumption'], 0), 'MW', local(df.index[-1], '%d.%m %H:%M'), accent=True),
         ui.card(tr('bal_gen_now', lang), ui.fmt(last['generation'], 0), 'MW',
-                ' · '.join(f"{tr(f'src_{k}', lang)} {last[k]:.0f}" for k in ('hydro', 'thermal', 'wind', 'solar'))),
-        ui.card(tr('bal_net_now', lang), ui.fmt(abs(net), 0), 'MW', tr('bal_net_sub_imp' if net >= 0 else 'bal_net_sub_exp', lang)),
-    ])
+                ' · '.join(f"{tr(f'src_{k}', lang)} {last[k]:.0f}" for k in STACK_ORDER)),
+    ]
+    if last['gross']:
+        cards += [ui.card(tr('bal_imp_now', lang), ui.fmt(last['imp'], 2), 'MW'),
+                  ui.card(tr('bal_exp_now', lang), ui.fmt(last['exp'], 2), 'MW')]
+    else:
+        cards.append(ui.card(tr('bal_net_now', lang), ui.fmt(abs(net), 0), 'MW', tr('bal_net_sub_imp' if net >= 0 else 'bal_net_sub_exp', lang)))
+    ui.cards(cards)
     balance_chart(lang, rows)
     ui.note(tr('bal_intro', lang), ui.tag('GSE', 'off'))
+    ui.note(tr('bal_flows_note', lang))
+    if not df['gross'].all():
+        ui.note(tr('bal_net_old', lang))
 
     energy = df[['hydro', 'thermal', 'wind', 'solar', 'generation', 'consumption']].sum() * an.PERIOD_HOURS
     st.subheader(tr('bal_mix', lang))
     c1, c2 = st.columns([1, 1])
     with c1:
-        srcs = ['hydro', 'thermal', 'wind', 'solar']
+        srcs = list(STACK_ORDER)
         fig = go.Figure(go.Pie(labels=[tr(f'src_{k}', lang) for k in srcs], values=[max(energy[k], 0) for k in srcs], hole=0.55,
-                               marker=dict(colors=[SRC_COLORS[k] for k in srcs]), sort=False, textinfo='percent'))
+                               marker=dict(colors=[SRC_COLORS[k] for k in srcs], line=dict(color=ui.C['bg'], width=2)),
+                               sort=False, textinfo='percent', textfont=dict(color='#0b1220', size=13)))
         ui.chart(ui.style(fig, 300).update_layout(hovermode='closest'))
         ui.note(tr('bal_mix_sub', lang))
     with c2:
-        imp = max(float(df['net'].clip(lower=0).sum()) * an.PERIOD_HOURS, 0.0)
-        exp = max(float(-df['net'].clip(upper=0).sum()) * an.PERIOD_HOURS, 0.0)
+        imp = max(float(df['imp'].sum()) * an.PERIOD_HOURS, 0.0)
+        exp = max(float(df['exp'].sum()) * an.PERIOD_HOURS, 0.0)
         expected = len(an.grid(max(start, df.index.min()), df.index.max()))
         cov = f"{tr('s_complete', lang)}: {pct(len(df) / expected) if expected else '-'} · {len(df)}/{expected}"
         ui.cards([
@@ -338,13 +402,16 @@ def balance_page(lang, data, reader, now):
             ui.card(tr('generation', lang), ui.fmt(energy['generation'], 0), 'MWh', cov),
             ui.card(tr('src_import', lang), ui.fmt(imp, 0), 'MWh', f"{tr('src_export', lang)}: {ui.fmt(exp, 0)} MWh"),
         ])
+    renewable_section(lang, df)
+
     st.subheader(tr('bal_profiles', lang))
     hours = (df.index.tz_convert(TZ) - pd.Timedelta(minutes=3)).hour
-    prof = df.groupby(hours)[['hydro', 'thermal', 'wind', 'solar', 'consumption', 'net']].mean()
+    prof = df.groupby(hours)[['hydro', 'thermal', 'wind', 'solar', 'consumption', 'imp', 'exp']].mean()
     fig = go.Figure()
-    for src in ('hydro', 'thermal', 'wind', 'solar'):
+    for src in STACK_ORDER:
         fig.add_scatter(x=prof.index, y=prof[src], name=tr(f'src_{src}', lang), mode='lines+markers', line=dict(color=SRC_COLORS[src], width=2.4))
-    fig.add_scatter(x=prof.index, y=prof['net'], name=tr('src_import', lang), mode='lines', line=dict(color=ui.C['model'], width=1.6, dash='dot'))
+    fig.add_scatter(x=prof.index, y=prof['imp'], name=tr('src_import', lang), mode='lines', line=dict(color=SRC_COLORS['import'], width=1.8, dash='dot'))
+    fig.add_scatter(x=prof.index, y=prof['exp'], name=tr('src_export', lang), mode='lines', line=dict(color=SRC_COLORS['export'], width=1.8, dash='dot'))
     fig.add_scatter(x=prof.index, y=prof['consumption'], name=tr('consumption', lang), mode='lines', line=dict(color='#ffffff', width=2.2))
     ui.chart(ui.style(fig, 340, 'MW', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
     ui.note(tr('bal_profiles_note', lang))
