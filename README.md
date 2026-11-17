@@ -22,7 +22,7 @@ Georgian and English, six pages (code in [`streamlit_cloud/`](streamlit_cloud/),
 - **GSE** (national aggregate only; GSE publishes no per-plant output): values and timestamps are shown as published. Quality codes (ACT, NRE, SUB, BLS) are shown unchanged; their official meaning is not confirmed, so the app never interprets them. Missing periods stay missing and are never filled. Source verification: [docs/sources/gse.md](docs/sources/gse.md).
 - **Open-Meteo** (DWD ICON forecast, ERA5 reanalysis): model estimates, not measurements and not a generation forecast. Attribution: Open-Meteo, CC BY 4.0. See [docs/sources/weather.md](docs/sources/weather.md) and [docs/sources/sites.md](docs/sources/sites.md).
 - **MW forecast:** an experimental estimate, not for operational or dispatch decisions. The app states whether it beats climatology or 24 h persistence on held-out hours.
-- **Collection:** a GitHub Actions collector writes daily CSV files to the [`data` branch](../../tree/data). It is scheduled every 15 minutes, but GitHub runs schedules on a best-effort basis, so runs can be delayed or skipped; each run recovers missing periods of up to the last 48 hours. The app shows the collection status and gaps honestly.
+- **Collection:** a GitHub Actions collector writes daily CSV files to the [`data` branch](../../tree/data). It is scheduled every 15 minutes, but GitHub runs schedules on a best-effort basis, so runs can be delayed or skipped; each run recovers missing periods of up to the last 96 hours. The app shows the collection status and gaps honestly.
 - **Reuse:** data reuse and licence terms of the sources, and the project's own licence, are pending owner review (see [License](#license)).
 
 ## Self-hosted edition (Next.js / FastAPI)

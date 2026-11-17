@@ -3,15 +3,15 @@ name: Collect GSE wind data
 # Durable history for the Streamlit edition (streamlit_cloud/README.md, "Persistence").
 # Runs only trusted code from the default branch (schedule/dispatch; never on pull requests) and
 # writes daily CSV files to the separate `data` branch. GitHub may delay or skip scheduled runs;
-# each run attempts bounded recovery within the last 12 hours. Longer outages, abandoned 404s
-# and unavailable upstream files can leave gaps. Pushes made with GITHUB_TOKEN do not trigger other workflows.
+# each run recovers missing periods of the last 12 hours, widening automatically up to 96 hours
+# after a long stop. Longer outages, abandoned 404s and unavailable upstream files can leave gaps. Pushes made with GITHUB_TOKEN do not trigger other workflows.
 on:
   schedule:
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       lookback_hours:
-        description: "Backfill window in hours (max 48; GSE retention is irregular beyond that)"
+        description: "Backfill window in hours (max 96)"
         default: "12"
 
 permissions:
@@ -64,10 +64,10 @@ jobs:
           LOOKBACK: ${{ github.event.inputs.lookback_hours || '12' }}
         run: |
           case "$LOOKBACK" in ''|*[!0-9]*) echo "lookback must be an integer"; exit 1;; esac
-          [ "$LOOKBACK" -ge 1 ] && [ "$LOOKBACK" -le 48 ] || { echo "lookback above 48 h"; exit 1; }
+          [ "$LOOKBACK" -ge 1 ] && [ "$LOOKBACK" -le 96 ] || { echo "lookback above 96 h"; exit 1; }
           set +e
           venv/bin/python code/streamlit_cloud/collector.py --data-dir data \
-            --lookback-hours "$LOOKBACK" --max-requests 1000 --weather
+            --lookback-hours "$LOOKBACK" --max-requests 2000 --weather
           echo "code=$?" >> "$GITHUB_OUTPUT"
       - name: Commit and push (only when something changed)
         env:
