@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / "streamlit_cloud"
 # Backend first, so streamlit_cloud/app.py never shadows the backend `app` package.
 sys.path[:0] = [str(ROOT / "backend"), str(HERE)]
+# Tests import and patch helper modules before the app runs; the redeploy guard must keep them.
+os.environ["WINDCAST_TESTING"] = "1"
 
 CLOCK = datetime(2026, 11, 14, 20, 11, tzinfo=UTC)
 

@@ -32,11 +32,20 @@ def test_changed_module_drops_all_local_modules(tmp_path, monkeypatch):
         sys.modules.pop(name, None)
 
 
-def test_unstamped_modules_are_left_alone(tmp_path, monkeypatch):
+def test_unstamped_module_from_an_older_deploy_is_reloaded(tmp_path, monkeypatch):
+    """Live case: the first deploy with the guard found an OLD i18n that had never been stamped."""
+    make(tmp_path, "wc_old", "T = {}\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.import_module("wc_old")
+    monkeypatch.setenv("WINDCAST_TESTING", "0")
+    assert reload_guard.drop_stale(tmp_path.resolve()) == ["wc_old"]
+    assert "wc_old" not in sys.modules
+
+
+def test_unstamped_modules_are_kept_under_tests(tmp_path, monkeypatch):
     make(tmp_path, "wc_plain", "X = 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
     mod = importlib.import_module("wc_plain")
-    os.utime(tmp_path / "wc_plain.py", ns=(0, 10**9))
-    assert reload_guard.drop_stale(tmp_path.resolve()) == []
+    assert reload_guard.drop_stale(tmp_path.resolve()) == []  # WINDCAST_TESTING=1 from conftest
     assert sys.modules["wc_plain"] is mod
     sys.modules.pop("wc_plain", None)
