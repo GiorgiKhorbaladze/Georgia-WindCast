@@ -120,3 +120,9 @@ def test_gaps_are_not_bridged_in_overview_charts():
     assert len(today) == 24 and any(v != v for v in today)  # missing hours are NaN gaps, not skipped
     gen = next(c for c in charts if c["data"][0].get("name") == tr("series_mw", "ka"))
     assert gen["data"][0].get("fill") in (None, "none") and gen["data"][0]["connectgaps"] is False
+
+
+def test_backfill_counter_wording_matches_the_collector():
+    # collector.RunReport.backfilled = inserted periods older than 1 h (a subset of "inserted")
+    assert "ერთ საათზე ძველი" in T["h_backfill"]["ka"] and "older than 1 h" in T["h_backfill"]["en"]
+    assert "საბაზისო მეთოდისა („{b}“)" in T["mw_weak"]["ka"]
