@@ -22,6 +22,8 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import analytics as an  # noqa: E402
+import compass  # noqa: E402
+from charts import now_marker, series_figure, series_frame, time_ticks, wall  # noqa: E402
 import data as source  # noqa: E402
 import mwmodel  # noqa: E402
 import ui  # noqa: E402
@@ -33,7 +35,6 @@ from i18n import tr  # noqa: E402
 st.set_page_config(page_title='Georgia WindCast', page_icon='🌬️', layout='wide')
 TZ = ZoneInfo('Asia/Tbilisi')
 BASEMAP = 'https://tiles.openfreemap.org/styles/dark'  # same basemap as the main product
-COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
 PAGES = ('overview', 'balance', 'analytics', 'forecast', 'accuracy', 'data')
 STATE_KEY = {'fresh': 'st_fresh', 'stale': 'st_stale', 'unavailable': 'st_unavailable', 'unverified': 'st_unverified'}
 
@@ -85,10 +86,6 @@ def author_block(lang):
 def local(value, fmt='%d.%m.%Y %H:%M'):
     return pd.Timestamp(value).tz_convert(TZ).strftime(fmt)
 
-
-def wall(value):
-    """Tbilisi wall-clock string for chart axes, independent of the viewer's time zone."""
-    return pd.Timestamp(value).tz_convert(TZ).strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def pct(x):
@@ -231,16 +228,12 @@ def site_wind(packet, index, height, now):
     return next((v for v in packet['series'][index].by_height[height] if v.valid_at == hour), None)
 
 
-def direction_text(deg):
-    return f'{deg:.0f}° ({COMPASS[int((deg + 22.5) % 360 // 45)]})' if deg is not None else '-'
-
-
 def site_map(lang, data, now):
     packet = data['forecast']
     records = []
     for i, site in enumerate(SITES):
         current = site_wind(packet, i, 80, now)
-        wind = (f'{current.speed_ms:.1f} m/s, {direction_text(current.direction_deg)}'
+        wind = (f"{current.speed_ms:.1f} {tr('ms', lang)}, {compass.label(current.direction_deg, lang)}"
                 if current and current.speed_ms is not None else '-')
         records.append(dict(num=str(i + 1), lat=site.latitude, lon=site.longitude, name=site.name_ka if lang == 'ka' else site.name_en,
                             status=site.status_ka if lang == 'ka' else site.status_en, wind=wind,
@@ -549,7 +542,7 @@ def forecast(lang, data, reader, now):
     ui.note(f"{tr('run', lang)}: {local(packet['run'])} · {tr('retrieved', lang)}: {local(packet['retrieved'])}{via}", ui.tag(tr('model_wind', lang), 'mdl'))
     if values:
         ui.note(tr('valid', lang, a=local(values[0].valid_at), b=local(values[-1].valid_at), h=hours))
-    show_series(values, lang, now)
+    show_series(values, lang, now, height)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -588,8 +581,18 @@ def mw_forecast(lang, data, reader, now):
         fig.add_scatter(x=x + x[::-1], y=list(fc['high']) + list(fc['low'][::-1]), fill='toself', mode='lines',
                         line=dict(width=0), fillcolor='rgba(167,139,250,0.18)', name=tr('mw_band', lang), hoverinfo='skip')
         fig.add_scatter(x=x, y=fc['mw'], mode='lines', name=tr('mw_estimate', lang), line=dict(color=ui.C['model'], width=2.5, dash='dash'))
-    fig.add_vline(x=wall(nowt), line_dash='dot', line_color=ui.C['warn'])
-    ui.chart(ui.style(fig, 340, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
+    now_marker(fig, nowt, lang)
+    skill_note(lang, res)
+    ui.style(fig, 340, 'MW')
+    xs = [t for tr_ in fig.data for t in (tr_.x or ())]
+    if xs:
+        vals, text = time_ticks(pd.Timestamp(min(xs)).tz_localize(TZ), pd.Timestamp(max(xs)).tz_localize(TZ))
+        fig.update_xaxes(type='date', tickvals=vals, ticktext=text, hoverformat='%d.%m %H:%M')
+    ui.chart(fig)
+    notes = [tr('mw_band_note', lang)]
+    if data['forecast']:
+        notes.insert(0, tr('mw_vintage', lang, run=local(data['forecast']['run'])))
+    ui.note(' · '.join(notes))
     st.markdown(f"**{tr('mw_eval', lang, n=res.test_hours, start=local(res.test_start))}**")
     table = [dict(m=tr('model', lang), **res.model), dict(m=tr('climatology', lang), **res.climatology)]
     table += [dict(m=tr('persistence', lang, h=h), **v) for h, v in res.persistence.items()]
@@ -599,27 +602,33 @@ def mw_forecast(lang, data, reader, now):
         st.write(tr('mw_method_text', lang))
 
 
-def show_series(values, lang, now):
+def skill_note(lang, res):
+    """State plainly whether the held-out model error beats the fair day-ahead baseline."""
+    base = mwmodel.fair_baseline(res)
+    if base is None or not res.model:
+        return
+    key, best = base
+    name = tr('climatology', lang) if key == 'climatology' else tr('persistence', lang, h=24)
+    kw = dict(m=ui.fmt(res.model['mae']), b=name, bm=ui.fmt(best), n=res.test_hours)
+    if res.model['mae'] >= best:
+        st.warning(tr('mw_weak', lang, **kw))
+    else:
+        st.info(tr('mw_skill', lang, **kw))
+
+
+def show_series(values, lang, now, height_m=None):
     if not values:
         st.info(tr('no_data', lang))
         return
-    # Reindex to hourly resolution: omitted timestamps must create visible gaps too.
-    frame = pd.DataFrame([dict(time=v.valid_at, speed=v.speed_ms, direction=v.direction_deg) for v in values]).set_index('time')
-    frame = frame.reindex(pd.date_range(frame.index.min(), frame.index.max(), freq='h'))
-    x = [wall(t) for t in frame.index]
-    fig = go.Figure(go.Scatter(x=x, y=frame.speed, mode='lines', connectgaps=False, name=tr('speed', lang),
-                               line=dict(color=ui.C['accent2'], width=2.2)))
-    fig.add_scatter(x=x, y=frame.direction, mode='markers', yaxis='y2', name=tr('direction', lang),
-                    marker=dict(color=ui.C['muted'], size=4))
-    if now is not None:
-        fig.add_vline(x=wall(now), line_dash='dot', line_color=ui.C['warn'])
-    ui.style(fig, 360, 'm/s')
-    fig.update_layout(yaxis=dict(rangemode='tozero'),
-                      yaxis2=dict(title='°', overlaying='y', side='right', range=[0, 360], dtick=90, showgrid=False))
-    ui.chart(fig.update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
-    display = frame.copy()
+    frame = series_frame(values)
+    fig = series_figure(frame, lang, height_m)
+    if now is not None and frame.index.min() <= now <= frame.index.max():
+        now_marker(fig, now, lang, rows=True)
+    ui.chart(fig)
+    ui.note(tr('wx_dir_note', lang))
+    display = pd.DataFrame({tr('speed', lang): frame.speed.round(2), tr('direction', lang): frame.direction,
+                            tr('direction_text', lang): [compass.sector(d, lang) or '-' for d in frame.direction]})
     display.index = [local(t) for t in frame.index]
-    display.columns = [tr('speed', lang), tr('direction', lang)]
     with st.expander(tr('table', lang)):
         st.dataframe(display, width='stretch')
 

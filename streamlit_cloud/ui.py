@@ -54,6 +54,7 @@ h2 {{ font-size: 1.25rem !important; font-weight: 600 !important; margin-top: 1.
 @media (max-width: 640px) {{
   .wc-hero h1 {{ font-size:1.35rem; }} .wc-value {{ font-size:1.45rem; }}
   .block-container {{ padding-left:.8rem; padding-right:.8rem; }}
+  .wc-badge {{ white-space:normal; }}  /* long source names must wrap, not be clipped */
 }}
 </style>
 """

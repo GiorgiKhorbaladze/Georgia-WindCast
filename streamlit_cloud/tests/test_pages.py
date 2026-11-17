@@ -104,6 +104,7 @@ def test_forecast_page_shows_model_vs_baselines_when_trained():
     assert methods[:2] == ["Model", "Climatology"] and any(m.startswith("Persistence") for m in methods)
     mae = dict(zip(methods, table["MAE, MW"], strict=True))
     assert mae["Model"] < mae["Climatology"]  # held-out comparison shown honestly
+    assert any("MAE" in i.value for i in at.info) and not at.warning  # skill stated, with sample size
 
 
 @pytest.mark.parametrize("lang", ["ka", "en"])

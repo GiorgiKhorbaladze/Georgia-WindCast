@@ -34,8 +34,15 @@ A GSE label marks the end of its 3-minute interval. Energy = sum of stored 3-min
 - **Validation:** time-ordered split; the last 25 % of paired hours (≥ 24 h) are held out. Reported against climatology (training mean by hour) and persistence (value 1/6/24 h earlier) on the same hours.
 - **Output:** the model refit on all paired hours is applied to the current ICON run for the next 48 h, clipped to the observed range (+10 %). The band shows the 10-90 % quantiles of held-out residuals (empirical, not a probabilistic guarantee).
 - **Threshold:** no forecast is shown below 168 paired hours; the page states how many are available.
+- **Skill label:** the page states whether the held-out MAE beats the best baseline available at a day-ahead lead (climatology or 24 h persistence). If it does not, a warning says the estimate is illustrative only. Persistence of 1 h and 6 h stays in the table but does not decide the label, because it is not available 24-48 h ahead.
 - **Updates:** with every new model run (about every 6 h) and as GSE history grows.
 - **Status:** independent experimental estimate. Not official GSE data, not per-plant output, not for operational or dispatch decisions.
+
+### Wind direction (`compass.py`, `charts.py`)
+
+- **Convention (one convention app-wide):** degrees say where the wind blows FROM, clockwise from north: 0°/360° from north, 90° from east, 180° from south, 270° from west. Text is shown next to the exact degrees, in 8 localized sectors (for example `270° - დასავლეთიდან` / `270° - from west`).
+- **Chart:** speed and direction are two stacked panels on one time axis, so one hover shows both for the same hour. Direction is drawn as points only, because joining 359° to 1° with a line would suggest a 358° swing. Hours below 3 m/s get hollow markers (direction less informative). Missing hours stay gaps; values are not smoothed.
+- **Time axis:** Tbilisi time; ticks every 12 h on a 3-day forecast, with midnight labelled by its date. A dotted orange line labelled "now"/"ახლა" marks the current time.
 
 ### Forecast accuracy (`verification.py`)
 
