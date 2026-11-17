@@ -172,7 +172,7 @@ def overview(lang, data, reader, now):
         ui.card(tr('peak_today', lang), ui.fmt(t.peak_mw, 1), 'MW',
                 tr('at_time', lang, time=local(t.peak_time, '%H:%M'), q=qcode(df.loc[t.peak_time, 'quality'], lang)) if t.peak_time is not None else ''),
     ])
-    ui.note(f"{tr('official', lang)} · {tr('cmp_note', lang)} {tr('units_note', lang)}", ui.tag('GSE', 'off'))
+    ui.note(f"{tr('official', lang)} · {tr('cmp_note', lang)} {tr('units_note', lang)}", ui.tag(tr('gse_tag', lang), 'off'))
     with st.expander(tr('cmp_detail_title', lang)):
         st.write(tr('cmp_detail', lang))
 
@@ -211,7 +211,7 @@ def overview(lang, data, reader, now):
     brows = reader.balance(now - timedelta(hours=24), now, now)
     if brows:
         balance_chart(lang, brows, height=320)
-        ui.note(tr('bal_intro', lang), ui.tag('GSE', 'off'))
+        ui.note(tr('bal_intro', lang), ui.tag(tr('gse_tag', lang), 'off'))
     else:
         st.info(tr('bal_none', lang))
 
@@ -397,7 +397,7 @@ def balance_page(lang, data, reader, now):
         cards.append(ui.card(tr('bal_net_now', lang), ui.fmt(abs(net), 0), 'MW', tr('bal_net_sub_imp' if net >= 0 else 'bal_net_sub_exp', lang)))
     ui.cards(cards)
     balance_chart(lang, rows)
-    ui.note(tr('bal_intro', lang), ui.tag('GSE', 'off'))
+    ui.note(tr('bal_intro', lang), ui.tag(tr('gse_tag', lang), 'off'))
     ui.note(tr('bal_flows_note', lang))
     if not df['gross'].all():
         ui.note(tr('bal_net_old', lang))
@@ -753,9 +753,9 @@ def data_page(lang, data, reader, now):
     st.markdown(tr('method_text', lang, fc=FORECAST.label, ra=REANALYSIS.label))
     st.warning(tr('disclaimer', lang))
     st.caption(tr('hosting', lang))
-    st.markdown('[GSE](https://www.gse.com.ge/) · [Open-Meteo (CC BY 4.0)](https://open-meteo.com/) · '
-                '[Source methodology](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/tree/main/docs/sources) · '
-                '[Data (CSV)](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/tree/data/gse)')
+    st.markdown(f"[{tr('gse_link', lang)}](https://www.gse.com.ge/) · " '[Open-Meteo (CC BY 4.0)](https://open-meteo.com/) · '
+                f"[{tr('link_method', lang)}](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/tree/main/docs/sources) · "
+                f"[{tr('link_data', lang)}](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/tree/data/gse)")
 
 
 if __name__ == '__main__':

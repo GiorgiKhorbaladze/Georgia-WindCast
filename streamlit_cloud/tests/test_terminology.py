@@ -58,7 +58,7 @@ def test_units_and_sources_are_explained_once():
     assert "მეგავატი (MW)" in T["units_note"]["ka"] and "მეგავატსაათი (MWh)" in T["units_note"]["ka"]
     assert "მეტრი წამში" in T["units_note"]["ka"]
     m = T["method_text"]["ka"]
-    assert "საქართველოს სახელმწიფო ელექტროსისტემა“ (GSE)" in m and "კოორდინირებული უნივერსალური დროით (UTC)" in m
+    assert "საქართველოს სახელმწიფო ელექტროსისტემა“" in m and "კოორდინირებული უნივერსალური დროით (UTC)" in m
     assert "(SCADA)" in T["disclaimer"]["ka"]
     assert "წინსწრების დრო 6 სთ-ზე ნაკლები" in T["ref_analysis"]["ka"]  # lead time, not just issue time
     assert "კალიბრირებული სანდოობის ინტერვალი" in T["mw_band_note"]["ka"]
@@ -126,3 +126,18 @@ def test_backfill_counter_wording_matches_the_collector():
     # collector.RunReport.backfilled = inserted periods older than 1 h (a subset of "inserted")
     assert "ერთ საათზე ძველი" in T["h_backfill"]["ka"] and "older than 1 h" in T["h_backfill"]["en"]
     assert "საბაზისო მეთოდისა („{b}“)" in T["mw_weak"]["ka"]
+
+
+def test_georgian_texts_use_the_full_name_instead_of_gse():
+    # owner decision 17.11.2026: no "GSE" abbreviation in the Georgian interface
+    assert [k for k, v in T.items() if "GSE" in v["ka"]] == []
+    assert T["gse_tag"]["ka"] == "საქართველოს სახელმწიფო ელექტროსისტემა" and T["gse_tag"]["en"] == "GSE"
+
+
+def test_overview_in_georgian_shows_no_gse_abbreviation():
+    import test_pages
+    at = test_pages.run("overview", "ka", test_pages.durable_two_days())
+    text = page_text(at)
+    assert "საქართველოს სახელმწიფო ელექტროსისტემა" in text
+    visible = re.sub(r"<[^>]+>", " ", text)  # ignore markup and URLs in attributes
+    assert "GSE" not in visible
