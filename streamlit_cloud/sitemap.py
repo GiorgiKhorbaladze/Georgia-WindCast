@@ -9,6 +9,7 @@ text; light wind (< 3 m/s) gets a muted arrow, because its direction is less mea
 from __future__ import annotations
 
 import base64
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 import compass
@@ -66,3 +67,34 @@ def site_record(num: int, site, value, lang: str, height_m: int = 80) -> dict:
     lines.append(status)
     rec['tip'] = '\n'.join(lines)
     return rec
+
+
+def value_at(packet, index: int, height_m: int, hour):
+    """The site's model value for exactly this valid hour, or None (never interpolated)."""
+    if not packet:
+        return None
+    return next((v for v in packet['series'][index].by_height.get(height_m, []) if v.valid_at == hour), None)
+
+
+def forecast_hours(packet, now, height_m: int = 80, horizon_h: int = 72) -> list:
+    """Valid hours of the current run, from the current hour up to `horizon_h` ahead, for which at
+    least one site has both speed and direction. Only hours present in the run are returned, so the
+    time slider never steps through hours the model did not provide."""
+    if not packet:
+        return []
+    hour = now.replace(minute=0, second=0, microsecond=0)
+    last = hour + timedelta(hours=horizon_h)
+    hours = set()
+    for loc in packet['series']:
+        for v in loc.by_height.get(height_m, []):
+            if hour <= v.valid_at <= last and v.speed_ms is not None and compass.sector(v.direction_deg) is not None:
+                hours.add(v.valid_at)
+    return sorted(hours)
+
+
+def next_hour(hours: list, current, step: int = 1):
+    """Next (or previous) available hour, wrapping round at the end of the run."""
+    if not hours:
+        return None
+    i = hours.index(current) if current in hours else -1
+    return hours[(i + step) % len(hours)]
