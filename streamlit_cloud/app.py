@@ -95,6 +95,11 @@ def local(value, fmt='%d.%m.%Y %H:%M'):
 
 
 
+def qcode(code, lang):
+    """Raw GSE quality code; anything but ACT is marked as having an unconfirmed meaning (never guessed)."""
+    return code if code == 'ACT' else f"{code} ({tr('q_unconfirmed', lang)})"
+
+
 def pct(x):
     return f'{x * 100:.1f}%'
 
@@ -148,7 +153,8 @@ def overview(lang, data, reader, now):
     df = an.frame(rows)
     latest = rows[-1] if rows else None
     state = generation_state(latest, now)
-    ui.hero(tr('app_title', lang), tr('tagline', lang), ui.badge(tr(STATE_KEY[state], lang), state))
+    badge_text = tr(STATE_KEY[state], lang) + (f" ({latest['quality']})" if state == 'unverified' and latest else '')
+    ui.hero(tr('app_title', lang), tr('tagline', lang), ui.badge(badge_text, state))
     if latest is None:
         st.info(tr('no_data', lang))
         site_map(lang, data, now)
@@ -159,14 +165,16 @@ def overview(lang, data, reader, now):
     y_sub = tr('full_day' if y.complete else 'incomplete_day', lang, pct=pct(y.completeness))
     ui.cards([
         ui.card(tr('now_mw', lang), ui.fmt(latest['value_mw'], 2), 'MW',
-                tr('now_sub', lang, time=local(latest['time'], '%H:%M')) + f" · {tr('quality', lang)}: {latest['quality']}", accent=True),
+                tr('now_sub', lang, time=local(latest['time'], '%H:%M')) + f" · {tr('quality', lang)}: {qcode(latest['quality'], lang)}", accent=True),
         ui.card(tr('today_energy', lang), ui.fmt(t.energy_mwh, 0), 'MWh',
                 tr('so_far', lang, time=local(due, '%H:%M'), pct=pct(t.completeness))),
         ui.card(tr('yesterday_energy', lang), ui.fmt(y.energy_mwh, 0), 'MWh', y_sub),
         ui.card(tr('peak_today', lang), ui.fmt(t.peak_mw, 1), 'MW',
-                tr('at_time', lang, time=local(t.peak_time, '%H:%M'), q=df.loc[t.peak_time, 'quality']) if t.peak_time is not None else ''),
+                tr('at_time', lang, time=local(t.peak_time, '%H:%M'), q=qcode(df.loc[t.peak_time, 'quality'], lang)) if t.peak_time is not None else ''),
     ])
-    ui.note(f"{tr('official', lang)} · {tr('cmp_note', lang)}", ui.tag('GSE', 'off'))
+    ui.note(f"{tr('official', lang)} · {tr('cmp_note', lang)} {tr('units_note', lang)}", ui.tag('GSE', 'off'))
+    with st.expander(tr('cmp_detail_title', lang)):
+        st.write(tr('cmp_detail', lang))
 
     st.subheader(tr('cmp_title', lang))
     left, right = st.columns([1, 2])
@@ -181,15 +189,19 @@ def overview(lang, data, reader, now):
                     sub_class='wc-up' if (delta or 0) >= 0 else 'wc-down'),
         ])
         if t.non_act or y.non_act:
-            ui.note(tr('non_act_note', lang, n=t.non_act + y.non_act))
+            codes = ', '.join(sorted(set(df['quality']) - {'ACT'})) or '-'
+            ui.note(tr('non_act_note', lang, n=t.non_act + y.non_act, codes=codes))
     with right:
         fig = go.Figure()
         for day, name, color, dash in ((y.day, tr('yesterday', lang), ui.C['accent2'], 'dot'), (t.day, tr('today', lang), ui.C['accent'], None)):
-            prof = an.hourly_profile(df, day)
+            # Hours without stored periods stay gaps: the line must not bridge them.
+            prof = an.hourly_profile(df, day).set_index('hour').reindex(range(24)).rename_axis('hour').reset_index()
+            prof['periods'] = prof['periods'].fillna(0).astype(int)
             fig.add_scatter(x=prof['hour'], y=prof['mean_mw'], mode='lines+markers', name=name,
                             line=dict(color=color, width=2.5, dash=dash), marker=dict(size=5),
-                            customdata=prof['periods'], hovertemplate='%{y:.1f} MW · %{customdata}/20<extra></extra>')
-        ui.chart(ui.style(fig, 300, 'MW', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
+                            customdata=prof['periods'],
+                            hovertemplate=f"%{{y:.1f}} MW · {tr('periods_stored', lang)}: %{{customdata}}/20<extra></extra>")
+        ui.chart(ui.style(fig, 300, tr('ax_power', lang), tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
         ui.note(tr('cmp_chart', lang))
 
     st.subheader(tr('last24', lang))
@@ -217,13 +229,19 @@ def generation_chart(lang, rows, start, end, height=340):
     grid = pd.date_range(first, last, freq='3min')
     by_time = {pd.Timestamp(r['time']): r for r in rows}
     values = [by_time[t]['value_mw'] if t in by_time else None for t in grid]
-    fig = go.Figure(go.Scatter(x=[wall(t) for t in grid], y=values, mode='lines', connectgaps=False, name='MW',
-                               line=dict(color=ui.C['accent'], width=2), fill='tozeroy', fillcolor='rgba(45,212,191,0.08)'))
+    # The area fill would span missing periods (Plotly fills across None), so it is used only without gaps.
+    gaps = any(v is None for v in values)
+    fig = go.Figure(go.Scatter(x=[wall(t) for t in grid], y=values, mode='lines', connectgaps=False, name=tr('series_mw', lang),
+                               line=dict(color=ui.C['accent'], width=2), fill=None if gaps else 'tozeroy',
+                               fillcolor='rgba(45,212,191,0.08)'))
     odd = [r for r in rows if r['quality'] != 'ACT']
     if odd:
+        # Raw code and source time in the tooltip; the code's meaning is not officially confirmed.
         fig.add_scatter(x=[wall(r['time']) for r in odd], y=[r['value_mw'] for r in odd], mode='markers',
-                        name=f"{tr('quality', lang)} ≠ ACT", marker=dict(color=ui.C['warn'], size=4))
-    ui.chart(ui.style(fig, height, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
+                        name=tr('q_legend', lang), marker=dict(color=ui.C['warn'], size=4),
+                        customdata=[[r['quality'], local(r['time'], '%d.%m %H:%M')] for r in odd],
+                        hovertemplate=f"%{{y:.2f}} MW · {tr('q_hover', lang)}<extra></extra>")
+    ui.chart(ui.style(fig, height, tr('ax_power', lang)).update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
     missing = sum(v is None for v in values)
     if missing:
         ui.note(tr('s_missing', lang, n=missing))
@@ -315,7 +333,7 @@ def balance_chart(lang, rows, height=360):
                         customdata=df['exp'], hovertemplate='%{customdata:.0f} MW')
     fig.add_scatter(x=x, y=df['consumption'], name=tr('consumption', lang), mode='lines',
                     line=dict(color='#ffffff', width=2.2), hovertemplate='%{y:.0f} MW')
-    ui.chart(ui.style(fig, height, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
+    ui.chart(ui.style(fig, height, tr('ax_power', lang)).update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
 
 
 def renewable_section(lang, df):
@@ -334,8 +352,9 @@ def renewable_section(lang, df):
     with c1:
         byh = an.wind_share_by_hour(df)
         fig = go.Figure(go.Bar(x=byh['hour'], y=byh['wind_share'] * 100, marker_color=SRC_COLORS['wind'],
-                               customdata=byh['periods'], hovertemplate='%{y:.1f}% · n=%{customdata}<extra></extra>'))
-        ui.chart(ui.style(fig, 280, '%', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]).update_layout(hovermode='closest'))
+                               customdata=byh['periods'],
+                               hovertemplate=f"%{{y:.1f}}% · {tr('periods_stored', lang)}: %{{customdata}}<extra></extra>"))
+        ui.chart(ui.style(fig, 280, tr('ax_share', lang), tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]).update_layout(hovermode='closest'))
         ui.note(tr('ren_hour', lang))
     with c2:
         st.markdown(f"**{tr('ren_cmp', lang)}**")
@@ -351,7 +370,7 @@ def renewable_section(lang, df):
                         tr('ren_cmp_sub', lang, q=tr('ren_bottom', lang), w=ui.fmt(cmp['calm_wind'], 0),
                            t=ui.fmt(cmp['calm_thermal'], 0), n=cmp['calm_n'])),
             ])
-            ui.note(tr('ren_caveat', lang))
+            ui.note(f"{tr('ren_cmp_how', lang)} {tr('ren_caveat', lang)}")
 
 
 def balance_page(lang, data, reader, now):
@@ -408,13 +427,14 @@ def balance_page(lang, data, reader, now):
     st.subheader(tr('bal_profiles', lang))
     hours = (df.index.tz_convert(TZ) - pd.Timedelta(minutes=3)).hour
     prof = df.groupby(hours)[['hydro', 'thermal', 'wind', 'solar', 'consumption', 'imp', 'exp']].mean()
+    prof = prof.reindex(range(24))  # hours without stored periods stay gaps
     fig = go.Figure()
     for src in STACK_ORDER:
         fig.add_scatter(x=prof.index, y=prof[src], name=tr(f'src_{src}', lang), mode='lines+markers', line=dict(color=SRC_COLORS[src], width=2.4))
     fig.add_scatter(x=prof.index, y=prof['imp'], name=tr('src_import', lang), mode='lines', line=dict(color=SRC_COLORS['import'], width=1.8, dash='dot'))
     fig.add_scatter(x=prof.index, y=prof['exp'], name=tr('src_export', lang), mode='lines', line=dict(color=SRC_COLORS['export'], width=1.8, dash='dot'))
     fig.add_scatter(x=prof.index, y=prof['consumption'], name=tr('consumption', lang), mode='lines', line=dict(color='#ffffff', width=2.2))
-    ui.chart(ui.style(fig, 340, 'MW', tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
+    ui.chart(ui.style(fig, 340, tr('ax_power', lang), tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
     ui.note(tr('bal_profiles_note', lang))
     ui.note(tr('bal_quality', lang))
     out = df.reset_index().rename(columns={'index': 'period_label_utc', 'time': 'period_label_utc'})
@@ -470,8 +490,8 @@ def analytics(lang, data, reader, now):
             hourly = part['value_mw'].groupby((part.index - pd.Timedelta(minutes=3)).floor('h')).mean()
             hourly = hourly.reindex(pd.date_range(hourly.index.min(), hourly.index.max(), freq='h'))
             fig = go.Figure(go.Scatter(x=[wall(t) for t in hourly.index], y=hourly.values, mode='lines', connectgaps=False,
-                                       line=dict(color=ui.C['accent'], width=1.6), name='MW'))
-            ui.chart(ui.style(fig, 320, 'MW').update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
+                                       line=dict(color=ui.C['accent'], width=1.6), name=tr('series_mw', lang)))
+            ui.chart(ui.style(fig, 320, tr('ax_power', lang)).update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
             ui.note(tr('hourly_mean_note', lang))
         days = an.daily(df, start, end, nowt, latest_due(now))
         if complete_only:
@@ -480,14 +500,14 @@ def analytics(lang, data, reader, now):
         if len(days):
             st.subheader(tr('daily_title', lang))
             colors = [ui.C['accent'] if c else ui.C['warn'] for c in days['complete']]
-            fig = go.Figure(go.Bar(x=[str(d) for d in days['day']], y=days['energy_mwh'], marker_color=colors, name='MWh',
+            fig = go.Figure(go.Bar(x=[str(d) for d in days['day']], y=days['energy_mwh'], marker_color=colors, name=tr('ax_energy', lang),
                                    customdata=np.stack([days['completeness'] * 100], axis=-1),
-                                   hovertemplate='%{y:.0f} MWh · %{customdata[0]:.1f}%<extra></extra>'))
+                                   hovertemplate=f"%{{y:.0f}} MWh · {tr('s_complete', lang)}: %{{customdata[0]:.1f}}%<extra></extra>"))
             if len(days) >= 7:
                 roll = days.set_index('day')['energy_mwh'].where(days.set_index('day')['complete']).rolling(7, min_periods=4).mean()
                 fig.add_scatter(x=[str(d) for d in roll.index], y=roll.values, mode='lines', name=tr('rolling', lang),
                                 line=dict(color=ui.C['accent2'], width=2))
-            ui.chart(ui.style(fig, 300, 'MWh').update_xaxes(type='category'))
+            ui.chart(ui.style(fig, 300, tr('ax_energy', lang)).update_xaxes(type='category'))
             ui.note(f"■ {tr('complete', lang)} · ■ {tr('incomplete', lang)}")
             agg_choice = st.radio(tr('aggregation', lang), ['day', 'week', 'month'], horizontal=True,
                                   format_func=lambda k: tr(f'agg_{k}', lang))
@@ -497,7 +517,7 @@ def analytics(lang, data, reader, now):
                 table = an.aggregate(days, 'W' if agg_choice == 'week' else 'M').drop(columns=['complete_days'])
             table['completeness'] = (table['completeness'] * 100).round(1)
             labels = {'day': tr('dates', lang), 'period': tr('range', lang), 'energy_mwh': f"{tr('s_total', lang)}, MWh",
-                      'mean_mw': f"{tr('s_mean', lang)}, MW", 'min_mw': 'Min, MW', 'max_mw': 'Max, MW',
+                      'mean_mw': f"{tr('s_mean', lang)}, MW", 'min_mw': f"{tr('t_min', lang)}, MW", 'max_mw': f"{tr('t_max', lang)}, MW",
                       'days': tr('dates', lang), 'completeness': f"{tr('s_complete', lang)}, %"}
             st.dataframe(table.round(1).rename(columns=labels), width='stretch', hide_index=True)
             pattern = an.weekday_pattern(days)
@@ -509,11 +529,12 @@ def analytics(lang, data, reader, now):
                 else:
                     names = tr('weekdays', lang).split(',')
                     fig = go.Figure(go.Bar(x=[names[w] for w in pattern['weekday']], y=pattern['mean'], marker_color=ui.C['accent2']))
-                    ui.chart(ui.style(fig, 260, 'MWh'))
+                    ui.chart(ui.style(fig, 260, tr('ax_energy', lang)))
+                    ui.note(tr('weekday_note', lang))
             with c2:
                 st.subheader(tr('dist_title', lang))
                 fig = go.Figure(go.Histogram(x=part['value_mw'], nbinsx=40, marker_color=ui.C['accent']))
-                ui.chart(ui.style(fig, 260, '', 'MW').update_layout(hovermode='closest'))
+                ui.chart(ui.style(fig, 260, '', tr('ax_power', lang)).update_layout(hovermode='closest'))
         out = part.reset_index().rename(columns={'time': 'period_label_utc'})
         st.download_button(tr('download', lang), out.to_csv(index=False), 'windcast_gse_filtered.csv', 'text/csv')
 
@@ -591,7 +612,7 @@ def mw_forecast(lang, data, reader, now):
         fig.add_scatter(x=x, y=fc['mw'], mode='lines', name=tr('mw_estimate', lang), line=dict(color=ui.C['model'], width=2.5, dash='dash'))
     now_marker(fig, nowt, lang)
     skill_note(lang, res)
-    ui.style(fig, 340, 'MW')
+    ui.style(fig, 340, tr('ax_power', lang))
     xs = [t for tr_ in fig.data for t in (tr_.x or ())]
     if xs:
         vals, text = time_ticks(pd.Timestamp(min(xs)).tz_localize(TZ), pd.Timestamp(max(xs)).tz_localize(TZ))
@@ -656,8 +677,9 @@ def accuracy(lang, data, reader, now):
     by_lead = ver.scores(p, by=('lead',))
     leads = [b[2] for b in ver.LEAD_BUCKETS if b[2] in set(by_lead['lead'])]
     by_lead = by_lead.set_index('lead').loc[leads].reset_index()
-    ui.cards([ui.card(f"{tr('lead', lang)} {r['lead']}", ui.fmt(r['mae'], 2), 'm/s',
-                      f"RMSE {ui.fmt(r['rmse'], 2)} · {tr('bias', lang).split(',')[0]} {r['bias']:+.2f} · n={r['n']}") for _, r in by_lead.iterrows()])
+    ui.cards([ui.card(f"{tr('lead', lang)} {r['lead']} · MAE", ui.fmt(r['mae'], 2), tr('ms', lang),
+                      tr('acc_card_sub', lang, rmse=ui.fmt(r['rmse'], 2), bias=f"{r['bias']:+.2f}", n=r['n'])) for _, r in by_lead.iterrows()])
+    ui.note(tr('acc_metrics_help', lang))
     detail = ver.scores(p)
     detail['site'] = [SITES[i].name_ka if lang == 'ka' else SITES[i].name_en for i in detail['site']]
     fig = go.Figure()
@@ -697,6 +719,7 @@ def data_page(lang, data, reader, now):
     else:
         state, text = 'fresh', tr('h_healthy', lang)
     st.markdown(ui.badge(text, state), unsafe_allow_html=True)
+    ui.note(tr('h_age_note', lang))
     ui.cards([
         ui.card(tr('h_last_success', lang), local(now - age) if age is not None else '-', '', '', accent=True),
         ui.card(tr('h_latest_label', lang), local(latest_label) if latest_label is not None else '-'),

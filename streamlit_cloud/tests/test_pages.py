@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from conftest import page_text
+from i18n import tr
 from store import Record
 from streamlit.testing.v1 import AppTest
 from test_analytics import packet, synthetic
@@ -130,7 +131,7 @@ def test_data_page_health_and_gaps(lang):
               "deep_backfill": {"cursor": (NOW - timedelta(days=5)).isoformat(), "done": False}}
     at = run("data", lang, durable_two_days(skip_yesterday=60), status=status)
     text = page_text(at)
-    assert ("ბოლო 6 საათის მონაცემები შენახულია" if lang == "ka" else "last 6 hours is stored") in text
+    assert tr("h_healthy", lang) in text and tr("h_age_note", lang).split(";")[0] in text
     assert "12" in text and "21" in text  # recovered periods and widened window are visible
     gaps = at.dataframe[0].value  # missing intervals table
     assert len(gaps) == 1 and int(gaps.iloc[0, 2]) == 60
