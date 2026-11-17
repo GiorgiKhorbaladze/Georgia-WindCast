@@ -406,11 +406,19 @@ def test_skipped_runs_widen_the_window_beyond_12_hours(tmp_path):
     assert status["last_run"]["backfilled"] == report.backfilled
 
 
-def test_catch_up_is_bounded_at_48_hours(tmp_path):
+def test_catch_up_is_bounded_at_96_hours(tmp_path):
     gse = Gse()
     collector(tmp_path, gse, hours=1).run(NOW)
-    report, _ = collector(tmp_path, gse, hours=12, max_requests=2000).run(NOW + timedelta(days=4))
-    assert report.lookback_used_hours == 48
+    report, _ = collector(tmp_path, gse, hours=12, max_requests=2000).run(NOW + timedelta(days=6))
+    assert report.lookback_used_hours == 96
+
+
+def test_three_day_schedule_gap_is_recovered_in_one_run(tmp_path):
+    gse = Gse()
+    collector(tmp_path, gse, hours=1).run(NOW)
+    report, _ = collector(tmp_path, gse, hours=12, max_requests=2000).run(NOW + timedelta(days=3))
+    assert 72 <= report.lookback_used_hours < 96 and report.failures == 0
+    assert report.inserted >= 72 * 20 - 1  # every 3-minute period of the gap, nothing synthesized
 
 
 def test_deep_backfill_is_bounded_per_run_and_walks_backwards(tmp_path):

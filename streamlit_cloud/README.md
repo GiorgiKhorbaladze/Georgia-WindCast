@@ -64,7 +64,7 @@ Community Cloud has no persistent storage, and apps sleep after 12 h without vis
 | Free managed Postgres (e.g. Neon, Supabase) | Good | Needs its own collector anyway | Quotas, project pausing on inactivity, terms change; credentials in Streamlit/GitHub secrets | new owner account + secrets | Viable later; not needed now |
 | Actions artifacts / caches | Expire (≤ 90 days / evicted) | - | - | none | Rejected |
 
-**Recovery limits:** each run requests missing periods within the last 12 h, subject to the request budget. A longer interruption can leave older gaps even if the source still retains those files; use an explicit backfill (up to 48 h). Retention was observed on 2026-11-16 and is not a provider guarantee. After four 404 responses a missing period is abandoned (except the newest due period), so late publication can also leave gaps. No gap-free continuity is guaranteed.
+**Recovery limits:** each run requests missing periods within the last 12 h, subject to the request budget. A longer interruption can leave older gaps even if the source still retains those files; runs widen the window automatically up to 96 h after a long stop, and an explicit backfill of up to 96 h is possible. Retention was observed on 2026-11-16 and is not a provider guarantee. After four 404 responses a missing period is abandoned (except the newest due period), so late publication can also leave gaps. No gap-free continuity is guaranteed.
 
 **Source revisions:** each run revalidates at most 4 stored periods (and at most one quarter of its request budget): rows with a non-ACT code, and rows labelled within the last 2 hours (one recheck about an hour after collection), non-ACT and newest first. Each period is rechecked at most hourly. Simulated steady state: about 850 GSE requests/day, within the production worker's 500-1000/day envelope (docs/sources/gse.md). Corrected bytes update the record and revision counter; identical bytes do not. Corrections outside the window or beyond the bounded budget may remain undiscovered.
 
@@ -90,7 +90,7 @@ period_label_utc,period_label_local,value_mw,quality,retrieved_at_utc,payload_sh
 | --- | --- |
 | GSE outage | Run records the failure; history keeps the last rows; the workflow fails (email to the owner) only when no reading is newer than 6 h |
 | Schema drift, label mismatch, future label | Invalid records are refused; valid records from the same run may be saved; the workflow fails visibly |
-| GitHub skips scheduled runs | Next run backfills only 12 h by default; longer stops can leave gaps; manual recovery up to 48 h is bounded and not guaranteed |
+| GitHub skips scheduled runs | Next run backfills only 12 h by default; longer stops can leave gaps; later runs widen their window automatically up to 96 h; gaps older than that remain |
 | Scheduled workflow disabled (60 days inactivity) | The app warns that the collector is stale; re-enable in Actions |
 | Open-Meteo `429` (shared cloud IPs) | Last good forecast is kept with its run and retrieval time, and the status degrades to stale or unavailable; retries back off |
 
@@ -100,12 +100,12 @@ period_label_utc,period_label_local,value_mw,quality,retrieved_at_utc,payload_sh
 2. **Create app** → repository `GiorgiKhorbaladze/Georgia-WindCast`, branch `main` (after PR #21 is merged; before that, `work/streamlit-cloud`), main file `streamlit_cloud/app.py`, **Advanced settings → Python 3.12**, custom subdomain `georgia-windcast`.
 3. No secrets are required. Optional environment-style settings: `WINDCAST_USER_AGENT` (identifying User-Agent for GSE/Open-Meteo) and `WINDCAST_DATA_BASE_URL` (defaults to this repository's `data` branch).
 
-The collector starts automatically once `.github/workflows/collect-gse.yml` is on `main` (scheduled workflows run only from the default branch). A one-off backfill of up to 48 h can be started from *Actions → Collect GSE wind data → Run workflow*.
+The collector starts automatically once `.github/workflows/collect-gse.yml` is on `main` (scheduled workflows run only from the default branch). A one-off backfill of up to 96 h can be started from *Actions → Collect GSE wind data → Run workflow*.
 
 ## Limits that remain
 
 - GitHub cron is best effort: runs can be delayed by tens of minutes or skipped. The live check covers the newest hour, and the bounded 12 h backfill can recover some missed runs.
-- History starts when collection starts (plus up to 48 h of backfill). There is no older archive.
+- History starts when collection starts (plus backfill as far as GSE still keeps the files). There is no older archive.
 - The MW forecast needs at least one week of paired data. The historical forecast archive format (Open-Meteo historical forecast API) could not be verified live from the development environment, which hit Open-Meteo's daily per-IP limit; if the format differed, the collector records the refusal and the model falls back to the project's own archive.
 - Accuracy scores start empty and grow with the archive; ERA5-based scores lag by about 5 days.
 - Link previews (LinkedIn, Open Graph) use Streamlit's generic page metadata; Community Cloud does not allow custom meta tags.

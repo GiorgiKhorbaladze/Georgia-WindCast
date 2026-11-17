@@ -57,8 +57,11 @@ FUTURE_TOLERANCE = timedelta(seconds=60)
 STATUS_PATH = "status/gse_collector.json"
 REVALIDATE_PER_RUN = 4
 # Adaptive catch-up: if the last stored label is older than the normal lookback (GitHub skipped or
-# delayed runs), the run widens its window up to this limit. GSE keeps files >= 48 h (verified).
-MAX_AUTO_LOOKBACK_HOURS = 48
+# delayed runs), the run widens its window up to this limit. GSE files were observed to stay available
+# for at least 14 days (2026-11-16); 96 h covers multi-day gaps in GitHub's best-effort schedule
+# (seen 17.11.2026: 3 scheduled runs in about 20 h). The deep backfill only walks backwards from the
+# oldest stored period, so it cannot fill a gap in the middle; this window is what recovers it.
+MAX_AUTO_LOOKBACK_HOURS = 96
 # Deep backfill: a small number of extra requests per run walk backwards from the oldest stored
 # period until DEEP_HORIZON_DAYS or a full day of 404s (GSE retention end). Temporary extra load,
 # about DEEP_PER_RUN x 96 requests/day until done; each deep period is tried once.
