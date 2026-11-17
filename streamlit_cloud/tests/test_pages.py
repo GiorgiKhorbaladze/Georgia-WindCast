@@ -58,7 +58,7 @@ def run(page, lang="ka", durable=None, status=None, archive=None, snapshot=None,
 def test_overview_comparison_full_yesterday(lang):
     text = page_text(run("overview", lang, durable_two_days()))
     assert "240" in text  # yesterday: 10 MW x 24 h, complete
-    assert ("სრული დღე" if lang == "ka" else "full day") in text
+    assert ("საკმარისად სრული დღე (≥99%)" if lang == "ka" else "sufficiently complete day (≥99%)") in text
     assert "+" in text and "100.0%" in text  # today 20 MW vs 10 MW at the same time
 
 
@@ -101,9 +101,9 @@ def test_forecast_page_shows_model_vs_baselines_when_trained():
     assert all("168" not in i.value for i in at.info)  # trained, not "insufficient"
     table = at.dataframe[0].value
     methods = list(table.iloc[:, 0])
-    assert methods[:2] == ["Model", "Climatology"] and any(m.startswith("Persistence") for m in methods)
+    assert methods[:2] == ["Model", "Climatology (hourly mean)"] and any(m.startswith("Persistence") for m in methods)
     mae = dict(zip(methods, table["MAE, MW"], strict=True))
-    assert mae["Model"] < mae["Climatology"]  # held-out comparison shown honestly
+    assert mae["Model"] < mae["Climatology (hourly mean)"]  # held-out comparison shown honestly
     assert any("MAE" in i.value for i in at.info) and not at.warning  # skill stated, with sample size
 
 
@@ -130,7 +130,7 @@ def test_data_page_health_and_gaps(lang):
               "deep_backfill": {"cursor": (NOW - timedelta(days=5)).isoformat(), "done": False}}
     at = run("data", lang, durable_two_days(skip_yesterday=60), status=status)
     text = page_text(at)
-    assert ("გამართულად" if lang == "ka" else "healthy") in text
+    assert ("ბოლო 6 საათის მონაცემები შენახულია" if lang == "ka" else "last 6 hours is stored") in text
     assert "12" in text and "21" in text  # recovered periods and widened window are visible
     gaps = at.dataframe[0].value  # missing intervals table
     assert len(gaps) == 1 and int(gaps.iloc[0, 2]) == 60
@@ -182,7 +182,7 @@ def test_overview_has_separate_balance_chart():
 def test_author_block_with_photo_and_linkedin():
     at = run("overview", "en", durable_two_days())
     side = " ".join(m.value for m in at.sidebar.markdown)
-    assert "Dr. Giorgi Khorbaladze" in side and "data:image/jpeg;base64," in side
+    assert "Giorgi Khorbaladze" in side and "Dr." not in side and "data:image/jpeg;base64," in side
     assert "linkedin.com/in/dr-giorgi-khorbaladze-academician-b1b744103" in side
 
 

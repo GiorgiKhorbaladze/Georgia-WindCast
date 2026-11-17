@@ -30,6 +30,7 @@ import compass  # noqa: E402
 from charts import now_marker, series_figure, series_frame, time_ticks, wall  # noqa: E402
 import data as source  # noqa: E402
 import mwmodel  # noqa: E402
+import sitemap  # noqa: E402
 import ui  # noqa: E402
 import verification as ver  # noqa: E402
 from data import FORECAST, REANALYSIS, SITES, SourceCache, generation_state, weather_state  # noqa: E402
@@ -131,7 +132,8 @@ def main():
         shown = {'forecast': data['forecast'], 'era5': data['archive']}
         for name, error in data['errors'].items():
             if name == 'gse' or not shown.get(name):  # a stored copy with its timestamp is shown instead
-                st.warning(tr('source_warning', lang, name=name, code=error))
+                st.warning(tr('source_warning', lang, name=tr(f'srcname_{name}', lang)))
+                st.caption(tr('tech_code', lang, code=error))
         {'overview': overview, 'balance': balance_page, 'analytics': analytics, 'forecast': forecast,
          'accuracy': accuracy, 'data': data_page}[page](lang, data, reader, now)
         st.caption(f"{tr('last_check', lang)}: {local(now)} · {tr('auto_refresh', lang)}")
@@ -235,34 +237,34 @@ def site_wind(packet, index, height, now):
 
 
 def site_map(lang, data, now):
+    """Three verified sites with the 80 m model wind of the current hour: text plus an arrow that
+    points where the air moves (the text says where it comes FROM). No interpolated wind field."""
     packet = data['forecast']
-    records = []
-    for i, site in enumerate(SITES):
-        current = site_wind(packet, i, 80, now)
-        wind = (f"{current.speed_ms:.1f} {tr('ms', lang)}, {compass.label(current.direction_deg, lang)}"
-                if current and current.speed_ms is not None else '-')
-        records.append(dict(num=str(i + 1), lat=site.latitude, lon=site.longitude, name=site.name_ka if lang == 'ka' else site.name_en,
-                            status=site.status_ka if lang == 'ka' else site.status_en, wind=wind,
-                            speed=current.speed_ms if current and current.speed_ms is not None else 0.0))
+    records = [sitemap.site_record(i + 1, site, site_wind(packet, i, 80, now), lang) for i, site in enumerate(SITES)]
     frame = pd.DataFrame(records)
+    arrows = frame[frame['has_arrow']]
     layers = [
         pdk.Layer('ScatterplotLayer', data=frame, get_position='[lon, lat]', get_radius=2600, radius_min_pixels=10,
                   get_fill_color=[45, 212, 191, 70], stroked=False, pickable=False),
+        pdk.Layer('IconLayer', data=arrows, get_position='[lon, lat]', get_icon='icon', get_angle='angle',
+                  get_size=sitemap.ARROW_PX, pickable=True),  # deck.gl default size unit: pixels
         pdk.Layer('ScatterplotLayer', data=frame, get_position='[lon, lat]', get_radius=1200, radius_min_pixels=6,
                   get_fill_color=[45, 212, 191, 235], get_line_color=[7, 17, 28], line_width_min_pixels=2, stroked=True, pickable=True),
         # Numbers, not names: pydeck turns string props such as character_set into accessors, so
         # non-ASCII (Georgian) glyphs cannot be requested; ASCII digits render with the default set.
-        pdk.Layer('TextLayer', data=frame, get_position='[lon, lat]', get_text='num', get_size=16,
-                  get_color=[232, 241, 248], get_pixel_offset=[0, -22]),
+        pdk.Layer('TextLayer', data=frame, get_position='[lon, lat]', get_text='num', get_size=15,
+                  get_color=[232, 241, 248], get_pixel_offset=[15, -15]),
     ]
+    view = pdk.ViewState(latitude=float(frame['lat'].mean()), longitude=float(frame['lon'].mean()), zoom=8.55)
     left, right = st.columns([3, 2])
     with left:
-        st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=41.99, longitude=44.17, zoom=8.2),
-                                 tooltip={'text': '{name}\n{status}\n80 m: {wind}'}, map_provider='carto', map_style=BASEMAP), height=360)
+        st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view, tooltip={'text': '{tip}', 'style': sitemap.TOOLTIP_STYLE},
+                                 map_provider='carto', map_style=BASEMAP), height=380)
     with right:
-        ui.cards([ui.card(f"{r['num']}. {r['name']}", r['wind'].split(',')[0] if r['wind'] != '-' else '-', '',
-                          f"80 m · {r['wind'].split(', ', 1)[1] if ', ' in r['wind'] else ''} · {r['status']}") for r in records])
-    ui.note(tr('site_note', lang, model=FORECAST.label), ui.tag(tr('model_wind', lang), 'mdl'))
+        ui.cards([ui.card(f"{r['num']}. {r['name']}", r['speed_txt'], '', f"{r['dir_txt']} · {r['meta']} · {r['status']}")
+                  for r in records])
+    ui.note(tr('map_arrow_note', lang), ui.tag(tr('model_wind', lang), 'mdl'))
+    ui.note(tr('site_note', lang, model=FORECAST.label))
 
 
 # ----------------------------------------------------------------------------------------- balance
@@ -521,7 +523,7 @@ def analytics(lang, data, reader, now):
     if archive:
         c1, c2 = st.columns(2)
         idx = c1.selectbox(tr('site', lang), range(len(SITES)), format_func=lambda i: SITES[i].name_ka if lang == 'ka' else SITES[i].name_en, key='era5_site')
-        height = c2.selectbox(tr('height', lang), REANALYSIS.heights, key='era5_h', format_func=lambda h: f'{h} m')
+        height = c2.selectbox(tr('height', lang), REANALYSIS.heights, key='era5_h', format_func=lambda h: f"{h} {tr('m_unit', lang)}")
         show_series(archive['series'][idx].by_height[height], lang, None)
     else:
         st.info(tr('st_unavailable', lang))
@@ -535,7 +537,7 @@ def forecast(lang, data, reader, now):
     st.subheader(tr('wx_title', lang))
     c1, c2 = st.columns(2)
     idx = c1.selectbox(tr('site', lang), range(len(SITES)), format_func=lambda i: SITES[i].name_ka if lang == 'ka' else SITES[i].name_en)
-    height = c2.selectbox(tr('height', lang), FORECAST.heights, index=1, format_func=lambda h: f'{h} m')
+    height = c2.selectbox(tr('height', lang), FORECAST.heights, index=1, format_func=lambda h: f"{h} {tr('m_unit', lang)}")
     packet = data['forecast']
     state, hours = weather_state(packet, now, idx, height)
     st.markdown(ui.badge(f"{tr(STATE_KEY[state], lang)} · {FORECAST.label}", state), unsafe_allow_html=True)
@@ -661,7 +663,7 @@ def accuracy(lang, data, reader, now):
     fig = go.Figure()
     for h, color in zip(sorted(detail['height'].unique()), (ui.C['accent'], ui.C['accent2'], ui.C['model'], ui.C['warn']), strict=False):
         g = ver.scores(p[p['height'] == h], by=('lead',)).set_index('lead').reindex(leads)
-        fig.add_scatter(x=leads, y=g['mae'], mode='lines+markers', name=f'{h} m', line=dict(color=color, width=2))
+        fig.add_scatter(x=leads, y=g['mae'], mode='lines+markers', name=f"{h} {tr('m_unit', lang)}", line=dict(color=color, width=2))
     ui.chart(ui.style(fig, 300, tr('mae', lang), tr('lead', lang)))
     table = detail.rename(columns={'site': tr('site', lang), 'height': tr('height', lang), 'lead': tr('lead', lang), 'n': tr('pairs', lang),
                                    'mae': tr('mae', lang), 'rmse': tr('rmse', lang), 'bias': tr('bias', lang), 'dir_mae': tr('dir_mae', lang)})

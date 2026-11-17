@@ -80,7 +80,7 @@ def test_tooltip_shows_degrees_and_localized_sector(lang):
     assert (speed.xaxis or "x") == (direction.xaxis or "x") == "x" and {speed.yaxis, direction.yaxis} == {"y", "y2"}
     assert fig.layout.hoversubplots == "axis" and fig.layout.hovermode == "x unified"
     texts = [a.text for a in fig.layout.annotations]
-    assert tr("direction_short", lang) in texts and any("80 m" in t for t in texts)
+    assert tr("direction_short", lang) in texts and any(f"80 {tr('m_unit', lang)}" in t for t in texts)
 
 
 def test_wraparound_points_stay_separate_values():
