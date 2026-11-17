@@ -20,7 +20,11 @@ import plotly.graph_objects as go
 import pydeck as pdk
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import reload_guard  # noqa: E402  (first: drops helper modules left over from before a redeploy)
+
+reload_guard.drop_stale(HERE)
 import analytics as an  # noqa: E402
 import compass  # noqa: E402
 from charts import now_marker, series_figure, series_frame, time_ticks, wall  # noqa: E402
@@ -31,6 +35,8 @@ import verification as ver  # noqa: E402
 from data import FORECAST, REANALYSIS, SITES, SourceCache, generation_state, weather_state  # noqa: E402
 from history import DATA_BASE, HistoryReader, collector_age  # noqa: E402
 from i18n import tr  # noqa: E402
+
+reload_guard.stamp(HERE)
 
 st.set_page_config(page_title='Georgia WindCast', page_icon='🌬️', layout='wide')
 TZ = ZoneInfo('Asia/Tbilisi')
