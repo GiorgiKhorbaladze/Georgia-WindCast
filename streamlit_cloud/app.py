@@ -30,6 +30,7 @@ import compass  # noqa: E402
 from charts import now_marker, series_figure, series_frame, time_ticks, wall  # noqa: E402
 import data as source  # noqa: E402
 import mwmodel  # noqa: E402
+import ramps as rp  # noqa: E402
 import sitemap  # noqa: E402
 import ui  # noqa: E402
 import verification as ver  # noqa: E402
@@ -443,6 +444,46 @@ def balance_page(lang, data, reader, now):
 
 # --------------------------------------------------------------------------------------- analytics
 
+def ramp_section(lang, df, start, end):
+    """Signed national wind-generation ramps over the selected range (ramps.py: definitions)."""
+    st.subheader(tr('ramp_title', lang))
+    c1, c2 = st.columns([1, 2])
+    key = c1.radio(tr('ramp_horizon', lang), list(rp.HORIZONS), horizontal=True, format_func=lambda k: tr(f'ramp_h_{k}', lang))
+    act_only = c2.checkbox(tr('ramp_act_only', lang), help=tr('ramp_act_help', lang))
+    horizon = rp.HORIZONS[key]
+    d = rp.deltas(df, horizon, start, end, act_only=act_only)
+    # Time before the first stored period is not "missing" (same rule as the coverage cards).
+    first = df.index.min() if len(df) else start
+    s = rp.stats(d, rp.possible_windows(max(start, first), end, horizon))
+    if s.n == 0:
+        st.info(tr('ramp_none', lang))
+        ui.note(tr('ramp_note', lang))
+        return
+    minutes = horizon / pd.Timedelta(minutes=1)
+
+    def extreme(value, end_label):
+        if value is None:
+            return '-', ''
+        return (f"{'+' if value > 0 else '−'}{ui.fmt(abs(value), 1)}",
+                tr('ramp_sub', lang, a=local(end_label - horizon, '%d.%m %H:%M'), b=local(end_label, '%H:%M'),
+                   r=f"{value / minutes:+.2f}"))
+    up, up_sub = extreme(s.max_up, s.max_up_end)
+    down, down_sub = extreme(s.max_down, s.max_down_end)
+    ui.cards([
+        ui.card(tr('ramp_up', lang), up, 'MW', up_sub, sub_class='wc-up'),
+        ui.card(tr('ramp_down', lang), down, 'MW', down_sub, sub_class='wc-down'),
+        ui.card(tr('ramp_p95', lang), ui.fmt(s.p95_abs, 1), 'MW', tr('ramp_share', lang, p=pct(s.share_up))),
+        ui.card(tr('ramp_complete', lang), pct(s.completeness), '', f"{s.n} / {s.possible}"),
+    ])
+    fig = go.Figure()
+    fig.add_histogram(x=d.loc[d['delta_mw'] > 0, 'delta_mw'], name=tr('ramp_inc', lang), marker_color=SRC_COLORS['wind'], nbinsx=40)
+    fig.add_histogram(x=d.loc[d['delta_mw'] < 0, 'delta_mw'], name=tr('ramp_dec', lang), marker_color=ui.C['bad'], nbinsx=40)
+    fig.update_layout(barmode='overlay', hovermode='closest')
+    fig.update_traces(opacity=0.85)
+    ui.chart(ui.style(fig, 260, tr('ramp_count', lang), tr('ramp_hist', lang)))
+    ui.note(tr('ramp_note', lang))
+
+
 def analytics(lang, data, reader, now):
     ui.hero(tr('page_analytics', lang), tr('facts_only', lang))
     nowt = pd.Timestamp(now)
@@ -535,6 +576,7 @@ def analytics(lang, data, reader, now):
                 st.subheader(tr('dist_title', lang))
                 fig = go.Figure(go.Histogram(x=part['value_mw'], nbinsx=40, marker_color=ui.C['accent']))
                 ui.chart(ui.style(fig, 260, '', tr('ax_power', lang)).update_layout(hovermode='closest'))
+        ramp_section(lang, df, start, end)
         out = part.reset_index().rename(columns={'time': 'period_label_utc'})
         st.download_button(tr('download', lang), out.to_csv(index=False), 'windcast_gse_filtered.csv', 'text/csv')
 
