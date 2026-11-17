@@ -248,18 +248,40 @@ def generation_chart(lang, rows, start, end, height=340):
         ui.note(tr('s_missing', lang, n=missing))
 
 
-def site_wind(packet, index, height, now):
-    if not packet:
-        return None
-    hour = now.replace(minute=0, second=0, microsecond=0)
-    return next((v for v in packet['series'][index].by_height[height] if v.valid_at == hour), None)
-
-
 def site_map(lang, data, now):
-    """Three verified sites with the 80 m model wind of the current hour: text plus an arrow that
-    points where the air moves (the text says where it comes FROM). No interpolated wind field."""
+    """Three verified sites with the model wind of a chosen valid hour: text plus an arrow that
+    points where the air moves (the text says where it comes FROM). No interpolated wind field.
+
+    A time slider steps only through valid hours present in the current ICON run (no values are
+    made up between hours or sites); "play" advances one hour every 1.5 s inside a fragment, so
+    only the map reruns and no provider request is made per step.
+    """
     packet = data['forecast']
-    records = [sitemap.site_record(i + 1, site, site_wind(packet, i, 80, now), lang) for i, site in enumerate(SITES)]
+    c1, c2 = st.columns([1, 3])
+    height = c1.selectbox(tr('height', lang), FORECAST.heights, index=FORECAST.heights.index(80), key='map_height',
+                          format_func=lambda h: f"{h} {tr('m_unit', lang)}")
+    hours = sitemap.forecast_hours(packet, now, height)
+    playing = c2.toggle(tr('map_play', lang), key='map_play', disabled=len(hours) < 2)
+
+    def view():
+        hour = st.session_state.get('map_hour')
+        if hours and hour not in hours:
+            hour = hours[0]
+        if playing and hours:
+            hour = sitemap.next_hour(hours, hour)
+        st.session_state['map_hour'] = hour
+        if len(hours) >= 2:
+            st.select_slider(tr('map_time', lang), options=hours, key='map_hour',
+                             format_func=lambda h: local(h, '%d.%m %H:%M'))
+            hour = st.session_state['map_hour']
+        render_site_map(lang, packet, hour, height)
+
+    st.fragment(run_every=1.5 if playing else None)(view)()
+
+
+def render_site_map(lang, packet, hour, height):
+    records = [sitemap.site_record(i + 1, site, sitemap.value_at(packet, i, height, hour) if hour else None, lang, height)
+               for i, site in enumerate(SITES)]
     frame = pd.DataFrame(records)
     arrows = frame[frame['has_arrow']]
     layers = [
@@ -282,8 +304,10 @@ def site_map(lang, data, now):
     with right:
         ui.cards([ui.card(f"{r['num']}. {r['name']}", r['speed_txt'], '', f"{r['dir_txt']} · {r['meta']} · {r['status']}")
                   for r in records])
-    ui.note(tr('map_arrow_note', lang), ui.tag(tr('model_wind', lang), 'mdl'))
-    ui.note(tr('site_note', lang, model=FORECAST.label))
+    run = f" · {tr('run', lang)}: {local(packet['run'])}" if packet else ''
+    ui.note(tr('map_arrow_note', lang, h=height) + run,
+            ui.tag(tr('model_wind', lang), 'mdl'))
+    ui.note(tr('map_time_note', lang) + ' ' + tr('site_note', lang, model=FORECAST.label))
 
 
 # ----------------------------------------------------------------------------------------- balance
