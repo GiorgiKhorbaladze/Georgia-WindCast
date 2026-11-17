@@ -108,7 +108,7 @@ def series_figure(frame, lang, height_m=None):
     for deg, name in axis.items():
         fig.add_annotation(text=name, x=1, y=deg, xref='paper', yref='y2', xanchor='right', yanchor='middle',
                            showarrow=False, font=dict(size=10, color=ui.C['muted']), bgcolor='rgba(7,17,28,0.7)')
-    titles = (tr('speed', lang) + (f' · {height_m} m' if height_m else ''), tr('direction_short', lang))
+    titles = (tr('speed', lang) + (f" · {height_m} {tr('m_unit', lang)}" if height_m else ''), tr('direction_short', lang))
     for y, text in zip((1.0, 0.36), titles, strict=True):
         fig.add_annotation(text=text, x=0, y=y, xref='paper', yref='paper', xanchor='left', yanchor='bottom',
                            showarrow=False, yshift=4, font=dict(size=13, color=ui.C['muted']))

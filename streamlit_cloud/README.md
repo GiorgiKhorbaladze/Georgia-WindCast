@@ -42,6 +42,7 @@ A GSE label marks the end of its 3-minute interval. Energy = sum of stored 3-min
 
 - **Convention (one convention app-wide):** degrees say where the wind blows FROM, clockwise from north: 0°/360° from north, 90° from east, 180° from south, 270° from west. Text is shown next to the exact degrees, in 8 localized sectors (for example `270° - დასავლეთიდან` / `270° - from west`).
 - **Chart:** speed and direction are two stacked panels on one time axis, so one hover shows both for the same hour. Direction is drawn as points only, because joining 359° to 1° with a line would suggest a 358° swing. Hours below 3 m/s get hollow markers (direction less informative). Missing hours stay gaps; values are not smoothed.
+- **Map (`sitemap.py`):** one arrow per site from the 80 m ICON value of the current hour, pointing where the air moves (FROM + 180°); the card and tooltip give speed, FROM degrees with the Georgian/English sector, height and Tbilisi valid time. No interpolated wind field. A missing value gets no arrow and an "unavailable" text; light wind (< 3 m/s) gets a grey arrow. The arrow is an inline SVG icon (no external asset) with a constant on-screen size; its rotation follows deck.gl's counter-clockwise angle convention, checked visually.
 - **Time axis:** Tbilisi time; ticks every 12 h on a 3-day forecast, with midnight labelled by its date. A dotted orange line labelled "now"/"ახლა" marks the current time.
 
 ### Forecast accuracy (`verification.py`)
