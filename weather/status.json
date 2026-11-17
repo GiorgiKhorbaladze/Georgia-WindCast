@@ -1,6 +1,6 @@
 {
-  "era5": "unchanged",
+  "era5": "updated",
   "forecast": "updated",
-  "hist_forecast": "unchanged",
-  "last_run_at": "2026-11-16T23:46:03.507202+00:00"
+  "hist_forecast": "updated",
+  "last_run_at": "2026-11-17T04:07:33.866041+00:00"
 }
