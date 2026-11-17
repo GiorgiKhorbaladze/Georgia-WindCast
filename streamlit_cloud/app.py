@@ -30,6 +30,7 @@ import compass  # noqa: E402
 from charts import now_marker, series_figure, series_frame, time_ticks, wall  # noqa: E402
 import data as source  # noqa: E402
 import mwmodel  # noqa: E402
+import windrose as wr  # noqa: E402
 import sitemap  # noqa: E402
 import ui  # noqa: E402
 import verification as ver  # noqa: E402
@@ -548,6 +549,46 @@ def analytics(lang, data, reader, now):
         show_series(archive['series'][idx].by_height[height], lang, None)
     else:
         st.info(tr('st_unavailable', lang))
+
+    wind_rose_section(lang, archive, reader, now)
+
+
+ROSE_COLORS = ('#1e3a5f', '#2563eb', '#22c55e', '#facc15', '#f97316')
+
+
+def wind_rose_section(lang, era5, reader, now):
+    """Wind rose per site from ONE source and ONE height (windrose.py: definitions)."""
+    st.subheader(tr('rose_title', lang))
+    c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+    src = c1.radio(tr('rose_source', lang), ['era5', 'icon'], format_func=lambda k: tr(f'rose_src_{k}', lang), key='rose_src')
+    idx = c2.selectbox(tr('site', lang), range(len(SITES)), key='rose_site',
+                       format_func=lambda i: SITES[i].name_ka if lang == 'ka' else SITES[i].name_en)
+    if src == 'era5':
+        packet, heights = era5 or reader.weather(now)[1], REANALYSIS.heights
+    else:
+        packet, heights = reader.hist_forecast(now), (80, 120)
+    height = c3.selectbox(tr('height', lang), heights, key=f'rose_h_{src}', format_func=lambda h: f"{h} {tr('m_unit', lang)}")
+    sectors = c4.radio(tr('rose_sectors', lang), [16, 8], key='rose_sectors')
+    values = packet['series'][idx].by_height.get(height, []) if packet else []
+    r = wr.rose(values, sectors)
+    if r.n_valid == 0:
+        st.info(tr('rose_none', lang))
+        ui.note(tr('rose_note', lang))
+        return
+    axis = compass.AXIS.get(lang, compass.AXIS['en'])
+    fig = go.Figure()
+    for band, color in zip(r.table.columns, ROSE_COLORS, strict=True):
+        fig.add_barpolar(r=r.table[band], theta=r.table.index, name=f"{band}", marker_color=color,
+                         hovertemplate=f"%{{theta:.0f}}° · {band} {tr('ms', lang)}: %{{r:.1f}}%<extra></extra>")
+    ui.style(fig, 420)
+    fig.update_layout(legend_title_text=tr('rose_band', lang), hovermode='closest', margin=dict(l=30, r=30, t=70, b=40),
+                      polar=dict(bgcolor='rgba(0,0,0,0)', angularaxis=dict(direction='clockwise', rotation=90, tickvals=[0, 90, 180, 270],
+                                                                         ticktext=[axis[d] for d in (0, 90, 180, 270)], gridcolor=ui.C['grid']),
+                                 radialaxis=dict(ticksuffix='%', gridcolor=ui.C['grid'], angle=90, tickangle=90)))
+    ui.chart(fig)
+    ui.note(tr('rose_meta', lang, src=tr(f'rose_src_{src}', lang), h=height, a=local(r.first, '%d.%m.%Y'), b=local(r.last, '%d.%m.%Y'),
+               n=r.n_valid, m=r.n_missing, calm=f"{r.calm_pct:.1f}%"), ui.tag(tr('model_wind', lang), 'mdl'))
+    ui.note(tr('rose_note', lang))
 
 
 # ---------------------------------------------------------------------------------------- forecast
