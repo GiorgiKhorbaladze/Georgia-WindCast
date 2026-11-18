@@ -71,7 +71,8 @@ def esc(value) -> str:
 
 
 def hero(title: str, subtitle: str, badge_html: str = "") -> None:
-    st.markdown(f'<div class="wc-hero"><div><h1>{esc(title)}</h1><p>{esc(subtitle)}</p></div>{badge_html}</div>',
+    sub = f'<p>{esc(subtitle)}</p>' if subtitle else ''
+    st.markdown(f'<div class="wc-hero"><div><h1>{esc(title)}</h1>{sub}</div>{badge_html}</div>',
                 unsafe_allow_html=True)
 
 

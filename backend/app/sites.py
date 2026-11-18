@@ -15,7 +15,7 @@ from app.schemas import SiteSummary
 SITES: tuple[SiteSummary, ...] = (
     SiteSummary(
         id="ruisi",
-        name_ka="რუისის ქარის ელექტროსადგური",
+        name_ka="„ვინდ ფაუერის“ რუისის ქარის ელექტროსადგური",
         name_en="Ruisi Wind Farm",
         coordinates_verified=True,
         latitude=42.055596,
@@ -35,7 +35,7 @@ SITES: tuple[SiteSummary, ...] = (
     ),
     SiteSummary(
         id="zemo-wind",
-        name_ka="ზემო ქარის ელექტროსადგური",
+        name_ka="„ზემო ვინდის“ ქარის ელექტროსადგური",
         name_en="Zemo Wind",
         coordinates_verified=True,
         latitude=41.895560,
@@ -53,7 +53,7 @@ SITES: tuple[SiteSummary, ...] = (
     ),
     SiteSummary(
         id="kartli-gori",
-        name_ka="ქართლის ქარის ელექტროსადგური",
+        name_ka="„ქართლის ქარის ელექტროსადგური“",
         name_en="Kartli (Qartli) Wind Farm, Gori",
         coordinates_verified=True,
         latitude=42.022423,

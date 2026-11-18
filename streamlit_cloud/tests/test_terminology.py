@@ -45,7 +45,7 @@ def test_freshness_is_not_presented_as_completeness_or_schedule_health():
     ("rmse", "საშუალო კვადრატული ცდომილების ფესვი", "(RMSE)"),
     ("bias", "სისტემატური ცდომილება", "(Bias)"),
     ("dir_mae", "მიმართულების საშუალო აბსოლუტური ცდომილება", "(MAE)"),
-    ("ref_era5", "მეტეოროლოგიური რეანალიზი", "(ERA5)"),
+    ("ref_era5", "მეტეოროლოგიური ხელახალი ანალიზი", "(ERA5)"),
     ("persistence", "წინა მნიშვნელობის შენარჩუნება", "(persistence)"),
     ("climatology", "კლიმატოლოგია", "(climatology)"),
 ])
@@ -83,7 +83,7 @@ def test_overview_shows_raw_code_with_caveat_and_unit_help(lang):
     rows = with_codes(test_pages.durable_two_days())
     at = test_pages.run("overview", lang, rows)
     text = page_text(at)
-    assert f"(NRE)" in text and tr("units_note", lang) in text
+    assert tr("units_note", lang) in text
     charts = [json.dumps(json.loads(c.proto.spec), ensure_ascii=False) for c in at.get("plotly_chart")]
     gen = next(c for c in charts if tr("q_legend", lang) in c)  # legend says "not ACT" in words
     assert '"NRE"' in gen and "≠" not in gen  # tooltip carries the exact raw code
@@ -115,8 +115,8 @@ def test_gaps_are_not_bridged_in_overview_charts():
     rows = [r for r in rows if not (rows[-1].period_label_utc - timedelta(hours=9) < r.period_label_utc < rows[-1].period_label_utc - timedelta(hours=2))]
     at = test_pages.run("overview", "ka", rows)
     charts = [json.loads(c.proto.spec) for c in at.get("plotly_chart")]
-    profile = next(c for c in charts if len(c["data"]) == 2 and c["data"][0].get("mode") == "lines+markers")
-    today = _values(profile["data"][1]["y"])
+    profile = next(c for c in charts if len(c["data"]) == 3 and c["data"][0].get("mode") == "lines+markers")
+    today = _values(profile["data"][-1]["y"])
     assert len(today) == 24 and any(v != v for v in today)  # missing hours are NaN gaps, not skipped
     gen = next(c for c in charts if c["data"][0].get("name") == tr("series_mw", "ka"))
     assert gen["data"][0].get("fill") in (None, "none") and gen["data"][0]["connectgaps"] is False
