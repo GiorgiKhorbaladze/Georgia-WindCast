@@ -553,3 +553,107 @@ def test_v1_balance_rows_are_read_and_refetched(tmp_path):
     report, _ = collector(tmp_path, Gse()).run(NOW + timedelta(seconds=10))
     assert report.balance_stored == 20  # same payloads, now with gross flows
     assert all(r.import_mw is not None for r in parse_balance_csv(path.read_text()))
+
+
+# ------------------------------------------------- gap repair (Issue #40 B: balance gap 14.11 15:09-18:24 UTC)
+
+GAP = [datetime(2026, 11, 14, 16, 0, tzinfo=UTC) + timedelta(minutes=3 * i) for i in range(20)]  # 20:00-20:57 Tbilisi
+
+
+def _six_hours_with_cursor(tmp_path):
+    """Six hours stored, deep backfill already past them (cursor at the oldest label, done)."""
+    collector(tmp_path, Gse(), hours=6, max_requests=200).run(NOW)
+    path = tmp_path / "status/gse_collector.json"
+    status = json.loads(path.read_text())
+    status["deep_backfill"] = {"cursor": min(stored_labels(tmp_path)).isoformat(), "done": True, "consecutive_404": 480}
+    path.write_text(json.dumps(status))
+
+
+def _drop(tmp_path, kind, labels):
+    from store import parse_balance_csv, render_balance_csv
+    path = next((tmp_path / kind).rglob("2026-11-14.csv"))
+    parse, render = (parse_balance_csv, render_balance_csv) if kind == "balance" else (parse_day_csv, render_day_csv)
+    path.write_text(render([r for r in parse(path.read_text()) if r.period_label_utc not in set(labels)]))
+
+
+def test_balance_gap_older_than_the_window_is_repaired(tmp_path):
+    from store import parse_balance_csv
+    _six_hours_with_cursor(tmp_path)
+    _drop(tmp_path, "balance", GAP)
+    report, code = Collector(tmp_path, Gse().client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(seconds=5))
+    assert code == 0 and report.repair_requested == 20 and report.balance_stored == 20
+    assert report.repair_inserted == 0  # wind rows were already there and stay unchanged
+    bal = {r.period_label_utc for r in parse_balance_csv(next((tmp_path / "balance").rglob("2026-11-14.csv")).read_text())}
+    assert set(GAP) <= bal
+
+
+def test_wind_gap_older_than_the_window_is_repaired_newest_first_and_bounded(tmp_path):
+    _six_hours_with_cursor(tmp_path)
+    _drop(tmp_path, "gse", GAP)
+    _drop(tmp_path, "balance", GAP)
+    gse = Gse()
+    gse.requests.clear()
+    report, _ = Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=8).run(NOW + timedelta(seconds=5))
+    assert report.repair_requested == 8 and report.repair_inserted == 8  # bounded per run
+    assert set(GAP[-8:]) <= stored_labels(tmp_path) and not set(GAP[:12]) & stored_labels(tmp_path)  # newest first
+    for i in range(3):
+        Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=8).run(NOW + timedelta(seconds=10 + i))
+    assert set(GAP) <= stored_labels(tmp_path)
+
+
+def _run(tmp_path, gse, at):
+    return Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=20).run(at)[0]
+
+
+def test_late_published_mid_range_period_is_rechecked_and_recovered(tmp_path):
+    # Review on #42: a 404 is not proof of non-publication, so the period must be rechecked later.
+    _six_hours_with_cursor(tmp_path)
+    _drop(tmp_path, "gse", GAP[:2])
+    gse = Gse(missing={"20:00", "20:03"})  # Tbilisi names of GAP[0], GAP[1]
+    r1 = _run(tmp_path, gse, NOW + timedelta(seconds=5))
+    assert r1.repair_requested == 2 and r1.repair_inserted == 0 and r1.failures == 0
+    status = json.loads((tmp_path / "status/gse_collector.json").read_text())
+    assert status["gap_repair"]["attempts_404"][GAP[0].isoformat()]["n"] == 1
+    assert _run(tmp_path, gse, NOW + timedelta(minutes=30)).repair_requested == 0  # not before the first delay
+    gse.missing.clear()  # GSE publishes the files late
+    r3 = _run(tmp_path, gse, NOW + timedelta(hours=1, seconds=10))
+    assert r3.repair_requested == 2 and r3.repair_inserted == 2
+    assert set(GAP[:2]) <= stored_labels(tmp_path)
+    status = json.loads((tmp_path / "status/gse_collector.json").read_text())
+    assert status["gap_repair"]["attempts_404"] == {}  # recovered periods leave the 404 history
+
+
+def test_repeated_404s_are_bounded_and_then_left_as_a_gap(tmp_path):
+    from collector import GAP_RETRY_DELAYS
+    _six_hours_with_cursor(tmp_path)
+    _drop(tmp_path, "gse", GAP[:1])
+    gse = Gse(missing={"20:00"})
+    gse.requests.clear()
+    t = NOW + timedelta(seconds=5)
+    for _ in range(40):  # 10 days of runs every 6 h (inside the 30-day horizon)
+        _run(tmp_path, gse, t)
+        t += timedelta(hours=6)
+    # the mock 404s 20:00 every day; count only the requests for this one period (14.11 20:00 Tbilisi)
+    assert sum("_14112026_2000" in n for n in gse.requests) == 1 + len(GAP_RETRY_DELAYS)
+    assert GAP[0] not in stored_labels(tmp_path)  # nothing invented, no zero filled in
+
+
+def test_earlier_one_shot_state_is_migrated_to_rechecks(tmp_path):
+    _six_hours_with_cursor(tmp_path)
+    _drop(tmp_path, "gse", GAP[:1])
+    path = tmp_path / "status/gse_collector.json"
+    status = json.loads(path.read_text())
+    status["gap_repair"] = {"not_published": [GAP[0].isoformat()], "updated_at": NOW.isoformat()}
+    path.write_text(json.dumps(status))
+    gse = Gse()
+    assert _run(tmp_path, gse, NOW + timedelta(minutes=10)).repair_requested == 0  # counted as one 404 at updated_at
+    r = _run(tmp_path, gse, NOW + timedelta(hours=1, minutes=1))
+    assert r.repair_inserted == 1 and GAP[0] in stored_labels(tmp_path)
+    assert "not_published" not in json.loads(path.read_text())["gap_repair"]
+
+
+def test_gap_repair_is_off_in_steady_state_helper_and_without_a_cursor(tmp_path):
+    collector(tmp_path, Gse(), hours=6, max_requests=200).run(NOW)
+    _drop(tmp_path, "balance", GAP)
+    report, _ = Collector(tmp_path, Gse().client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(seconds=5))
+    assert report.repair_requested == 0  # no deep cursor yet: the deep walk itself covers older periods first
