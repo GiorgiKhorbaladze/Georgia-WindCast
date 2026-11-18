@@ -49,3 +49,30 @@ def test_unstamped_modules_are_kept_under_tests(tmp_path, monkeypatch):
     assert reload_guard.drop_stale(tmp_path.resolve()) == []  # WINDCAST_TESTING=1 from conftest
     assert sys.modules["wc_plain"] is mod
     sys.modules.pop("wc_plain", None)
+
+
+def test_backend_package_changes_also_reload_everything(tmp_path, monkeypatch):
+    """Live 18.11.2026: new texts but OLD station names, because backend/app/sites.py was cached."""
+    here, backend = tmp_path / "ui", tmp_path / "be"
+    (backend / "wcpkg").mkdir(parents=True)
+    here.mkdir()
+    (backend / "wcpkg" / "__init__.py").write_text("", "utf-8")
+    (backend / "wcpkg" / "sites.py").write_text("NAME = 'old'\n", "utf-8")
+    make(here, "wc_data", "from wcpkg.sites import NAME\n")
+    monkeypatch.syspath_prepend(str(backend))
+    monkeypatch.syspath_prepend(str(here))
+    importlib.import_module("wc_data")
+    trees = ((backend / "wcpkg").resolve(),)
+    reload_guard.stamp(here.resolve(), trees)
+    assert reload_guard.drop_stale(here.resolve(), trees) == []
+
+    sites = backend / "wcpkg" / "sites.py"
+    sites.write_text("NAME = 'new'\n", "utf-8")
+    st = sites.stat()
+    os.utime(sites, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    assert reload_guard.drop_stale(here.resolve()) == []  # old behaviour: backend change unseen
+    dropped = reload_guard.drop_stale(here.resolve(), trees)
+    assert dropped == ["wc_data", "wcpkg", "wcpkg.sites"]
+    assert importlib.import_module("wc_data").NAME == "new"
+    for name in dropped:
+        sys.modules.pop(name, None)
