@@ -246,3 +246,38 @@ def test_wind_share_by_hour_and_windy_vs_calm():
     assert c["windy_wind"] > c["calm_wind"]
     assert c["windy_thermal"] < c["calm_thermal"]  # by construction of the synthetic input
     assert an.windy_vs_calm(df.iloc[:10]) is None  # too few periods
+
+
+@dataclass
+class GridLoc:
+    by_height: dict
+    grid_latitude: float
+    grid_longitude: float
+
+
+def test_sites_in_the_same_grid_cell_count_once_in_aggregates():
+    # Issue #40 B: Ruisi and Kartli share the ICON/ERA5 cell (42.0, 44.0) and get identical values.
+    t0 = datetime(2026, 11, 10, tzinfo=UTC)
+    runs = []
+    for i in range(8):
+        run = t0 + timedelta(hours=6 * i)
+        same = packet(run, lambda v, k: 8.0 + 0.2 * k)["series"][0].by_height
+        other = packet(run, lambda v, k: 5.0)["series"][0].by_height
+        runs.append(dict(run=run, series=[GridLoc(same, 42.0, 44.0), GridLoc(other, 41.875, 44.375), GridLoc(same, 42.0, 44.0)]))
+    p = ver.pairs(runs, ver.analysis_reference(runs))
+    pi = ver.independent(p)
+    assert len(pi) == len(p) * 2 // 3  # one of the two identical sites dropped
+    assert set(pi["cell"]) == {(42.0, 44.0), (41.875, 44.375)}
+    s_all, s_ind = ver.scores(p, by=("lead",)).set_index("lead"), ver.scores(pi, by=("lead",)).set_index("lead")
+    # with the duplicate the shared cell would weigh 2/3; independent pairs weigh both cells equally
+    assert s_ind.loc["12-24h", "mae"] < s_all.loc["12-24h", "mae"]
+    assert s_ind.loc["12-24h", "n"] == s_all.loc["12-24h", "n"] * 2 // 3
+    assert len(ver.scores(p)) == len(ver.scores(pi)) + len(ver.scores(p[p["site"] == 2]))  # per-site detail keeps all sites
+
+
+def test_real_payload_grid_cells_show_the_shared_cell():
+    from app.ingestion.openmeteo import REANALYSIS, parse_response
+    from test_adapter import FIXTURES
+    series = parse_response((FIXTURES / "openmeteo/real_archive_era5_3sites_20261106.json").read_bytes(), 3, REANALYSIS.heights)
+    cells = [ver._cell(loc, i) for i, loc in enumerate(series)]
+    assert cells[0] == cells[2] != cells[1]
