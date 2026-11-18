@@ -28,6 +28,11 @@ TZ = ZoneInfo("Asia/Tbilisi")
 HEIGHTS = (80, 120)
 MIN_PERIODS_PER_HOUR = 16
 MIN_PAIRED_HOURS = 168  # one week of paired hours before any model is trained
+# Publication switch (Issue #40 B, owner request 18.11.2026): the numeric national MW forecast is NOT
+# shown until a stricter, out-of-sample evaluation (rolling origin, by lead time, against persistence
+# and climatology, enough independent days) has been done and the owner switches this on. Reaching
+# MIN_PAIRED_HOURS alone must not publish a number.
+PUBLISH_FORECAST = False
 RIDGE_ALPHA = 1.0
 PERSISTENCE_HORIZONS = (1, 6, 24)
 

@@ -411,6 +411,8 @@ T: dict[str, dict[str, str]] = {
         "en": "Ramp = national wind generation at the end of the window minus at its start (MW). Both endpoints must be stored 3-minute values; nothing is interpolated or filled. Windows overlap and each ends at a 3-minute label; times are Tbilisi time. MW/min is the average rate over the whole window. Completeness = computable windows / windows with both endpoints inside the selected range. These are descriptive historical statistics, not a forecast, an imbalance volume or a regulating-reserve requirement."},
     "ramp_act_help": {"ka": "ითვლება მხოლოდ ინტერვალები, რომელთა ორივე ბოლო წერტილს ACT კოდი აქვს. სხვა კოდების ოფიციალური განმარტება დადასტურებული არ არის, ამიტომ ეს მგრძნობელობის შემოწმებაა და არა მონაცემების შესწორება.",
         "en": "Counts only windows whose both endpoints carry code ACT. The official meaning of other codes is not confirmed, so this is a sensitivity check, not a data correction."},
+    "mw_suspended": {"ka": "ეროვნული MW პროგნოზი დროებით შეჩერებულია, სანამ მისი სიზუსტე დამოუკიდებელ მონაცემებზე მკაცრად არ შეფასდება. ფაქტობრივი გენერაცია მხოლოდ საქართველოს სახელმწიფო ელექტროსისტემის ჯამური მონაცემებითაა ნაჩვენები.",
+        "en": "The national MW forecast is suspended until its accuracy has been rigorously evaluated on independent data. Actual generation is shown only from the national GSE aggregate."},
 }
 
 
