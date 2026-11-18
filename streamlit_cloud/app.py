@@ -761,7 +761,8 @@ def accuracy(lang, data, reader, now):
     if p.empty:
         st.info(tr('acc_none', lang))
         return
-    by_lead = ver.scores(p, by=('lead',))
+    pi = ver.independent(p)  # aggregate cards and chart: each model grid cell once
+    by_lead = ver.scores(pi, by=('lead',))
     leads = [b[2] for b in ver.LEAD_BUCKETS if b[2] in set(by_lead['lead'])]
     by_lead = by_lead.set_index('lead').loc[leads].reset_index()
     ui.cards([ui.card(f"{tr('lead', lang)} {r['lead']} · MAE", ui.fmt(r['mae'], 2), tr('ms', lang),
@@ -771,12 +772,15 @@ def accuracy(lang, data, reader, now):
     detail['site'] = [SITES[i].name_ka if lang == 'ka' else SITES[i].name_en for i in detail['site']]
     fig = go.Figure()
     for h, color in zip(sorted(detail['height'].unique()), (ui.C['accent'], ui.C['accent2'], ui.C['model'], ui.C['warn']), strict=False):
-        g = ver.scores(p[p['height'] == h], by=('lead',)).set_index('lead').reindex(leads)
+        g = ver.scores(pi[pi['height'] == h], by=('lead',)).set_index('lead').reindex(leads)
         fig.add_scatter(x=leads, y=g['mae'], mode='lines+markers', name=f"{h} {tr('m_unit', lang)}", line=dict(color=color, width=2))
     ui.chart(ui.style(fig, 300, tr('mae', lang), tr('lead', lang)))
     table = detail.rename(columns={'site': tr('site', lang), 'height': tr('height', lang), 'lead': tr('lead', lang), 'n': tr('pairs', lang),
                                    'mae': tr('mae', lang), 'rmse': tr('rmse', lang), 'bias': tr('bias', lang), 'dir_mae': tr('dir_mae', lang)})
     st.dataframe(table.drop(columns=['dir_n']).round(2), width='stretch', hide_index=True)
+    shared = p.groupby('cell')['site'].nunique()
+    if (shared > 1).any():
+        ui.note(tr('acc_shared_cell', lang))
 
 
 # -------------------------------------------------------------------------------------------- data
