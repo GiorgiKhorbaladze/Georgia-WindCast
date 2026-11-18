@@ -69,9 +69,12 @@ DEEP_PER_RUN = 20
 DEEP_HORIZON_DAYS = 30
 # Gap repair: periods between the oldest stored label and the recovery window that lack wind or
 # balance (e.g. collected before the balance parser existed, or skipped by more than 96 h) are
-# requested again, newest first, at most deep_per_run per run. A 404 is remembered and not retried,
-# so a period GSE never published stays a gap and costs one request only.
+# requested again, newest first, at most deep_per_run per run. A 404 does not prove that a period will
+# never be published, so it is rechecked with growing delays (GAP_RETRY_DELAYS after the 1st, 2nd, ...
+# 404); after the last delay the period is left as a gap. Worst case per unpublished period:
+# 1 + len(GAP_RETRY_DELAYS) requests over about 4 days, always inside the per-run bound.
 GAP_STATUS_KEY = "gap_repair"
+GAP_RETRY_DELAYS = (timedelta(hours=1), timedelta(hours=6), timedelta(hours=24), timedelta(hours=72))
 
 
 def due_labels(now: datetime, hours: float) -> list[datetime]:
@@ -278,7 +281,15 @@ class Collector:
         """Re-request stored-range periods older than the window that lack wind or balance."""
         horizon = now - timedelta(days=DEEP_HORIZON_DAYS)
         lower = max(horizon, datetime.fromisoformat(deep["cursor"])) if deep.get("cursor") else window_start
-        tried = {k for k in gaps.get("not_published", []) if datetime.fromisoformat(k) >= horizon}
+        attempts = self._gap_attempts(gaps, now, horizon)
+
+        def due(label: datetime) -> bool:
+            a = attempts.get(label.isoformat())
+            if a is None:
+                return True
+            n = int(a["n"])
+            return n <= len(GAP_RETRY_DELAYS) and now - datetime.fromisoformat(a["last"]) >= GAP_RETRY_DELAYS[n - 1]
+
         todo: list[datetime] = []
         if lower < window_start:
             day = window_start.date()
@@ -289,7 +300,7 @@ class Collector:
                     second=0, microsecond=0, minute=57))
                 start = max(lower, datetime.combine(day, datetime.min.time(), UTC))
                 while label >= start and len(todo) < self.deep_per_run:
-                    if (label not in wind or label not in bal) and label.isoformat() not in tried:
+                    if (label not in wind or label not in bal) and due(label):
                         todo.append(label)
                     label -= PERIOD
                 day -= timedelta(days=1)
@@ -299,7 +310,8 @@ class Collector:
             for lb, result in results:
                 report.repair_requested += 1
                 if result.kind is FetchKind.NOT_PUBLISHED:
-                    tried.add(lb.isoformat())
+                    prev = attempts.get(lb.isoformat(), {"n": 0})
+                    attempts[lb.isoformat()] = {"n": int(prev["n"]) + 1, "last": now.isoformat()}
                     continue
                 if result.kind is not FetchKind.OK:
                     report.failures += 1
@@ -308,9 +320,19 @@ class Collector:
                 self._apply(lb, result, now, report, {})
                 if report.integrity_error:
                     break
+                attempts.pop(lb.isoformat(), None)  # published after all: no longer a gap
                 report.repair_inserted += report.inserted - before
                 report.backfilled += report.inserted - before
-        return {"not_published": sorted(tried), "updated_at": now.isoformat()}
+        return {"attempts_404": dict(sorted(attempts.items())), "updated_at": now.isoformat()}
+
+    @staticmethod
+    def _gap_attempts(gaps: dict, now: datetime, horizon: datetime) -> dict:
+        """404 history per label; migrates the earlier one-shot list (counted as one 404 at updated_at)."""
+        attempts = {k: dict(v) for k, v in gaps.get("attempts_404", {}).items()}
+        legacy_at = gaps.get("updated_at", now.isoformat())
+        for k in gaps.get("not_published", []):
+            attempts.setdefault(k, {"n": 1, "last": legacy_at})
+        return {k: v for k, v in attempts.items() if datetime.fromisoformat(k) >= horizon}
 
     def _deep_backfill(self, now: datetime, window_start: datetime, deep: dict, report: RunReport) -> dict:
         """Walk backwards from the cursor, DEEP_PER_RUN periods per run, each tried once."""
