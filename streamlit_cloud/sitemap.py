@@ -64,7 +64,6 @@ def site_record(num: int, site, value, lang: str, height_m: int = 80) -> dict:
         lines.append(rec['to_txt'])
         if rec['calm']:
             lines.append(tr('calm_hint_map', lang))
-    lines.append(status)
     rec['tip'] = '\n'.join(lines)
     return rec
 

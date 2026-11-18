@@ -117,12 +117,12 @@ def test_slider_selects_a_later_model_hour(lang, overview):
     want = next(v for v in expected if v.valid_at == target)
     row = deck_rows(at)[0]
     assert row["angle"] == pytest.approx(sitemap.icon_angle(compass.to_bearing(want.direction_deg)))
-    assert target.astimezone(sitemap.TZ).strftime("%d.%m %H:%M") in page_text(at)
+    assert at.select_slider[0].value == target  # the slider shows the selected valid hour
     assert tr("map_time_note", lang) in page_text(at)
 
 
 def test_height_selector_changes_values_and_label(overview):
     test_pages, snapshot, series, now = overview
     at = interact(test_pages, "ka", snapshot, now, lambda at: at.selectbox(key="map_height").set_value(120).run())
-    assert "120 მ · მოდელური პროგნოზი" in page_text(at)
+    assert "· 120 მ" in page_text(at)
     assert tr("map_arrow_note", "ka", h=120) in page_text(at)

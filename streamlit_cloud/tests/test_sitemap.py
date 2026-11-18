@@ -109,7 +109,7 @@ def test_overview_map_has_arrows_and_site_text(lang, snapshot_at):
         assert row["angle"] == pytest.approx(sitemap.icon_angle(compass.to_bearing(float(row["dir_txt"].split("°")[0]))), abs=0.6)
     text = page_text(at)
     assert tr("map_arrow_note", lang, h=80) in text
-    assert text.count(tr("map_meta", lang, h=80, t="")[:-1]) >= 3  # height + "model forecast" on every card
+    assert text.count(f"· 80 {tr('m_unit', lang)}") >= 3  # direction and height on every card
 
 
 def test_overview_map_without_a_value_for_one_site(snapshot_at):

@@ -151,7 +151,7 @@ def main():
 # ---------------------------------------------------------------------------------------- overview
 
 def overview(lang, data, reader, now):
-    rows = combined_history(reader.records(now - timedelta(hours=52), now, now), data['history'])
+    rows = combined_history(reader.records(now - timedelta(hours=76), now, now), data['history'])
     df = an.frame(rows)
     latest = rows[-1] if rows else None
     state = generation_state(latest, now)
@@ -164,6 +164,9 @@ def overview(lang, data, reader, now):
     due = latest_due(now)
     cmp = an.compare_today_yesterday(df, pd.Timestamp(now), due)
     t, y = cmp.today, cmp.yesterday
+    d2 = an.day_stats(df, t.day - timedelta(days=2), pd.Timestamp(now))  # day before yesterday (D-2), full day
+    # D-2 cut at the same clock time as today's latest due label (matched elapsed time, not a full day)
+    d2_same = an.day_stats(df, d2.day, pd.Timestamp(now), due - pd.Timedelta(days=2))
     y_sub = tr('full_day' if y.complete else 'incomplete_day', lang, pct=pct(y.completeness))
     ui.cards([
         ui.card(tr('now_mw', lang), ui.fmt(latest['value_mw'], 2), 'MW',
@@ -186,16 +189,18 @@ def overview(lang, data, reader, now):
         ui.cards([
             ui.card(tr('cmp_same_time', lang), ui.fmt(cmp.yesterday_same_time.energy_mwh, 0), 'MWh',
                     tr('so_far', lang, time=local(due - pd.Timedelta(days=1), '%d.%m %H:%M'), pct=pct(cmp.yesterday_same_time.completeness))),
+            ui.card(tr('cmp_same_time_d2', lang), ui.fmt(d2_same.energy_mwh, 0), 'MWh',
+                    tr('so_far', lang, time=local(due - pd.Timedelta(days=2), '%d.%m %H:%M'), pct=pct(d2_same.completeness))),
             ui.card(tr('cmp_delta', lang), sign + ui.fmt(abs(delta), 0) if delta is not None else '-', 'MWh',
                     (sign + f'{abs(cmp.delta_same_time_pct):.1f}%') if cmp.delta_same_time_pct is not None else '',
                     sub_class='wc-up' if (delta or 0) >= 0 else 'wc-down'),
+            ui.card(tr('d2_energy', lang), ui.fmt(d2.energy_mwh, 0), 'MWh',
+                    tr('full_day' if d2.complete else 'incomplete_day', lang, pct=pct(d2.completeness))),
         ])
-        if t.non_act or y.non_act:
-            codes = ', '.join(sorted(set(df['quality']) - {'ACT'})) or '-'
-            ui.note(tr('non_act_note', lang, n=t.non_act + y.non_act, codes=codes))
     with right:
         fig = go.Figure()
-        for day, name, color, dash in ((y.day, tr('yesterday', lang), ui.C['accent2'], 'dot'), (t.day, tr('today', lang), ui.C['accent'], None)):
+        for day, name, color, dash in ((d2.day, tr('day_d2', lang), ui.C['muted'], 'dash'), (y.day, tr('yesterday', lang), ui.C['accent2'], 'dot'),
+                                       (t.day, tr('today', lang), ui.C['accent'], None)):
             # Hours without stored periods stay gaps: the line must not bridge them.
             prof = an.hourly_profile(df, day).set_index('hour').reindex(range(24)).rename_axis('hour').reset_index()
             prof['periods'] = prof['periods'].fillna(0).astype(int)
@@ -303,7 +308,7 @@ def render_site_map(lang, packet, hour, height):
         st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view, tooltip={'text': '{tip}', 'style': sitemap.TOOLTIP_STYLE},
                                  map_provider='carto', map_style=BASEMAP), height=380)
     with right:
-        ui.cards([ui.card(f"{r['num']}. {r['name']}", r['speed_txt'], '', f"{r['dir_txt']} · {r['meta']} · {r['status']}")
+        ui.cards([ui.card(f"{r['num']}. {r['name']}", r['speed_txt'], '', f"{r['dir_txt']} · {height} {tr('m_unit', lang)}")
                   for r in records])
     run = f" · {tr('run', lang)}: {local(packet['run'])}" if packet else ''
     ui.note(tr('map_arrow_note', lang, h=height) + run,
@@ -369,34 +374,13 @@ def renewable_section(lang, df):
     if shares is None:
         st.info(tr('bal_none', lang))
         return
-    ui.cards([
-        ui.card(tr('ren_wind', lang), pct(shares['wind']), '', f"{tr('ren_sub', lang)} · {ui.fmt(shares['wind_mwh'], 0)} MWh", accent=True),
-        ui.card(tr('ren_ws', lang), pct(shares['wind_solar']), '', tr('ren_sub', lang)),
-        ui.card(tr('ren_all', lang), pct(shares['renewable']), '', tr('ren_sub', lang)),
-    ])
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        byh = an.wind_share_by_hour(df)
-        fig = go.Figure(go.Bar(x=byh['hour'], y=byh['wind_share'] * 100, marker_color=SRC_COLORS['wind'],
-                               customdata=byh['periods'],
-                               hovertemplate=f"%{{y:.1f}}% · {tr('periods_stored', lang)}: %{{customdata}}<extra></extra>"))
-        ui.chart(ui.style(fig, 280, tr('ax_share', lang), tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]).update_layout(hovermode='closest'))
-        ui.note(tr('ren_hour', lang))
-    with c2:
-        st.markdown(f"**{tr('ren_cmp', lang)}**")
-        cmp = an.windy_vs_calm(df)
-        if cmp is None:
-            ui.note(tr('ren_wait', lang))
-        else:
-            ui.cards([
-                ui.card(tr('ren_windy', lang), ui.fmt(cmp['windy_import'], 0), 'MW',
-                        tr('ren_cmp_sub', lang, q=tr('ren_top', lang), w=ui.fmt(cmp['windy_wind'], 0),
-                           t=ui.fmt(cmp['windy_thermal'], 0), n=cmp['windy_n'])),
-                ui.card(tr('ren_calm', lang), ui.fmt(cmp['calm_import'], 0), 'MW',
-                        tr('ren_cmp_sub', lang, q=tr('ren_bottom', lang), w=ui.fmt(cmp['calm_wind'], 0),
-                           t=ui.fmt(cmp['calm_thermal'], 0), n=cmp['calm_n'])),
-            ])
-            ui.note(f"{tr('ren_cmp_how', lang)} {tr('ren_caveat', lang)}")
+    ui.cards([ui.card(tr('ren_wind', lang), pct(shares['wind']), '', f"{ui.fmt(shares['wind_mwh'], 0)} MWh", accent=True)])
+    byh = an.wind_share_by_hour(df)
+    fig = go.Figure(go.Bar(x=byh['hour'], y=byh['wind_share'] * 100, marker_color=SRC_COLORS['wind'],
+                           customdata=byh['periods'],
+                           hovertemplate=f"%{{y:.1f}}% · {tr('periods_stored', lang)}: %{{customdata}}<extra></extra>"))
+    ui.chart(ui.style(fig, 280, tr('ax_share', lang), tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]).update_layout(hovermode='closest'))
+    ui.note(tr('ren_hour', lang))
 
 
 def balance_page(lang, data, reader, now):
@@ -424,7 +408,6 @@ def balance_page(lang, data, reader, now):
     ui.cards(cards)
     balance_chart(lang, rows)
     ui.note(tr('bal_intro', lang), ui.tag(tr('gse_tag', lang), 'off'))
-    ui.note(tr('bal_flows_note', lang))
     if not df['gross'].all():
         ui.note(tr('bal_net_old', lang))
 
@@ -437,7 +420,6 @@ def balance_page(lang, data, reader, now):
                                marker=dict(colors=[SRC_COLORS[k] for k in srcs], line=dict(color=ui.C['bg'], width=2)),
                                sort=False, textinfo='percent', textfont=dict(color='#0b1220', size=13)))
         ui.chart(ui.style(fig, 300).update_layout(hovermode='closest'))
-        ui.note(tr('bal_mix_sub', lang))
     with c2:
         imp = max(float(df['imp'].sum()) * an.PERIOD_HOURS, 0.0)
         exp = max(float(df['exp'].sum()) * an.PERIOD_HOURS, 0.0)
@@ -461,8 +443,6 @@ def balance_page(lang, data, reader, now):
     fig.add_scatter(x=prof.index, y=prof['exp'], name=tr('src_export', lang), mode='lines', line=dict(color=SRC_COLORS['export'], width=1.8, dash='dot'))
     fig.add_scatter(x=prof.index, y=prof['consumption'], name=tr('consumption', lang), mode='lines', line=dict(color='#ffffff', width=2.2))
     ui.chart(ui.style(fig, 340, tr('ax_power', lang), tr('hours', lang)).update_xaxes(dtick=3, range=[-0.5, 23.5]))
-    ui.note(tr('bal_profiles_note', lang))
-    ui.note(tr('bal_quality', lang))
     out = df.reset_index().rename(columns={'index': 'period_label_utc', 'time': 'period_label_utc'})
     st.download_button(tr('download', lang), out.to_csv(index=False), 'windcast_gse_balance.csv', 'text/csv')
 
@@ -510,7 +490,7 @@ def ramp_section(lang, df, start, end):
 
 
 def analytics(lang, data, reader, now):
-    ui.hero(tr('page_analytics', lang), tr('facts_only', lang))
+    ui.hero(tr('page_analytics', lang), '')
     nowt = pd.Timestamp(now)
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -772,7 +752,7 @@ def show_series(values, lang, now, height_m=None):
 # ---------------------------------------------------------------------------------------- accuracy
 
 def accuracy(lang, data, reader, now):
-    ui.hero(tr('page_accuracy', lang), tr('acc_intro', lang))
+    ui.hero(tr('page_accuracy', lang), '')
     archive = reader.forecast_archive(now)
     ui.note(tr('runs_archived', lang, n=len(archive)), ui.tag(tr('model_wind', lang), 'mdl'))
     ref_kind = st.radio(tr('reference', lang), ['analysis', 'era5'], horizontal=True, format_func=lambda k: tr(f'ref_{k}', lang))
@@ -787,7 +767,7 @@ def accuracy(lang, data, reader, now):
     by_lead = by_lead.set_index('lead').loc[leads].reset_index()
     ui.cards([ui.card(f"{tr('lead', lang)} {r['lead']} · MAE", ui.fmt(r['mae'], 2), tr('ms', lang),
                       tr('acc_card_sub', lang, rmse=ui.fmt(r['rmse'], 2), bias=f"{r['bias']:+.2f}", n=r['n'])) for _, r in by_lead.iterrows()])
-    ui.note(tr('acc_metrics_help', lang))
+    ui.note(tr('acc_ref_model', lang, ref=tr(f'ref_{ref_kind}', lang)) + ' ' + tr('acc_metrics_help', lang))
     detail = ver.scores(p)
     detail['site'] = [SITES[i].name_ka if lang == 'ka' else SITES[i].name_en for i in detail['site']]
     fig = go.Figure()
@@ -858,11 +838,8 @@ def data_page(lang, data, reader, now):
     else:
         ui.note(tr('no_gaps', lang))
 
-    st.subheader(tr('how_title', lang))
-    st.write(tr('how_text', lang))
     st.subheader(tr('method_title', lang))
     st.markdown(tr('method_text', lang, fc=FORECAST.label, ra=REANALYSIS.label))
-    st.warning(tr('disclaimer', lang))
     st.caption(tr('hosting', lang))
     st.markdown(f"[{tr('gse_link', lang)}](https://www.gse.com.ge/) · " '[Open-Meteo (CC BY 4.0)](https://open-meteo.com/) · '
                 f"[{tr('link_method', lang)}](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/tree/main/docs/sources) · "

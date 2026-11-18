@@ -60,13 +60,21 @@ REVALIDATE_PER_RUN = 4
 # delayed runs), the run widens its window up to this limit. GSE files were observed to stay available
 # for at least 14 days (2026-11-16); 96 h covers multi-day gaps in GitHub's best-effort schedule
 # (seen 17.11.2026: 3 scheduled runs in about 20 h). The deep backfill only walks backwards from the
-# oldest stored period, so it cannot fill a gap in the middle; this window is what recovers it.
+# oldest stored period; this window recovers recent gaps and the bounded gap repair below older ones.
 MAX_AUTO_LOOKBACK_HOURS = 96
 # Deep backfill: a small number of extra requests per run walk backwards from the oldest stored
 # period until DEEP_HORIZON_DAYS or a full day of 404s (GSE retention end). Temporary extra load,
 # about DEEP_PER_RUN x 96 requests/day until done; each deep period is tried once.
 DEEP_PER_RUN = 20
 DEEP_HORIZON_DAYS = 30
+# Gap repair: periods between the oldest stored label and the recovery window that lack wind or
+# balance (e.g. collected before the balance parser existed, or skipped by more than 96 h) are
+# requested again, newest first, at most deep_per_run per run. A 404 does not prove that a period will
+# never be published, so it is rechecked with growing delays (GAP_RETRY_DELAYS after the 1st, 2nd, ...
+# 404); after the last delay the period is left as a gap. Worst case per unpublished period:
+# 1 + len(GAP_RETRY_DELAYS) requests over about 4 days, always inside the per-run bound.
+GAP_STATUS_KEY = "gap_repair"
+GAP_RETRY_DELAYS = (timedelta(hours=1), timedelta(hours=6), timedelta(hours=24), timedelta(hours=72))
 
 
 def due_labels(now: datetime, hours: float) -> list[datetime]:
@@ -91,6 +99,8 @@ class RunReport:
     deep_inserted: int = 0
     balance_stored: int = 0
     balance_errors: int = 0
+    repair_requested: int = 0
+    repair_inserted: int = 0  # wind periods inserted by gap repair (balance-only fills count in balance_stored)
 
 
 class Collector:
@@ -214,6 +224,9 @@ class Collector:
                     report.backfilled += 1
 
         deep = status.get("deep_backfill", {})
+        gaps = status.get(GAP_STATUS_KEY, {})
+        if self.deep_per_run and report.failures == 0 and report.integrity_error is None:
+            gaps = self._repair_gaps(now, labels[-1], deep, gaps, report)
         if self.deep_per_run and report.failures == 0 and report.integrity_error is None and not deep.get("done"):
             deep = self._deep_backfill(now, labels[-1], deep, report)
 
@@ -240,9 +253,12 @@ class Collector:
                 deep_inserted=report.deep_inserted,
                 balance_stored=report.balance_stored,
                 balance_errors=report.balance_errors,
+                repair_requested=report.repair_requested,
+                repair_inserted=report.repair_inserted,
             ),
             lookback_hours=self.lookback_hours,
             deep_backfill=deep,
+            **{GAP_STATUS_KEY: gaps},
             parser_version=PARSER_VERSION,
             revalidated_at=checked,
             missing_attempts=dict(sorted(misses.items())),
@@ -260,6 +276,63 @@ class Collector:
         if stale:
             return report, 2
         return report, 0
+
+    def _repair_gaps(self, now: datetime, window_start: datetime, deep: dict, gaps: dict, report: RunReport) -> dict:
+        """Re-request stored-range periods older than the window that lack wind or balance."""
+        horizon = now - timedelta(days=DEEP_HORIZON_DAYS)
+        lower = max(horizon, datetime.fromisoformat(deep["cursor"])) if deep.get("cursor") else window_start
+        attempts = self._gap_attempts(gaps, now, horizon)
+
+        def due(label: datetime) -> bool:
+            a = attempts.get(label.isoformat())
+            if a is None:
+                return True
+            n = int(a["n"])
+            return n <= len(GAP_RETRY_DELAYS) and now - datetime.fromisoformat(a["last"]) >= GAP_RETRY_DELAYS[n - 1]
+
+        todo: list[datetime] = []
+        if lower < window_start:
+            day = window_start.date()
+            while day >= lower.date() and len(todo) < self.deep_per_run:
+                wind = {r.period_label_utc for r in self._load(day)}
+                bal = {r.period_label_utc for r in self._load_balance(day) if r.import_mw is not None}
+                label = min(window_start - PERIOD, datetime.combine(day, datetime.max.time(), UTC).replace(
+                    second=0, microsecond=0, minute=57))
+                start = max(lower, datetime.combine(day, datetime.min.time(), UTC))
+                while label >= start and len(todo) < self.deep_per_run:
+                    if (label not in wind or label not in bal) and due(label):
+                        todo.append(label)
+                    label -= PERIOD
+                day -= timedelta(days=1)
+        if todo:
+            with self.client_factory() as client, ThreadPoolExecutor(self.concurrency) as pool:
+                results = list(pool.map(lambda lb: (lb, fetch(client, self.url(lb))), todo))
+            for lb, result in results:
+                report.repair_requested += 1
+                if result.kind is FetchKind.NOT_PUBLISHED:
+                    prev = attempts.get(lb.isoformat(), {"n": 0})
+                    attempts[lb.isoformat()] = {"n": int(prev["n"]) + 1, "last": now.isoformat()}
+                    continue
+                if result.kind is not FetchKind.OK:
+                    report.failures += 1
+                    break
+                before = report.inserted
+                self._apply(lb, result, now, report, {})
+                if report.integrity_error:
+                    break
+                attempts.pop(lb.isoformat(), None)  # published after all: no longer a gap
+                report.repair_inserted += report.inserted - before
+                report.backfilled += report.inserted - before
+        return {"attempts_404": dict(sorted(attempts.items())), "updated_at": now.isoformat()}
+
+    @staticmethod
+    def _gap_attempts(gaps: dict, now: datetime, horizon: datetime) -> dict:
+        """404 history per label; migrates the earlier one-shot list (counted as one 404 at updated_at)."""
+        attempts = {k: dict(v) for k, v in gaps.get("attempts_404", {}).items()}
+        legacy_at = gaps.get("updated_at", now.isoformat())
+        for k in gaps.get("not_published", []):
+            attempts.setdefault(k, {"n": 1, "last": legacy_at})
+        return {k: v for k, v in attempts.items() if datetime.fromisoformat(k) >= horizon}
 
     def _deep_backfill(self, now: datetime, window_start: datetime, deep: dict, report: RunReport) -> dict:
         """Walk backwards from the cursor, DEEP_PER_RUN periods per run, each tried once."""
