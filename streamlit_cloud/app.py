@@ -164,7 +164,9 @@ def overview(lang, data, reader, now):
     due = latest_due(now)
     cmp = an.compare_today_yesterday(df, pd.Timestamp(now), due)
     t, y = cmp.today, cmp.yesterday
-    d2 = an.day_stats(df, t.day - timedelta(days=2), pd.Timestamp(now))  # day before yesterday (D-2)
+    d2 = an.day_stats(df, t.day - timedelta(days=2), pd.Timestamp(now))  # day before yesterday (D-2), full day
+    # D-2 cut at the same clock time as today's latest due label (matched elapsed time, not a full day)
+    d2_same = an.day_stats(df, d2.day, pd.Timestamp(now), due - pd.Timedelta(days=2))
     y_sub = tr('full_day' if y.complete else 'incomplete_day', lang, pct=pct(y.completeness))
     ui.cards([
         ui.card(tr('now_mw', lang), ui.fmt(latest['value_mw'], 2), 'MW',
@@ -187,6 +189,8 @@ def overview(lang, data, reader, now):
         ui.cards([
             ui.card(tr('cmp_same_time', lang), ui.fmt(cmp.yesterday_same_time.energy_mwh, 0), 'MWh',
                     tr('so_far', lang, time=local(due - pd.Timedelta(days=1), '%d.%m %H:%M'), pct=pct(cmp.yesterday_same_time.completeness))),
+            ui.card(tr('cmp_same_time_d2', lang), ui.fmt(d2_same.energy_mwh, 0), 'MWh',
+                    tr('so_far', lang, time=local(due - pd.Timedelta(days=2), '%d.%m %H:%M'), pct=pct(d2_same.completeness))),
             ui.card(tr('cmp_delta', lang), sign + ui.fmt(abs(delta), 0) if delta is not None else '-', 'MWh',
                     (sign + f'{abs(cmp.delta_same_time_pct):.1f}%') if cmp.delta_same_time_pct is not None else '',
                     sub_class='wc-up' if (delta or 0) >= 0 else 'wc-down'),
@@ -762,7 +766,7 @@ def accuracy(lang, data, reader, now):
     by_lead = by_lead.set_index('lead').loc[leads].reset_index()
     ui.cards([ui.card(f"{tr('lead', lang)} {r['lead']} · MAE", ui.fmt(r['mae'], 2), tr('ms', lang),
                       tr('acc_card_sub', lang, rmse=ui.fmt(r['rmse'], 2), bias=f"{r['bias']:+.2f}", n=r['n'])) for _, r in by_lead.iterrows()])
-    ui.note(tr('acc_metrics_help', lang))
+    ui.note(tr('acc_ref_model', lang, ref=tr(f'ref_{ref_kind}', lang)) + ' ' + tr('acc_metrics_help', lang))
     detail = ver.scores(p)
     detail['site'] = [SITES[i].name_ka if lang == 'ka' else SITES[i].name_en for i in detail['site']]
     fig = go.Figure()

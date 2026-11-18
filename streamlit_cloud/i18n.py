@@ -419,6 +419,10 @@ T: dict[str, dict[str, str]] = {
         "en": "Day before yesterday (D-2)"},
     "d2_energy": {"ka": "ქარის გამომუშავება გუშინწინ (D-2)",
         "en": "Wind energy, day before yesterday (D-2)"},
+    "cmp_same_time_d2": {"ka": "ქარის გამომუშავება გუშინწინ, იმავე დრომდე",
+        "en": "Wind energy the day before yesterday, until the same time"},
+    "acc_ref_model": {"ka": "საცნობარო მნიშვნელობა მოდელურია: {ref}. ეს არ არის ადგილზე გაზომვასთან შედარება.",
+        "en": "The reference is model-based: {ref}. This is not a comparison with on-site measurements."},
 }
 
 
