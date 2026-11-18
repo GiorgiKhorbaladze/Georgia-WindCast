@@ -669,6 +669,9 @@ def _model_inputs(gse_key, hist_key, live_key, _df, _train, _live, now_hour):
 def mw_forecast(lang, data, reader, now):
     st.subheader(tr('mw_title', lang))
     ui.note(tr('mw_disclaimer', lang), ui.tag(tr('estimate', lang), 'est'))
+    if not mwmodel.PUBLISH_FORECAST:  # owner-controlled; nothing is computed or shown while suspended
+        st.info(tr('mw_suspended', lang))
+        return
     nowt = pd.Timestamp(now)
     rows = combined_history(reader.records(now - timedelta(days=31), now, now), data['history'])
     df = an.frame(rows)

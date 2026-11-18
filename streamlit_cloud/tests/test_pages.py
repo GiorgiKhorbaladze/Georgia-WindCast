@@ -78,14 +78,31 @@ def test_analytics_page_stats_and_download(lang):
 
 
 @pytest.mark.parametrize("lang", ["ka", "en"])
-def test_forecast_page_insufficient_history_is_explicit(lang):
+def test_forecast_page_withholds_the_mw_forecast_by_default(lang):
+    # Issue #40 B: the national MW forecast stays suspended until the owner switches it on.
+    import mwmodel
+    assert mwmodel.PUBLISH_FORECAST is False
+    table, df = synthetic(24 * 20)  # enough paired hours: still nothing may be shown
+    shift = (NOW.replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)) - table.index[-1].to_pydatetime()
+    durable = [Record(t.to_pydatetime() + shift, "x", float(v), "ACT", NOW, f"h{k}", "p")
+               for k, (t, v) in enumerate(df["value_mw"].items())]
+    at = run("forecast", lang, durable)
+    assert tr("mw_suspended", lang) in " ".join(i.value for i in at.info)
+    assert tr("mw_band", lang) not in page_text(at) and "MAE" not in page_text(at)
+    assert ("არაოფიციალური" if lang == "ka" else "Unofficial") in page_text(at)
+
+
+@pytest.mark.parametrize("lang", ["ka", "en"])
+def test_forecast_page_insufficient_history_is_explicit(lang, monkeypatch):
+    monkeypatch.setattr("mwmodel.PUBLISH_FORECAST", True)  # behaviour once the owner switches it on
     at = run("forecast", lang, durable_two_days())
     infos = " ".join(i.value for i in at.info)
     assert ("168" in infos) and ("საათი" in infos if lang == "ka" else "h" in infos)
     assert ("არაოფიციალური" if lang == "ka" else "Unofficial") in page_text(at)
 
 
-def test_forecast_page_shows_model_vs_baselines_when_trained():
+def test_forecast_page_shows_model_vs_baselines_when_trained(monkeypatch):
+    monkeypatch.setattr("mwmodel.PUBLISH_FORECAST", True)
     table, df = synthetic(24 * 20)
     # align the synthetic hourly table to whole hours ending two hours before NOW
     shift = (NOW.replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)) - table.index[-1].to_pydatetime()
