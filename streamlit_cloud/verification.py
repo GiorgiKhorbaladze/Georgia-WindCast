@@ -5,6 +5,8 @@ that is itself model-based, and the UI says so:
 - "analysis": for each valid hour, the value of the most recent LATER run at a lead under 6 h
   (short-range forecast as best available estimate; it shares the model's own biases);
 - "era5": ECMWF ERA5 reanalysis at 10 m (independent model; about 25 km; 5-day lag).
+Sites that fall in the same model grid cell get identical model values (Ruisi and Kartli share
+one ICON and one ERA5 cell); aggregate scores count each cell once (independent()).
 Errors are forecast minus reference. Direction errors are circular and use only hours with
 reference speed >= 3 m/s (direction is meaningless at calm).
 """
@@ -52,6 +54,12 @@ def era5_reference(archive: dict | None) -> dict:
     return ref
 
 
+def _cell(loc, i: int) -> tuple:
+    """Model grid cell of a location series (falls back to the site index if no grid is known)."""
+    lat, lon = getattr(loc, "grid_latitude", None), getattr(loc, "grid_longitude", None)
+    return (round(lat, 4), round(lon, 4)) if lat is not None and lon is not None else ("site", i)
+
+
 def pairs(packets: list[dict], ref: dict) -> pd.DataFrame:
     """Forecast/reference pairs; the reference must come from a later run (never the same one)."""
     rows = []
@@ -66,9 +74,16 @@ def pairs(packets: list[dict], ref: dict) -> pd.DataFrame:
                         continue
                     if r[2] is not None and r[2] <= p["run"]:
                         continue
-                    rows.append(dict(site=i, height=h, lead=bucket, valid=v.valid_at, run=p["run"],
+                    rows.append(dict(site=i, cell=_cell(loc, i), height=h, lead=bucket, valid=v.valid_at, run=p["run"],
                                      f_speed=v.speed_ms, r_speed=r[0], f_dir=v.direction_deg, r_dir=r[1]))
     return pd.DataFrame(rows)
+
+
+def independent(df: pd.DataFrame) -> pd.DataFrame:
+    """One pair per grid cell, height, run and valid hour: sites sharing a cell are not counted twice."""
+    if df.empty or "cell" not in df:
+        return df
+    return df.drop_duplicates(subset=["cell", "height", "run", "valid"], keep="first")
 
 
 def _circ(a: float | None, b: float | None) -> float | None:
