@@ -207,7 +207,8 @@ def test_stale_beats_unverified_and_label_ahead_is_not_fresh():
 
 
 def test_non_act_value_is_shown_with_unverified_badge():
-    """Production rule: the published value and raw code stay visible (not replaced by '-')."""
+    """The published value stays visible (not replaced by '-'); the raw code is no longer shown
+    publicly (owner decision 19.11.2026), but the reading is never presented as confirmed."""
     from streamlit.testing.v1 import AppTest
     cache = SourceCache(transport(ACT.replace(b"QUALITY='ACT'", b"QUALITY='NRE'")))
     snapshot = cache.snapshot(NOW)
@@ -215,8 +216,8 @@ def test_non_act_value_is_shown_with_unverified_badge():
         at = AppTest.from_file(str(ROOT / 'streamlit_cloud/app.py')).run(timeout=20)
         assert not at.exception
         text = page_text(at)
-        assert '73.60' in text and 'NRE' in text  # value kept, code shown
-        assert 'დაუდასტურებელი' in text
+        assert '73.60' in text and 'NRE' not in text  # value kept, code hidden
+        assert 'დაუდასტურებელი მონაცემი' in text and 'აქტუალური' not in text  # not shown as fresh/confirmed
 
 
 def test_durable_history_feeds_overview_and_map_is_rendered(offline_history):

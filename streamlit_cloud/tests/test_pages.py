@@ -161,7 +161,8 @@ def test_data_page_stale_collector():
 
 def test_kpi_labels_say_wind_generation_not_consumption():
     text = page_text(run("overview", "ka", durable_two_days()))
-    assert "ქარის გენერაციის მაქსიმუმი დღეს" in text and "3-წუთიანი საშუალო" in text and "ხარისხის კოდი: ACT" in text
+    assert "ქარის გენერაციის მაქსიმუმი დღეს" in text and "3-წუთიანი საშუალო" in text and "ქარის გენერაცია" in text
+    assert "ხარისხის კოდი" not in text and "ACT" not in text  # no quality codes in the public UI
     assert "ქარის გამომუშავება დღეს" in text and "ქარის გამომუშავება გუშინ" in text
     assert "დღის პიკი" not in text  # ambiguous (reads as demand peak)
 

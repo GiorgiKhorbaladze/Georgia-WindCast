@@ -8,9 +8,10 @@ Definitions (shown to the user):
 - Windows overlap: one window ends at every 3-minute label (a 1 h ramp is evaluated every 3 min).
 - Completeness = windows with both endpoints stored / windows whose both endpoints lie inside the
   selected range on the 3-minute grid.
-- Quality: by default every stored value is used, as published; with act_only=True a window counts
-  only if BOTH endpoints carry the code ACT. The meaning of other codes is not confirmed, so this
-  is a sensitivity option, not a correction.
+- Quality: every stored value is used, as published (the public page always does this). With
+  act_only=True a window counts only if BOTH endpoints carry the code ACT; the meaning of other
+  codes is not confirmed, so this is an internal sensitivity check, not a correction. Since
+  19.11.2026 it is no longer offered in the public UI (owner decision); it stays tested here.
 - MW/min = ramp / H in minutes (the average rate over the window, not an instantaneous rate).
 These are descriptive historical statistics: not a forecast, not an imbalance volume and not a
 regulating-reserve requirement.

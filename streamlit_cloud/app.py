@@ -98,9 +98,6 @@ def local(value, fmt='%d.%m.%Y %H:%M'):
 
 
 
-def qcode(code, lang):
-    """Raw GSE quality code; anything but ACT is marked as having an unconfirmed meaning (never guessed)."""
-    return code if code == 'ACT' else f"{code} ({tr('q_unconfirmed', lang)})"
 
 
 def pct(x):
@@ -156,7 +153,8 @@ def overview(lang, data, reader, now):
     df = an.frame(rows)
     latest = rows[-1] if rows else None
     state = generation_state(latest, now)
-    badge_text = tr(STATE_KEY[state], lang) + (f" ({latest['quality']})" if state == 'unverified' and latest else '')
+    # Public UI shows no raw quality codes; a non-ACT reading stays "unverified" (never "fresh").
+    badge_text = tr(STATE_KEY[state], lang)
     ui.hero(tr('app_title', lang), tr('tagline', lang), ui.badge(badge_text, state))
     if latest is None:
         st.info(tr('no_data', lang))
@@ -171,12 +169,12 @@ def overview(lang, data, reader, now):
     y_sub = tr('full_day' if y.complete else 'incomplete_day', lang, pct=pct(y.completeness))
     ui.cards([
         ui.card(tr('now_mw', lang), ui.fmt(latest['value_mw'], 2), 'MW',
-                tr('now_sub', lang, time=local(latest['time'], '%H:%M')) + f" · {tr('quality', lang)}: {qcode(latest['quality'], lang)}", accent=True),
+                tr('now_sub', lang, time=local(latest['time'], '%H:%M')), accent=True),
         ui.card(tr('today_energy', lang), ui.fmt(t.energy_mwh, 0), 'MWh',
                 tr('so_far', lang, time=local(due, '%H:%M'), pct=pct(t.completeness))),
         ui.card(tr('yesterday_energy', lang), ui.fmt(y.energy_mwh, 0), 'MWh', y_sub),
         ui.card(tr('peak_today', lang), ui.fmt(t.peak_mw, 1), 'MW',
-                tr('at_time', lang, time=local(t.peak_time, '%H:%M'), q=qcode(df.loc[t.peak_time, 'quality'], lang)) if t.peak_time is not None else ''),
+                tr('at_time', lang, time=local(t.peak_time, '%H:%M')) if t.peak_time is not None else ''),
     ])
     ui.note(f"{tr('official', lang)} · {tr('cmp_note', lang)} {tr('units_note', lang)}", ui.tag(tr('gse_tag', lang), 'off'))
     with st.expander(tr('cmp_detail_title', lang)):
@@ -242,13 +240,8 @@ def generation_chart(lang, rows, start, end, height=340):
     fig = go.Figure(go.Scatter(x=[wall(t) for t in grid], y=values, mode='lines', connectgaps=False, name=tr('series_mw', lang),
                                line=dict(color=ui.C['accent'], width=2), fill=None if gaps else 'tozeroy',
                                fillcolor='rgba(45,212,191,0.08)'))
-    odd = [r for r in rows if r['quality'] != 'ACT']
-    if odd:
-        # Raw code and source time in the tooltip; the code's meaning is not officially confirmed.
-        fig.add_scatter(x=[wall(r['time']) for r in odd], y=[r['value_mw'] for r in odd], mode='markers',
-                        name=tr('q_legend', lang), marker=dict(color=ui.C['warn'], size=4),
-                        customdata=[[r['quality'], local(r['time'], '%d.%m %H:%M')] for r in odd],
-                        hovertemplate=f"%{{y:.2f}} MW · {tr('q_hover', lang)}<extra></extra>")
+    # Every stored value is drawn as published, whatever its quality code; codes stay in the stored
+    # records and the CSV download, not in the public chart (owner decision 19.11.2026).
     ui.chart(ui.style(fig, height, tr('ax_power', lang)).update_xaxes(type='date', tickformat='%H:%M\n%d.%m'))
     missing = sum(v is None for v in values)
     if missing:
@@ -453,11 +446,9 @@ def balance_page(lang, data, reader, now):
 def ramp_section(lang, df, start, end):
     """Signed national wind-generation ramps over the selected range (ramps.py: definitions)."""
     st.subheader(tr('ramp_title', lang))
-    c1, c2 = st.columns([1, 2])
-    key = c1.radio(tr('ramp_horizon', lang), list(rp.HORIZONS), horizontal=True, format_func=lambda k: tr(f'ramp_h_{k}', lang))
-    act_only = c2.checkbox(tr('ramp_act_only', lang), help=tr('ramp_act_help', lang))
+    key = st.radio(tr('ramp_horizon', lang), list(rp.HORIZONS), horizontal=True, format_func=lambda k: tr(f'ramp_h_{k}', lang))
     horizon = rp.HORIZONS[key]
-    d = rp.deltas(df, horizon, start, end, act_only=act_only)
+    d = rp.deltas(df, horizon, start, end)  # all stored values, as published (ramps.py: act_only stays internal)
     # Time before the first stored period is not "missing" (same rule as the coverage cards).
     first = df.index.min() if len(df) else start
     s = rp.stats(d, rp.possible_windows(max(start, first), end, horizon))
@@ -515,9 +506,7 @@ def analytics(lang, data, reader, now):
     load_from = an.day_bounds(an.local_day(start.ceil('3min')))[0]  # whole days for daily completeness
     rows = combined_history(reader.records(load_from.to_pydatetime(), end.to_pydatetime(), now), data['history'])
     df = an.frame(rows)
-    codes = sorted(df['quality'].unique()) if len(df) else []
-    qualities = st.multiselect(tr('quality_filter', lang), codes, default=codes) if codes else []
-    f = an.Filters(start, end, hours[0], hours[1], tuple(qualities) if codes else None, complete_only)
+    f = an.Filters(start, end, hours[0], hours[1], None, complete_only)  # all quality codes, as before by default
     part, grid, present = an.apply_filters(df, f, nowt)
     s = an.summary(part, grid, present)
     ui.cards([

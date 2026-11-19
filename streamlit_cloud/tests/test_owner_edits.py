@@ -32,15 +32,15 @@ def test_overview_has_d2_and_no_removed_notes(lang):
     at = test_pages.run("overview", lang, test_pages.durable_two_days())
     text = page_text(at)
     assert tr("d2_energy", lang) in text
-    for key in ("non_act_note",):
-        assert tr(key, lang, n=0, codes="")[:20] not in text
+    assert "ACT-ისგან განსხვავებული" not in text and "other than ACT" not in text
 
 
 @pytest.mark.parametrize("lang", ["ka", "en"])
 def test_removed_notes_are_not_rendered(lang):
     import test_pages
     texts = " ".join(page_text(test_pages.run(p, lang, test_pages.durable_two_days())) for p in ("balance", "analytics", "accuracy", "data"))
-    for key in ("bal_flows_note", "bal_mix_sub", "bal_profiles_note", "bal_quality", "facts_only", "acc_intro", "how_text", "disclaimer", "ren_ws", "ren_cmp"):
+    assert "თითოეულ ბლოკს აქვს ხარისხის კოდი" not in texts and "carries a quality code" not in texts
+    for key in ("bal_flows_note", "bal_mix_sub", "bal_profiles_note", "facts_only", "acc_intro", "how_text", "disclaimer", "ren_ws", "ren_cmp"):
         assert T[key][lang][:40] not in texts, key
 
 

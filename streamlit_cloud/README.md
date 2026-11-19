@@ -6,8 +6,8 @@ Public, zero-cost edition of Georgia WindCast. The original Next.js/FastAPI/Post
 
 | Page | Content |
 | --- | --- |
-| Overview | Latest GSE national wind generation (MW, 3-minute average) with source time, quality code and freshness; energy today, yesterday and yesterday until the same time (MWh) with completeness; peaks; hourly profile today vs yesterday; last 24 h; map of the three verified sites with model wind at 80 m |
-| Historical analysis | 24 h / 7 d / 30 d / 90 d / custom range; filters by hour window, quality code and complete days; statistics (total MWh, mean, median, min/max, standard deviation, missing periods, completeness); daily totals with 7-day rolling mean; daily/weekly/monthly tables; weekday pattern (from 14 complete days); distribution; filtered CSV (UTC); ERA5 reanalysis, labelled as model data |
+| Overview | Latest GSE national wind generation (MW, 3-minute average) with source time and freshness; energy today, yesterday and yesterday until the same time (MWh) with completeness; peaks; hourly profile today vs yesterday; last 24 h; map of the three verified sites with model wind at 80 m |
+| Historical analysis | 24 h / 7 d / 30 d / 90 d / custom range; filters by hour window and complete days; statistics (total MWh, mean, median, min/max, standard deviation, missing periods, completeness); daily totals with 7-day rolling mean; daily/weekly/monthly tables; weekday pattern (from 14 complete days); distribution; filtered CSV (UTC); ERA5 reanalysis, labelled as model data |
 | Forecast | Experimental national MW estimate with empirical band and held-out accuracy versus climatology and persistence; DWD ICON wind speed and direction at 10/80/120/180 m with run, valid time and continuous coverage |
 | Forecast accuracy | Archived ICON runs scored by site, height and lead time (≤6 h ... 48-72 h): MAE, RMSE, bias, circular direction error, pair counts; reference = later short-range run or ERA5 at 10 m |
 | Data and methodology | Collector health: last successful collection, latest stored period, completeness for 24 h and 7 d, missing intervals, recovered periods, search window, deep-backfill progress; sources, methodology, disclaimers |
@@ -24,7 +24,9 @@ On the recorded file, hydro + thermal + wind + solar = total generation, and con
 
 ### Energy and day conventions (`analytics.py`)
 
-A GSE label marks the end of its 3-minute interval. Energy = sum of stored 3-minute averages × 0.05 h. A Tbilisi day holds labels 00:03 ... 24:00 (480 periods). Missing periods are counted, never filled; a day is "complete" at ≥ 99 % of its periods; today is always "in progress". Non-ACT periods are included in totals and counted separately. MW is power, MWh is energy.
+A GSE label marks the end of its 3-minute interval. Energy = sum of stored 3-minute averages × 0.05 h. A Tbilisi day holds labels 00:03 ... 24:00 (480 periods). Missing periods are counted, never filled; a day is "complete" at ≥ 99 % of its periods; today is always "in progress". Non-ACT periods are included in totals, unchanged. MW is power, MWh is energy.
+
+**Quality codes in the public UI (owner decision 19.11.2026):** the pages show no raw GSE quality codes (ACT, NRE, SUB, BLS, INV): no code in cards, chart tooltips or legends, no code filter and no "ACT only" ramp option. Nothing is dropped or replaced: every stored value is drawn and counted as published. A latest reading whose code is not ACT (or whose label is ahead of the clock) is still badged "Unconfirmed reading", never "fresh". The codes remain in every stored record, in both CSV downloads, in the collector's revalidation rule and in `ramps.deltas(act_only=True)` as an internal sensitivity check; their meaning is unpublished and is not guessed.
 
 ### Experimental MW forecast (`mwmodel.py`)
 
