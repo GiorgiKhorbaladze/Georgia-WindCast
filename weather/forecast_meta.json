@@ -1,7 +1,7 @@
 {
-  "run": "2026-11-19T00:00:00+00:00",
-  "retrieved": "2026-11-19T07:10:32.081195+00:00",
+  "run": "2026-11-19T06:00:00+00:00",
+  "retrieved": "2026-11-19T13:13:28.641327+00:00",
   "url": "https://api.open-meteo.com/v1/forecast?latitude=42.055596,41.895560,42.022423&longitude=43.985914,44.370612,44.047890&hourly=wind_speed_10m,wind_direction_10m,wind_speed_80m,wind_direction_80m,wind_speed_120m,wind_direction_120m,wind_speed_180m,wind_direction_180m&models=icon_global&forecast_days=4&wind_speed_unit=ms&timeformat=unixtime&timezone=GMT",
-  "sha256": "64adcc7fe8a82fa672273d96e312fa2fd86b978c6389f337c670a2c8e1207aab",
+  "sha256": "9d258020e426db08c7f71328f1a251e0728a7a2e941cc3f7143aec8a6064a592",
   "content_addressed": true
 }
