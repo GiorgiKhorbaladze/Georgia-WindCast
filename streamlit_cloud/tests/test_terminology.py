@@ -17,12 +17,12 @@ EN = " ".join(e["en"] for e in T.values())
 def test_quality_codes_are_never_expanded_into_guessed_meanings():
     for guess in (r"ACT\W{0,3}(=|-|:)?\s*Actual", r"Actual\s*\(ACT\)", "Not refreshed", "Substitut", "Blocked", r"NRE\s*\(\w"):
         assert not re.search(guess, EN) and not re.search(guess, KA), guess
-    for code in ("ACT", "NRE", "SUB", "BLS"):  # all observed codes are named, with the caveat
-        assert code in T["method_text"]["ka"] and code in T["method_text"]["en"]
-    assert "ოფიციალური განმარტება" in T["method_text"]["ka"] and "not yet available" in T["method_text"]["en"]
     assert "≠" not in KA + EN  # no symbol-only legend
-    assert T["q_legend"]["ka"] == "განსხვავებული ხარისხის კოდი (არა ACT)"
-    assert T["st_unverified"]["ka"] == "ხარისხის კოდი დასაზუსტებელია"  # not "the value is wrong"
+    # Public UI names no quality codes (owner decision 19.11.2026); codes stay in data and docs.
+    for code in ("ACT", "NRE", "SUB", "BLS"):
+        assert not re.search(rf"\b{code}\b", KA + EN), code
+    assert T["st_unverified"]["ka"] == "დაუდასტურებელი მონაცემი"  # neither "wrong" nor "confirmed"
+    assert T["st_unverified"]["en"] == "Unconfirmed reading"
 
 
 def test_generation_quartiles_are_not_called_windy_or_calm():
@@ -78,26 +78,29 @@ def with_codes(rows, code="NRE", every=40):
 
 
 @pytest.mark.parametrize("lang", ["ka", "en"])
-def test_overview_shows_raw_code_with_caveat_and_unit_help(lang):
+def test_overview_chart_keeps_every_value_but_shows_no_codes(lang):
     import test_pages
     rows = with_codes(test_pages.durable_two_days())
     at = test_pages.run("overview", lang, rows)
     text = page_text(at)
-    assert tr("units_note", lang) in text
-    charts = [json.dumps(json.loads(c.proto.spec), ensure_ascii=False) for c in at.get("plotly_chart")]
-    gen = next(c for c in charts if tr("q_legend", lang) in c)  # legend says "not ACT" in words
-    assert '"NRE"' in gen and "≠" not in gen  # tooltip carries the exact raw code
-    assert all('"MW"' != json.loads(c)["layout"].get("yaxis", {}).get("title", {}).get("text") for c in charts)
+    assert tr("units_note", lang) in text and "NRE" not in text
+    charts = [json.loads(c.proto.spec) for c in at.get("plotly_chart")]
+    assert not any("NRE" in json.dumps(c) or "ACT" in json.dumps(c) for c in charts)  # legend and tooltips
+    gen = next(c for c in charts if c["data"][0].get("name") == tr("series_mw", lang))
+    assert len(gen["data"]) == 1  # one series: non-ACT values are neither dropped nor drawn separately
+    ys = [v for v in _values(gen["data"][0]["y"]) if v == v]
+    now = test_pages.NOW  # chart window: the last 24 h before the page's clock
+    assert len(ys) == sum(1 for r in rows if now - timedelta(hours=24) <= r.period_label_utc <= now)
+    assert all('"MW"' != c["layout"].get("yaxis", {}).get("title", {}).get("text") for c in charts)
 
 
-def test_peak_card_marks_non_act_code_as_unconfirmed():
+def test_peak_card_shows_value_and_time_without_code():
     import test_pages
     rows = test_pages.durable_two_days()
     from dataclasses import replace
     rows = rows[:-1] + [replace(rows[-1], value_mw=99.0, quality="NRE")]
-    at = test_pages.run("overview", "ka", rows)
-    assert f"NRE ({tr('q_unconfirmed', 'ka')})" in page_text(at)
-
+    text = page_text(test_pages.run("overview", "ka", rows))
+    assert "99.0" in text and "NRE" not in text and "3-წუთიანი საშუალო" in text
 
 
 def _values(arr):
@@ -141,3 +144,31 @@ def test_overview_in_georgian_shows_no_gse_abbreviation():
     assert "საქართველოს სახელმწიფო ელექტროსისტემა" in text
     visible = re.sub(r"<[^>]+>", " ", text)  # ignore markup and URLs in attributes
     assert "GSE" not in visible
+
+
+# --------------------------------------- public UI without quality codes (owner request 19.11.2026)
+
+@pytest.mark.parametrize("lang", ["ka", "en"])
+def test_analytics_has_no_code_filter_or_act_checkbox_and_counts_every_value(lang):
+    import test_pages
+    rows = with_codes(test_pages.durable_two_days(), every=7)  # many non-ACT periods
+    at = test_pages.run("analytics", lang, rows)
+    assert len(at.multiselect) == 0  # former quality-code filter
+    assert not any("ACT" in c.label for c in at.checkbox)  # former "ACT only" ramp option
+    text = page_text(at)
+    assert not re.search(r"\b(ACT|NRE)\b", text)
+    # same totals as with all codes ACT: hiding the codes neither drops nor changes values
+    plain = page_text(test_pages.run("analytics", lang, test_pages.durable_two_days()))
+    num = re.compile(r"\d[\d\s]*[.,]?\d*\s*MWh")
+    assert num.findall(text)[:3] == num.findall(plain)[:3]
+
+
+def test_quality_information_is_kept_internally():
+    import analytics as an
+    import ramps as rp
+    import test_pages
+    rows = with_codes(test_pages.durable_two_days(), every=7)
+    df = an.frame([dict(time=r.period_label_utc, value_mw=r.value_mw, quality=r.quality) for r in rows])
+    assert set(df["quality"]) == {"ACT", "NRE"}  # stored codes untouched
+    h = rp.HORIZONS["15min"]
+    assert len(rp.deltas(df, h, act_only=True)) < len(rp.deltas(df, h))  # sensitivity option still works internally
