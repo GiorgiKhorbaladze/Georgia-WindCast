@@ -34,6 +34,7 @@ import mwmodel  # noqa: E402
 import windrose as wr  # noqa: E402
 import ramps as rp  # noqa: E402
 import sitemap  # noqa: E402
+import system_snapshot  # noqa: E402
 import ui  # noqa: E402
 import verification as ver  # noqa: E402
 from data import FORECAST, REANALYSIS, SITES, SourceCache, generation_state, weather_state  # noqa: E402
@@ -45,7 +46,7 @@ reload_guard.stamp(HERE, (BACKEND_APP,))
 st.set_page_config(page_title='Georgia WindCast', page_icon='🌬️', layout='wide')
 TZ = ZoneInfo('Asia/Tbilisi')
 BASEMAP = 'https://tiles.openfreemap.org/styles/dark'  # same basemap as the main product
-PAGES = ('overview', 'balance', 'analytics', 'forecast', 'accuracy', 'data')
+PAGES = ('overview', 'system_map', 'balance', 'analytics', 'forecast', 'accuracy', 'data')
 STATE_KEY = {'fresh': 'st_fresh', 'stale': 'st_stale', 'unavailable': 'st_unavailable', 'unverified': 'st_unverified'}
 
 
@@ -131,6 +132,10 @@ def main():
     def dashboard():
         now = source.utcnow()
         reader = history_reader()
+        if page == 'system_map':
+            system_snapshot.render(lang, reader, now)
+            st.caption(f"{tr('last_check', lang)} · {local(now)} · {tr('auto_refresh', lang)}")
+            return
         cache = source_cache()
         cache.adopt_stored(*reader.weather(now))  # second path when Open-Meteo limits this host
         data = cache.snapshot(now, include_archive=page == 'analytics')
