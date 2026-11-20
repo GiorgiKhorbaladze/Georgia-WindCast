@@ -101,11 +101,11 @@ a{color:#8fdbff}
   .wind h1{font-size:.88rem}
   #trend{height:26px}
   .reading output{font-size:2.25rem}
-  .map-tools{right:8px;top:44%}
+  .map-tools{right:8px}
   .stage-bottom{inset:auto 7px 7px}
   .strip{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .mix{padding:.4rem .55rem}
-  .mix-legend{gap:.2rem .7rem;font-size:.7rem}
+  #mix-panel{display:none}  /* phones: the same mix values are in the balance section below the map */
+  .map-tools{top:38%}
   .metric{padding:.4rem .55rem}
   .metric strong{font-size:1rem}
   #site-info{left:8px;bottom:172px}
