@@ -71,7 +71,7 @@ h1,h2,p{margin:0}
 .metric small{font-weight:500;color:var(--muted);font-size:.72rem}
 .playback{display:flex;gap:7px;padding:5px;align-items:center}
 .playback input{flex:1;min-width:35px;accent-color:var(--mint)}
-#site-info{position:absolute;left:16px;bottom:150px;padding:.7rem 2.6rem .7rem .8rem;max-width:calc(100% - 80px)}
+#site-info{position:absolute;left:16px;bottom:calc(var(--dock, 138px) + 24px);padding:.7rem 2.6rem .7rem .8rem;max-width:calc(100% - 80px)}
 #site-info small{display:block;margin-top:.2rem;color:var(--muted)}
 #close-site{position:absolute;right:5px;top:5px}
 .details{padding:20px 1px}
@@ -107,7 +107,7 @@ a{color:#8fdbff}
   .map-tools{top:38%}
   .metric{padding:.4rem .55rem}
   .metric strong{font-size:1rem}
-  #site-info{left:8px;bottom:172px}
+  #site-info{left:8px;bottom:calc(var(--dock, 160px) + 14px)}
   .playback button,.playback select{padding:0 .43rem;font-size:.78rem}
   .exchanges{grid-template-columns:1fr}
 }

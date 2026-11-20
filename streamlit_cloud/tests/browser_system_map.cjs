@@ -112,6 +112,10 @@ async function exercise(browser, dimensions, english, fallback) {
   await frame.locator('.site').first().focus();
   await frame.locator('.site').first().press('Enter');
   await frame.locator('#site-info').waitFor();
+  // Regression: the details card must not sit under the bottom dock (mix panel grew it).
+  const card = await frame.locator('#site-info').boundingBox();
+  const dock = await frame.locator('.stage-bottom').boundingBox();
+  assert(card.y + card.height <= dock.y, `site details overlap the dock: ${card.y + card.height} > ${dock.y}`);
   await frame.locator('#close-site').click();
   if (await frame.locator('#play').isEnabled()) {
     const time = frame.locator('#time');
