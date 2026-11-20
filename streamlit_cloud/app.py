@@ -841,6 +841,8 @@ def data_page(lang, data, reader, now):
     st.markdown(tr('method_text', lang, fc=FORECAST.label, ra=REANALYSIS.label))
     st.caption(tr('hosting', lang))
     st.markdown(f"[{tr('gse_link', lang)}](https://www.gse.com.ge/) · " '[Open-Meteo (CC BY 4.0)](https://open-meteo.com/) · '
+                '[DWD ICON](https://www.dwd.de/) · '
+                f"{tr('copernicus_credit', lang)} · "
                 f"[{tr('link_method', lang)}](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/tree/main/docs/sources) · "
                 f"[{tr('link_data', lang)}](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/tree/data/gse)")
 

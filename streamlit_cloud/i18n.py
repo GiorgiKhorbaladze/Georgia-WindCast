@@ -412,6 +412,8 @@ T: dict[str, dict[str, str]] = {
         "en": "Wind energy the day before yesterday, until the same time"},
     "acc_ref_model": {"ka": "საცნობარო მნიშვნელობა მოდელურია: {ref}. ეს არ არის ადგილზე გაზომვასთან შედარება.",
         "en": "The reference is model-based: {ref}. This is not a comparison with on-site measurements."},
+    "copernicus_credit": {"ka": "ERA5: შეიცავს კოპერნიკის კლიმატის ცვლილების სამსახურის (C3S) მოდიფიცირებულ ინფორმაციას",
+        "en": "ERA5: contains modified Copernicus Climate Change Service (C3S) information"},
 }
 
 
