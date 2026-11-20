@@ -36,6 +36,20 @@ from defusedxml import ElementTree as SafeET
 from balance import MAX_MW, parse_balance
 from app.ingestion.gse_parser import GseSchemaError, GseValueError
 
+# GSE's own published list of main interconnection lines ("Data from the Power System" page,
+# https://admin.gse.com.ge/api/en/menu/data-from-the-power-system-224, retrieved 20.11.2026).
+# Name, ISO country code and voltage exactly as published; no geometry, endpoints or operator.
+PUBLISHED_LINES_SOURCE = ("GSE website, 'Data from the Power System' (interconnection lines table), "
+                          "retrieved 2026-11-20")
+PUBLISHED_LINES: dict[str, tuple[str, int]] = {  # line title -> (country, kV)
+    "Alaverdi": ("AM", 220),
+    "Gardabani - 1": ("AZ", 330), "Gardabani - 2": ("AZ", 330), "Mukhranis Velly": ("AZ", 500),
+    "Kavkasioni": ("RU", 500), "Salkhino": ("RU", 220), "Java": ("RU", 110), "Nakaduli": ("RU", 110),
+    "Meskheti": ("TR", 400),  # published with the note "connected through HVDC"
+    "Adjara": ("TR", 220),
+}
+BLOCK_COUNTRY_CODES = {"AZERBAIJAN": "AZ", "ARMENIA": "AM", "RUSSIA": "RU", "TURKEY": "TR"}
+
 CONTRACT_VERSION = "cross_border_flow/v1"
 PARSER_VERSION = "gse-interchange-03m/1"
 BLOCK_SUFFIX = "TIE LINES"
@@ -211,6 +225,31 @@ def persistence_flags(series: Sequence[InterchangeSnapshot], min_periods: int = 
     return flagged
 
 
+def registry_entry(record: TieRecord) -> dict | None:
+    """Published line-list entry for an individual line record, only on an exact name match whose
+    published country agrees with the XML block. Subtotals and unmatched names return None."""
+    if record.kind != "line" or record.identifier not in PUBLISHED_LINES:
+        return None
+    country, kv = PUBLISHED_LINES[record.identifier]
+    if BLOCK_COUNTRY_CODES.get(record.block_country_label) != country:
+        return None
+    return {"line_title": record.identifier, "country": country, "voltage_kv": kv}
+
+
+def line_coverage(snap: InterchangeSnapshot) -> dict[str, dict]:
+    """Per country code: published lines vs lines with an individual record in this file."""
+    out: dict[str, dict] = {}
+    for b in snap.blocks:
+        code = BLOCK_COUNTRY_CODES.get(b.block_country_label)
+        if code is None:
+            continue
+        listed = sorted(n for n, (c, _) in PUBLISHED_LINES.items() if c == code)
+        reported = sorted(r.identifier for r in b.lines if registry_entry(r))
+        out[code] = {"published_lines": listed, "individually_reported": reported,
+                     "not_individually_reported": [n for n in listed if n not in reported]}
+    return out
+
+
 def to_contract(snap: InterchangeSnapshot, persistent: Iterable[str] = ()) -> dict:
     """Contract v1 document (JSON-serialisable). See docs/contracts/cross_border_flow_v1.md."""
     frozen = set(persistent)
@@ -221,6 +260,7 @@ def to_contract(snap: InterchangeSnapshot, persistent: Iterable[str] = ()) -> di
             "mw": round(r.mw, 6), "direction": r.direction,
             "availability": "persistent_value" if r.source_id in frozen else "reported",
             "source_quality": r.quality,
+            "published_line": registry_entry(r),
         }
 
     return {
@@ -249,6 +289,8 @@ def to_contract(snap: InterchangeSnapshot, persistent: Iterable[str] = ()) -> di
             "gross_import_mw": round(snap.gross_import_mw, 6),
             "gross_export_mw": round(snap.gross_export_mw, 6),
         },
+        "line_coverage": line_coverage(snap),
+        "line_registry_source": PUBLISHED_LINES_SOURCE,
         "geometry": None,  # no route or endpoint geometry is published by the source
         "publication": "not_authorized",  # owner + source-rights gate, Issue #18
     }

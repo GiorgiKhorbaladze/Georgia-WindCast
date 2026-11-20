@@ -133,3 +133,29 @@ def test_not_wired_into_collector_archive_or_app():
     for name in ("collector.py", "store.py", "history.py", "app.py", "system_snapshot.py", "data.py"):
         text = (sc / name).read_text("utf-8")
         assert "import interchange" not in text and "from interchange" not in text, name
+
+
+def test_line_records_match_gse_published_line_list_and_coverage_is_explicit():
+    s = ix.parse_interchange(ACT)
+    lines = [r for r in s.records if r.kind == "line"]
+    assert [ix.registry_entry(r) for r in lines] == [
+        {"line_title": "Salkhino", "country": "RU", "voltage_kv": 220},
+        {"line_title": "Java", "country": "RU", "voltage_kv": 110},
+        {"line_title": "Nakaduli", "country": "RU", "voltage_kv": 110},
+    ]
+    assert all(ix.registry_entry(r) is None for r in s.records if r.kind == "subtotal")  # subtotal is no line
+    cov = ix.line_coverage(s)
+    assert cov["RU"]["not_individually_reported"] == ["Kavkasioni"]  # 500 kV line has no record in the file
+    assert cov["AZ"]["individually_reported"] == [] and len(cov["AZ"]["published_lines"]) == 3
+    assert cov["TR"]["published_lines"] == ["Adjara", "Meskheti"] and cov["AM"]["published_lines"] == ["Alaverdi"]
+    doc = ix.to_contract(s)
+    assert doc["line_coverage"] == cov and "retrieved 2026-11-20" in doc["line_registry_source"]
+
+
+def test_registry_never_maps_on_country_mismatch_or_unknown_name():
+    body = ACT.replace(b"B3='Nakaduli'", b"B3='Unknownline'")
+    s = ix.parse_interchange(body)
+    unknown = next(r for r in s.records if r.identifier == "Unknownline")
+    assert ix.registry_entry(unknown) is None
+    moved = ix.TieRecord("TURKEY/line/Java", "TOTAL TURKEY TIE LINES", "TURKEY", "line", "Java", 1.0, "ACT")
+    assert ix.registry_entry(moved) is None  # published country RU != block TR

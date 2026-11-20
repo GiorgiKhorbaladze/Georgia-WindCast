@@ -35,10 +35,38 @@ Consequences:
   unknown row kind, a missing subtotal, a duplicate record, an empty identifier, a non-finite or
   implausible value (|MW| > 10 000) makes the whole file invalid: no partial record is produced.
 
+## 1a. GSE's published line list (country mapping evidence)
+
+GSE's own website ("Data from the Power System", retrieved 20.11.2026 via
+`https://admin.gse.com.ge/api/en/menu/data-from-the-power-system-224`) lists the main interconnection
+lines with country and voltage:
+
+| Country | Line title (as published) | kV | Individual record in the 3-minute XML? |
+|---|---|---|---|
+| AM | Alaverdi | 220 | no (block subtotal only) |
+| AZ | Gardabani - 1 | 330 | no |
+| AZ | Gardabani - 2 | 330 | no |
+| AZ | Mukhranis Velly | 500 | no |
+| RU | Kavkasioni | 500 | **no**, although it is listed |
+| RU | Salkhino | 220 | yes |
+| RU | Java | 110 | yes (persistent value) |
+| RU | Nakaduli | 110 | yes |
+| TR | Meskheti (published note: connected through HVDC) | 400 | no |
+| TR | Adjara | 220 | no |
+
+- The three XML line identifiers match published line titles exactly, and their published country
+  (RU) agrees with the XML block. `published_line` is filled only on such an exact double match.
+- **Coverage is incomplete even in the RUSSIA block**: the 500 kV Kavkasioni line has no record.
+  `line_coverage` lists, per country, published lines and which of them are individually reported.
+- The list gives names, countries and voltages only: no route, endpoint, substation or operator.
+
 ## 2. Identifiers and mapping policy
 
 - `source_id` = `<block_country_label>/<kind>/<identifier>`, e.g. `RUSSIA/line/Nakaduli`,
   `AZERBAIJAN/subtotal/Azerbaij`. Stable across files; built only from published strings.
+- `published_line` (lines only): `{line_title, country, voltage_kv}` from GSE's published list
+  (§1a) when the identifier matches a published title AND the published country matches the block;
+  otherwise `null`. Subtotals never get one.
 - `block_country_label` is the word GSE writes in the block name. It records **how GSE groups the
   records**, not where a line physically runs, which substations it connects, or who operates it.
 - `identifier` is B3 verbatim. No translation, no expansion, no coordinates.
@@ -74,11 +102,16 @@ Consequences:
     {"block": "TOTAL RUSSIA TIE LINES", "block_country_label": "RUSSIA", "lines_published": true,
      "subtotal": {"source_id": "RUSSIA/subtotal/Russia", "mw": 0.0, "direction": "zero", "...": "..."},
      "lines": [{"source_id": "RUSSIA/line/Java", "kind": "line", "identifier": "Java", "mw": 18.299999,
-                "direction": "import", "availability": "persistent_value", "source_quality": "BLS"}],
+                "direction": "import", "availability": "persistent_value", "source_quality": "BLS",
+                "published_line": {"line_title": "Java", "country": "RU", "voltage_kv": 110}}],
      "flow_mw": 32.746205, "subtotal_minus_lines_mw": -32.746205}
   ],
   "national": {"net_from_ties_mw": 1.848239, "net_from_balance_mw": 14.360352, "residual_mw": 12.512113,
                "gross_import_mw": 32.746205, "gross_export_mw": 30.897966},
+  "line_coverage": {"RU": {"published_lines": ["Java", "Kavkasioni", "Nakaduli", "Salkhino"],
+                           "individually_reported": ["Java", "Nakaduli", "Salkhino"],
+                           "not_individually_reported": ["Kavkasioni"]}, "AZ": {"...": "..."}},
+  "line_registry_source": "GSE website, 'Data from the Power System' (interconnection lines table), retrieved 2026-11-20",
   "geometry": null,
   "publication": "not_authorized"
 }
@@ -115,7 +148,8 @@ Field rules:
 ## 6. Guidance for the consumer (frontend)
 
 - Show what exists: four block-level flows (country label as published) and, inside the RUSSIA
-  block, three line records. Do not draw per-line routes for blocks without lines.
+  block, three line records. Listed-but-unreported lines (e.g. Kavkasioni, all AZ/AM/TR lines) may be
+  named from `line_coverage` but must carry no MW value and no flow animation. Do not draw per-line routes for blocks without lines.
 - `persistent_value` records (currently `Java`) need a visible "unchanged value" treatment and no
   "live flow" animation.
 - If the national residual is non-zero, show both numbers or neither; never silently rescale.
