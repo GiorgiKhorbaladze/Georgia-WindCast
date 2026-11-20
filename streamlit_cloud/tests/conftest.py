@@ -39,6 +39,7 @@ def offline_history(request):
         patch("history.HistoryReader.forecast_archive", return_value=[]),
         patch("history.HistoryReader.balance", return_value=[]),
         patch("history.HistoryReader.hist_forecast", return_value=None),
+        patch("wind_history_view.remote_csv", return_value=None),  # monthly archive: bundled seed
     ):
         yield clock
 
