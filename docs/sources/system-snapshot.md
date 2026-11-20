@@ -1,16 +1,28 @@
 # System Map & Live System Snapshot
 
-The Streamlit **System map** refreshes every three minutes. It reads the newest available period in the past 24 hours from `balance/YYYY/MM/YYYY-MM-DD.csv` through the same history reader as **Power system balance**. The page makes no direct requests to GSE, weather services or map tile servers.
+The System map uses a local Streamlit component to place the national wind reading, trend and latest-period controls over an interactive geographic map. Streamlit refreshes the component's data every three minutes. Pan, zoom, fullscreen and playback run in the browser. The component reads the existing balance archive through the same shared reader as **Power system balance** and makes no upstream API or tile requests.
 
-## National readings
+## National readings and playback
 
-- **Consumption, total generation, hydro, thermal, wind and solar** come from the matching national blocks in the GSE three-minute XML export. All cards show average power in MW for one source period. The collector retains full source precision and the cards display two decimals.
-- **Import and export** are separate gross national totals from the existing [balance parser](../../streamlit_cloud/balance.py), based on the signed tie-line readings in that same export. A missing gross value is unavailable. Net interchange does not determine gross flows.
-- The GSE source label and collector retrieval timestamp are separately identified in Tbilisi time. A source label over ten minutes old is stale. When a recent period has missing or non-ACT quality metadata in any of the six national blocks, or a refresh failed, the page treats its quality as unconfirmed. Even a recent label does not establish measurement accuracy. Quality codes, parser version and payload hash stay in the data branch. The balance record has no comparable per-flow quality metadata for gross interchange.
-- Zero remains a recorded value. Missing or non-finite values show a dash and **Unavailable**. When no period is available in the past 24 hours, the map stays usable.
-- **Phase 2 — frequency.** GSE publishes frequency in a separate one-minute export. Frequency is hidden pending a source reliability and reuse review and owner approval for any collection.
+- **Consumption, total generation, hydro, thermal, wind and solar** come from the corresponding national blocks in one GSE three-minute XML export. **Import and export** are the collector's gross national totals from the same period. Values represent average power in **MW**. The reported wind figure is national and has no connection to any wind-site marker.
+- The source label and collector retrieval time are shown separately in Tbilisi time. A source label more than ten minutes old is stale. A recent period with missing or non-ACT quality metadata in any of the six national blocks, or a failed refresh, has unconfirmed quality. Raw quality metadata and payload hashes are retained in the archive and excluded from component messages.
+- Zero displays as zero. Missing readings display as a dash. The signed balance residual is generation + imports − exports − consumption, calculated from unrounded values. Its magnitude is highlighted above 1 MW as a display threshold. A nonzero residual is retained, and a missing term leaves the check unavailable.
+- The trend breaks at gaps. The comparison appears only when both wind readings are present, their quality passes the existing ACT check, and their source labels are exactly three minutes apart. The playback slider selects actual stored periods within the preceding 24 hours. Historical playback is labeled explicitly, skips missing timestamps without filling data, and updates all cards together. Speed changes the presentation interval, independent of the source cadence. **Latest** returns to the refreshed view.
+- Frequency remains out of scope. The separate one-minute GSE export requires a source and permission review before collection.
 
-The cards are periodically refreshed national aggregates. The geographic layers are static reference data. See [GSE source verification](gse.md) and the [Streamlit pipeline](../../streamlit_cloud/README.md).
+## What the authorized tie-line fixtures establish
+
+The [recorded GSE fixtures](../../backend/tests/fixtures/gse) use `B1=AllGeorg`, `EL=P` and `IN=MvAvr03m`. Within tie-line blocks, `B2=Intercha` identifies an individual row and `B2=IntchSum` a subtotal. `B3` carries source identifiers. The tests verify that the signed values used by the existing collector reconcile to the stored gross totals. Positive means into Georgia and negative means out of Georgia. The collector uses individual rows where present and falls back to that block's subtotal where they are absent. Adding both would double-count some blocks.
+
+The two fixtures label Azerbaijan, Armenia, and Turkey through subtotals only. The Russia block contains a zero subtotal and the individual identifiers `Salkhino`, `Java`, and `Nakaduli`. These strings do not verify endpoints or country assignments beyond source block membership. An individual row has a non-ACT quality flag and some subtotal entries are missing individual measurements. The 00:03 Tbilisi fixture also has a −12.512113 MW residual. The source flags and mismatch do not establish a cause by themselves. An offline diagnostic exposes source label, raw block/identifier, row kind, signed MW and quality for reconciliation.
+
+The public archive has no per-line history, independent mapping of GSE identifiers, or comparable per-flow quality fields. Imports and exports panels therefore show national gross totals and say that line-level readings are unavailable. No route, endpoint, line-specific measurement, geographic or schematic flow animation is displayed. No ingestion, archive schema or scheduled workflow was expanded.
+
+If approved line-level collection and independently verified geometry become available, animate only time-qualified, validated directional readings. The motion rate would be illustrative and would have no physical meaning. Historical animation would require actual archived line records for the selected period.
+
+## Browser behavior
+
+The renderer uses bundled SVG and small HTML overlays. It requires neither WebGL nor GPU acceleration. The explicit fullscreen button requests native browser fullscreen when the frame is allowed to do so. Otherwise a same-origin Streamlit frame expands to the viewport. Both retain the camera and playback selection. The exit button restores the previous page, and Escape exits the immersive fallback or is handled by the browser in native mode. The renderer has no required motion or background animation loop.
 
 ## Bundled geographic layers
 
@@ -20,7 +32,7 @@ The cards are periodically refreshed national aggregates. The geographic layers 
 | Reference cities | [Natural Earth 1:10m populated places, v5.1.2](https://github.com/nvkelso/natural-earth-vector/blob/v5.1.2/geojson/ne_10m_populated_places.geojson), four selected points with localized labels | Public domain. Coordinates represent cities at map scale. |
 | Wind sites | The three existing [verified WindCast locations](sites.md), checked on 14 November 2026 | The same representative points and source uncertainties already used by WindCast. Use the focus selector to see uncertainty and provenance. |
 
-All layers are available offline after the application loads. The interactive map requires browser WebGL. The named focus selector and site details are accessible without map hover.
+All geography is bundled. Wind-site details open on click, touch or keyboard activation. The outline and city positions provide geographic context; they do not establish transmission geography.
 
 ## Transmission dataset gap and acquisition options
 

@@ -133,8 +133,9 @@ def main():
         now = source.utcnow()
         reader = history_reader()
         if page == 'system_map':
+            st.markdown('<style>.block-container {max-width:none; padding-inline:clamp(.45rem, 1.6vw, 1.5rem);}</style>',
+                        unsafe_allow_html=True)
             system_snapshot.render(lang, reader, now)
-            st.caption(f"{tr('last_check', lang)} · {local(now)} · {tr('auto_refresh', lang)}")
             return
         cache = source_cache()
         cache.adopt_stored(*reader.weather(now))  # second path when Open-Meteo limits this host
