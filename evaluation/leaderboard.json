@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-20T20:01:56+00:00",
+ "generated_at": "2026-11-20T20:09:26+00:00",
  "contract": "wind_forecast_ledger/v1",
  "candidates": {
   "ridge_icon": "Ridge on as-of ICON wind (streamlit_cloud/mwmodel.py); hourly; needs >= 168 paired hours of archived runs",
