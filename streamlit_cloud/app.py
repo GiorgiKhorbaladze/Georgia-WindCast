@@ -37,6 +37,7 @@ import sitemap  # noqa: E402
 import system_snapshot  # noqa: E402
 import ui  # noqa: E402
 import verification as ver  # noqa: E402
+import wind_history_page  # noqa: E402
 from data import FORECAST, REANALYSIS, SITES, SourceCache, generation_state, weather_state  # noqa: E402
 from history import DATA_BASE, HistoryReader, collector_age  # noqa: E402
 from i18n import tr  # noqa: E402
@@ -46,7 +47,7 @@ reload_guard.stamp(HERE, (BACKEND_APP,))
 st.set_page_config(page_title='Georgia WindCast', page_icon='🌬️', layout='wide')
 TZ = ZoneInfo('Asia/Tbilisi')
 BASEMAP = 'https://tiles.openfreemap.org/styles/dark'  # same basemap as the main product
-PAGES = ('overview', 'system_map', 'balance', 'analytics', 'forecast', 'accuracy', 'data')
+PAGES = ('overview', 'system_map', 'balance', 'analytics', 'wind_history', 'forecast', 'accuracy', 'data')
 STATE_KEY = {'fresh': 'st_fresh', 'stale': 'st_stale', 'unavailable': 'st_unavailable', 'unverified': 'st_unverified'}
 
 
@@ -136,6 +137,9 @@ def main():
             st.markdown('<style>.block-container {max-width:none; padding-inline:clamp(.45rem, 1.6vw, 1.5rem);}</style>',
                         unsafe_allow_html=True)
             system_snapshot.render(lang, reader, now)
+            return
+        if page == 'wind_history':  # monthly energy archive; no live sources involved
+            wind_history_page.render(lang)
             return
         cache = source_cache()
         cache.adopt_stored(*reader.weather(now))  # second path when Open-Meteo limits this host
