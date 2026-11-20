@@ -113,8 +113,10 @@ def pdf_to_layout_text(pdf: bytes, workdir: Path) -> str:
         raise StructureError("pdftotext (poppler-utils) is not installed")
     src = workdir / "doc.pdf"
     src.write_bytes(pdf)
-    run = subprocess.run([exe, "-layout", "-enc", "UTF-8", str(src), "-"], capture_output=True,
-                         timeout=60, check=False)
+    # Fixed argv, no shell: the executable comes from PATH lookup of a constant name and the only
+    # variable argument is the temporary file this function created; the PDF bytes never reach argv.
+    run = subprocess.run(  # nosemgrep: dangerous-subprocess-use-audit
+        [exe, "-layout", "-enc", "UTF-8", str(src), "-"], capture_output=True, timeout=60, check=False)
     if run.returncode != 0:
         raise StructureError(f"pdftotext failed ({run.returncode})")
     return run.stdout.decode("utf-8", errors="strict")
