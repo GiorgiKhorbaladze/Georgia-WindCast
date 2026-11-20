@@ -98,6 +98,48 @@ def parse_balance(payload: bytes):
                               imports=imports, exports=exports, **values)
 
 
+@dataclass(frozen=True, slots=True)
+class TieReading:
+    block: str
+    identifier: str
+    is_subtotal: bool
+    mw: float
+    quality: str
+
+
+def inspect_interchange(payload: bytes):
+    """Return a source label and tie records for offline verification of authorized XML.
+
+    The block and identifier are source strings, not a verified line-to-country registry.
+    This diagnostic does not change the public collector or archive.
+    """
+    label, _ = parse_balance(payload)
+    root = SafeET.fromstring(payload)
+    return label, tuple(_reported_ties(list(root.iterfind("BLOCKS/BLOCK_AREA"))))
+
+
+def _reported_ties(areas):
+    blocks = [b for b in areas if "TIE LINES" in (b.get("Name") or "")]
+    if not blocks:
+        raise GseSchemaError("no tie-line blocks")
+    for block in blocks:
+        name = (block.get("Name") or "").strip()
+        for row in block.iterfind("TA"):
+            kind = (row.get("B2") or "").strip()
+            if ((row.get("EL") or "").strip() != "P" or (row.get("IN") or "").strip() != "MvAvr03m"
+                    or kind not in ("Intercha", "IntchSum")):
+                continue
+            raw = (row.get("VALUE") or "").strip()
+            try:
+                value = float(raw)
+            except ValueError as exc:
+                raise GseValueError(f"non-numeric tie flow {raw!r}") from exc
+            if not math.isfinite(value) or abs(value) > MAX_MW:
+                raise GseValueError(f"implausible tie flow {value}")
+            yield TieReading(name, (row.get("B3") or "").strip(), kind == "IntchSum",
+                             value, (row.get("QUALITY") or "").strip())
+
+
 def _tie_flows(areas) -> tuple[float, float]:
     """Gross import and export (MW) over all tie-line blocks; individual lines preferred."""
     blocks = [b for b in areas if "TIE LINES" in (b.get("Name") or "")]
