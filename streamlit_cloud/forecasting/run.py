@@ -9,6 +9,9 @@
     Rolling-origin replay over the stored history into OUT/backtest (simulated issue time =
     cutoff, labelled as such). Models see only observations up to each cutoff.
 
+``python -m forecasting.run weather --data-dir DATA --out-dir OUT``
+    One batched multi-point weather request, only when the collector saw a new ICON run.
+
 ``python -m forecasting.run evaluate --data-dir DATA --out-dir OUT``
     Scores both ledgers against the GSE observations and writes OUT/evaluation/*.
 
@@ -140,15 +143,34 @@ def cmd_evaluate(data_dir: Path, out: Path, now: datetime, force: bool = False) 
     return {"result": "evaluated", "live_cases": report["live"]["coverage"], "backtest": report["backtest"]["coverage"]}
 
 
+def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
+    import os
+
+    import httpx
+
+    from forecasting import weather_points
+
+    headers = {"Accept": "application/json"}
+    if ua := os.environ.get("WINDCAST_USER_AGENT"):
+        headers["User-Agent"] = ua
+    with httpx.Client(timeout=httpx.Timeout(30.0), headers=headers, follow_redirects=False) as client:
+        def fetch(u: str) -> weather_points.Response:
+            r = client.get(u)
+            return weather_points.Response(r.status_code, r.content)
+        return weather_points.collect(out, data_dir, fetch, now)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate"])
+    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather"])
     ap.add_argument("--data-dir", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--force", action="store_true", help="evaluate even if the last run is recent")
     a = ap.parse_args(argv)
     now = datetime.now(UTC).replace(microsecond=0)
-    if a.cmd == "evaluate":
+    if a.cmd == "weather":
+        result = cmd_weather(a.data_dir, a.out_dir, now)
+    elif a.cmd == "evaluate":
         result = cmd_evaluate(a.data_dir, a.out_dir, now, a.force)
     else:
         result = {"issue": cmd_issue, "backtest": cmd_backtest}[a.cmd](a.data_dir, a.out_dir, now)

@@ -1,9 +1,8 @@
 """Weather predictor contract (Issue #57): variables, candidate points, as-of rules, ablations.
 
-Status: CONTRACT ONLY. The project currently stores ICON wind speed/direction at 80/120 m for
-the three farm sites. Temperature, precipitation, pressure, humidity and the western points
-below are NOT collected: adding them is new upstream ingestion and needs a separate owner
-decision. ``request_plan`` documents exactly what would be requested and how often.
+Collection (owner-approved 20.11.2026): forecasting/weather_points.py requests these variables at
+POINTS in ONE batched Open-Meteo call per new ICON run (the run the GSE collector already
+detected), so there is no extra polling and no duplicate per-point request.
 
 Leakage rule: a model issued at ``issued_at`` may use an NWP run only if the run's
 initialisation time AND the time it was actually retrieved (or provably available) are both
@@ -17,10 +16,16 @@ from dataclasses import dataclass
 from datetime import datetime
 
 VARIABLES = (
-    "wind_speed_80m", "wind_direction_80m", "wind_speed_120m", "wind_direction_120m", "wind_gusts_10m",
     "temperature_2m", "relative_humidity_2m", "precipitation", "rain", "pressure_msl", "surface_pressure",
-    "cloud_cover",
+    "cloud_cover", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m", "wind_speed_80m",
+    "wind_direction_80m", "wind_speed_120m", "wind_direction_120m",
 )
+# Expected units in the provider response; anything else is refused (schema drift).
+UNITS = {"temperature_2m": "°C", "relative_humidity_2m": "%", "precipitation": "mm", "rain": "mm",
+         "pressure_msl": "hPa", "surface_pressure": "hPa", "cloud_cover": "%", "wind_speed_10m": "m/s",
+         "wind_direction_10m": "°", "wind_gusts_10m": "m/s", "wind_speed_80m": "m/s", "wind_direction_80m": "°",
+         "wind_speed_120m": "m/s", "wind_direction_120m": "°"}
+RANGES = {"°C": (-60, 60), "%": (0, 100), "mm": (0, 300), "hPa": (500, 1100), "m/s": (0, 100), "°": (0, 360)}
 
 
 @dataclass(frozen=True)
@@ -32,14 +37,16 @@ class Point:
     role: str  # "upstream" | "target"
 
 
-# Candidate points (to be validated against the chosen model's grid before any collection).
+# Points requested in one batched call per ICON run (forecasting/weather_points.py). The farm points
+# reuse the verified site coordinates (backend/app/sites.py); Ruisi shares Kartli's ICON cell
+# (42.0, 44.0) and is therefore not requested twice.
 POINTS: tuple[Point, ...] = (
     Point("batumi", 41.64, 41.63, "west", "upstream"),
     Point("poti", 42.15, 41.67, "west", "upstream"),
     Point("kutaisi", 42.27, 42.70, "west", "upstream"),
     Point("surami_pass", 42.02, 43.55, "central", "upstream"),
-    Point("gori_kartli", 41.98, 44.11, "east", "target"),
-    Point("ruisi", 42.02, 44.03, "east", "target"),
+    Point("kartli_ruisi", 42.022423, 44.047890, "east", "target"),
+    Point("zemo", 41.895560, 44.370612, "east", "target"),
     Point("tbilisi", 41.72, 44.79, "east", "target"),
 )
 
@@ -77,9 +84,14 @@ def pressure_gradient(west_hpa: float, east_hpa: float) -> float:
     return west_hpa - east_hpa
 
 
-def request_plan(runs_per_day: int = 4, forecast_hours: int = 72) -> dict:
-    """What a future multi-point collection would request (not executed anywhere)."""
+def request_plan(runs_per_day: int = 4, forecast_days: int = 4) -> dict:
+    """Request budget of the batched collection (one data call + two metadata checks per new run).
+
+    ``weighted_calls_*`` is an ESTIMATE assuming Open-Meteo counts each location, and each block of
+    10 variables, as one call; the free tier allows 10,000 calls per day."""
+    per_request = len(POINTS) * math.ceil(len(VARIABLES) / 10)
     return dict(points=len(POINTS), variables=len(VARIABLES), runs_per_day=runs_per_day,
-                hours_per_run=forecast_hours, requests_per_day=runs_per_day,  # one batched call per run
-                values_per_day=len(POINTS) * len(VARIABLES) * forecast_hours * runs_per_day,
-                status="not active - needs owner approval (new upstream ingestion)")
+                forecast_days=forecast_days, http_requests_per_day=runs_per_day * 3,
+                weighted_calls_per_request_estimate=per_request,
+                weighted_calls_per_day_estimate=runs_per_day * (per_request + 2),
+                status="active once per new ICON run (owner-approved 20.11.2026)")

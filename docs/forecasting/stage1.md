@@ -48,11 +48,21 @@ reported as a second score next to the full one.
 (unverified); Ruisi capacity and staged commissioning are not established from an official source.
 Capacity-factor models stay off while any operating capacity is unverified; MW models run.
 
-## Weather predictors
-`forecasting/features.py` defines variables (temperature, precipitation, pressure, humidity, wind,
-gusts, cloud), candidate west/central/east points, as-of run selection and the three ablations
-(local wind / local weather / local + west). Only ICON wind at the three farm sites is collected
-today; the extra variables and points are new ingestion and need a separate owner decision.
+## Weather predictors (collection owner-approved 20.11.2026)
+`forecasting/weather_points.py` stores ICON (`icon_global`) forecasts of temperature, humidity,
+precipitation, rain, sea-level and surface pressure, cloud cover and wind (10/80/120 m, gusts) at
+seven points: Batumi, Poti, Kutaisi (west), Surami pass (central), Kartli/Ruisi cell, Zemo and
+Tbilisi (east).
+
+- One batched request per NEW run, detected from the collector's `weather/forecast_meta.json`
+  (no extra polling); the run is checked against Open-Meteo metadata before and after the request.
+- About 4 data requests and 8 metadata checks a day; estimated weighted calls < 100/day (free tier
+  10,000/day). After a 429 or other failure, no request for one hour.
+- Stored as the exact response (gzip) with SHA-256, run time, retrieval time and the grid cell of
+  every point; points resolving to the same cell are listed (not independent predictors).
+- As-of rule: a model issued at T uses a run only if run <= T and retrieved <= T.
+- Hypothesis (west precipitation vs. east wind) and ablations (local wind / local weather /
+  local + west) are evaluated in the challenger stage; nothing is assumed in advance.
 
 ## Monthly
 `forecasting/monthly.py`: per-station same-month Q10/Q50/Q90 from >= 5 comparable years (the
