@@ -108,3 +108,17 @@ def test_audited_1712_period_preserves_all_eight_values_and_signed_difference():
     }
     assert period["residual"] == pytest.approx(16.968126)
     assert row.hydro_mw + row.thermal_mw + row.wind_mw + row.solar_mw - row.generation_mw == pytest.approx(.243600)
+
+
+def test_line_level_panels_are_gated_off_in_production():
+    # Issue #49 / contract v1: production sends no cross-border document; the frontend renders
+    # per-block records only for a same-period document with publication == "authorized".
+    import system_snapshot
+    assert system_snapshot.CROSS_BORDER_ENABLED is False
+    with patch("history.HistoryReader.balance", return_value=[ROW]), patch("system_snapshot.MAP") as mount:
+        run("system_map", "en")
+    assert mount.call_args.kwargs["cross_border"] is None
+    js = (Path(system_snapshot.__file__).parent / "system_map_frontend/map.js").read_text("utf-8")
+    assert 'doc.publication !== "authorized"' in js and 'doc.contract !== "cross_border_flow/v1"' in js
+    assert "docTime === period.time" in js  # never a document from another period
+    assert "<path" not in js.split("function crossBorder")[1].split("function linkHighlight")[0]  # no routes drawn

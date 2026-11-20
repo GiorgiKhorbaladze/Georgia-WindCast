@@ -450,7 +450,7 @@ def test_deep_backfill_stops_after_a_day_of_404s(tmp_path):
     collector(tmp_path, gse, hours=1).run(NOW)
     done = False
     for i in range(60):
-        Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(seconds=i + 1))
+        Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(hours=i, seconds=1))
         deep = json.loads((tmp_path / "status/gse_collector.json").read_text())["deep_backfill"]
         if deep["done"]:
             done = True
@@ -597,7 +597,7 @@ def test_wind_gap_older_than_the_window_is_repaired_newest_first_and_bounded(tmp
     assert report.repair_requested == 8 and report.repair_inserted == 8  # bounded per run
     assert set(GAP[-8:]) <= stored_labels(tmp_path) and not set(GAP[:12]) & stored_labels(tmp_path)  # newest first
     for i in range(3):
-        Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=8).run(NOW + timedelta(seconds=10 + i))
+        Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=8).run(NOW + timedelta(hours=1 + i, seconds=10))
     assert set(GAP) <= stored_labels(tmp_path)
 
 
@@ -647,7 +647,7 @@ def test_earlier_one_shot_state_is_migrated_to_rechecks(tmp_path):
     path.write_text(json.dumps(status))
     gse = Gse()
     assert _run(tmp_path, gse, NOW + timedelta(minutes=10)).repair_requested == 0  # counted as one 404 at updated_at
-    r = _run(tmp_path, gse, NOW + timedelta(hours=1, minutes=1))
+    r = _run(tmp_path, gse, NOW + timedelta(hours=1, minutes=6))  # next hourly extra slot
     assert r.repair_inserted == 1 and GAP[0] in stored_labels(tmp_path)
     assert "not_published" not in json.loads(path.read_text())["gap_repair"]
 
@@ -657,3 +657,30 @@ def test_gap_repair_is_off_in_steady_state_helper_and_without_a_cursor(tmp_path)
     _drop(tmp_path, "balance", GAP)
     report, _ = Collector(tmp_path, Gse().client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(seconds=5))
     assert report.repair_requested == 0  # no deep cursor yet: the deep walk itself covers older periods first
+
+
+def test_extra_requests_run_at_most_hourly_with_a_15_minute_trigger(tmp_path):
+    # cron-job.org fires every 15 min since 19.11.2026; deep backfill and gap repair must not scale with it
+    _six_hours_with_cursor(tmp_path)
+    path = tmp_path / "status/gse_collector.json"
+    status = json.loads(path.read_text())
+    status["deep_backfill"]["done"] = False
+    path.write_text(json.dumps(status))
+    gse = Gse()
+    runs = [Collector(tmp_path, gse.client, lookback_hours=1, deep_per_run=20).run(NOW + timedelta(minutes=15 * k))[0]
+            for k in range(8)]  # two hours of 15-minute triggers
+    extra = [r.deep_requested + r.repair_requested for r in runs]
+    assert extra[0] > 0 and extra[4] > 0  # t = 0 min and t = 60 min
+    assert extra[1] == extra[2] == extra[3] == 0 and extra[5] == extra[6] == extra[7] == 0
+    assert all(r.failures == 0 for r in runs)
+
+
+def test_daily_request_volume_with_15_minute_trigger_stays_near_the_envelope(tmp_path):
+    from collector import DEEP_PER_RUN
+    gse = Gse()
+    collector(tmp_path, gse, hours=12, max_requests=300).run(NOW)
+    gse.requests.clear()
+    for k in range(1, 97):  # one day of 15-minute triggers, steady state
+        Collector(tmp_path, gse.client, lookback_hours=12, deep_per_run=DEEP_PER_RUN).run(NOW + timedelta(minutes=15 * k))
+    # new periods (~480) + revalidation + at most 24 x (deep 20 + repair 20); was ~4,700 before the hourly gate
+    assert len(gse.requests) <= 480 + 96 * 4 + 24 * 2 * DEEP_PER_RUN

@@ -1,0 +1,108 @@
+name: Monitor GSE monthly wind history
+
+# Issue #52. Independent of collect-gse.yml (the 15-minute 3-minute-MW collector): own script,
+# own state file (history/monitor_state.json) and its own failure status. It only shares the
+# `collect-gse` concurrency group so the two never push to the `data` branch at the same time.
+#
+# The daily wake-up is cheap: GSE is contacted only when >= 20 days have passed since the
+# previous attempt (persisted); otherwise the run logs `skipped_not_due` and makes no request.
+#
+# Pause switch: set the repository variable HISTORY_MONITOR_PAUSED to "true" to stop the
+# scheduled runs (Settings > Secrets and variables > Actions > Variables). Manual runs below
+# always work.
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = obey the 20-day gate; force_check = check now; approve = approve pending values"
+        type: choice
+        options: [check, force_check, approve]
+        default: check
+      approve_through:
+        description: "approve: highest revision id to approve (see history/wind_monthly.csv)"
+        default: ""
+      reason:
+        description: "approve: reason recorded in the revision ledger"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: collect-gse
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    if: github.event_name == 'workflow_dispatch' || vars.HISTORY_MONITOR_PAUSED != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write  # repository-scoped permission; the script writes history/ on the data branch
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          path: code
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.11.32"
+      - name: Install dependencies (pinned) and pdftotext
+        run: |
+          uv venv -p 3.12 venv
+          uv pip install -p venv -r code/streamlit_cloud/collector-requirements.txt
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends poppler-utils
+      - name: Check out the data branch
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git init -q data && cd data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://github.com/$REPO.git"
+          git -c http.extraheader="$auth" fetch -q --depth 1 origin data
+          git checkout -q -b data FETCH_HEAD
+      - name: Run
+        id: run
+        env:
+          MODE: ${{ github.event.inputs.mode || 'check' }}
+          THROUGH: ${{ github.event.inputs.approve_through }}
+          REASON: ${{ github.event.inputs.reason }}
+        run: |
+          set +e
+          case "$MODE" in
+            check) venv/bin/python code/streamlit_cloud/history_monitor.py check --data-dir data ;;
+            force_check) venv/bin/python code/streamlit_cloud/history_monitor.py check --data-dir data --force ;;
+            approve)
+              case "$THROUGH" in ''|*[!0-9]*) echo "approve_through must be an integer"; exit 1;; esac
+              [ -n "$REASON" ] || { echo "reason is required"; exit 1; }
+              venv/bin/python code/streamlit_cloud/history_monitor.py approve --data-dir data \
+                --through "$THROUGH" --reason "$REASON" ;;
+            *) echo "unknown mode"; exit 1 ;;
+          esac
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+      - name: Commit and push history/ (only when something changed)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd data
+          git add -A history
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -q -m "GSE monthly wind history $(date -u +%Y-%m-%dT%H:%MZ)"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          for i in 1 2 3 4; do
+            git -c http.extraheader="$auth" push -q origin data && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
+      - name: Fail visibly on a refused document or unreachable source
+        if: steps.run.outputs.code != '0'
+        env:
+          CODE: ${{ steps.run.outputs.code }}
+        run: |
+          echo "history monitor exit code $CODE (1 = document refused or download failed, 2 = page unreachable)"
+          exit 1
