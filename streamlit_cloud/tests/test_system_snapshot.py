@@ -60,11 +60,23 @@ def test_signed_line_and_subtotal_reconcile_with_collector(file):
     wind = parse_wind_export(body)
     assert label == same_label == wind.period_label_utc
     assert balance.wind == wind.value_mw
+    expected = {
+        "real_act_15112026_0009.xml": (1075.829346, 313.713287, 73.599297, 0, 1463.141968, 1536.535400,
+                                     73.393583, 0),
+        "real_nre_15112026_0003.xml": (1171.450562, 313.832825, 91.333824, 0, 1583.024292, 1597.384644,
+                                     32.746205, 30.897966),
+    }
+    assert tuple(getattr(balance, field) for field in (*BLOCKS, "imports", "exports")) == pytest.approx(
+        expected[file.name], abs=1e-8, rel=0
+    )
     identifiers = [(row.block, row.identifier, row.is_subtotal) for row in ties]
     assert all(row.identifier for row in ties) and len(identifiers) == len(set(identifiers))
     russia = [row for row in ties if "RUSSIA" in row.block]
     assert {row.identifier for row in russia if not row.is_subtotal} == {"Salkhino", "Java", "Nakaduli"}
-    assert any(row.is_subtotal for row in russia)
+    subtotal, = (row for row in russia if row.is_subtotal)
+    assert subtotal.mw == 0
+    assert sum(row.mw for row in russia if not row.is_subtotal) > 32
+    assert len([row for row in ties if not row.is_subtotal]) == 3
     assert any(row.identifier == "Java" and row.quality == "BLS" for row in russia)
     line_blocks = {row.block for row in ties if not row.is_subtotal}
     signed = [row.mw for row in ties if not row.is_subtotal or row.block not in line_blocks]
@@ -75,3 +87,24 @@ def test_signed_line_and_subtotal_reconcile_with_collector(file):
         assert residual == pytest.approx(-12.512113)
     else:
         assert residual == pytest.approx(0, abs=.01)
+
+
+def test_audited_1712_period_preserves_all_eight_values_and_signed_difference():
+    # Archived aggregate row from data commit ae1fe3f, 20 November 2026 17:12 Tbilisi.
+    label = LABEL.replace(day=20, hour=13, minute=12)
+    row = replace(
+        ROW, period_label_utc=label, period_label_local="20.11.2026 17:12:00",
+        retrieved_at_utc=label + timedelta(minutes=3, seconds=34),
+        hydro_mw=1602.259766, thermal_mw=424.108429, wind_mw=-0.071, solar_mw=8.629999,
+        generation_mw=2034.683594, consumption_mw=2025.301025, import_mw=18.299999,
+        export_mw=10.714442, quality="hydro:NRE;thermal:SUB;wind:ACT;solar:SUB;generation:NRE;consumption:NRE",
+    )
+    period, = period_payload([row], label + timedelta(minutes=4), False)
+    assert period["label"] == "20.11.2026 17:12:00"
+    assert period["retrieved"] == "20.11.2026 17:15:34"
+    assert period["status"] == "unconfirmed" and period["wind_confirmed"]
+    assert period["values"] == {
+        name: getattr(row, f"{name}_mw") for name in (*BLOCKS, "import", "export")
+    }
+    assert period["residual"] == pytest.approx(16.968126)
+    assert row.hydro_mw + row.thermal_mw + row.wind_mw + row.solar_mw - row.generation_mw == pytest.approx(.243600)

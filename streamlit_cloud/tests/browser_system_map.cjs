@@ -38,12 +38,18 @@ async function exercise(browser, dimensions, english, fallback) {
   assert.equal(await frame.locator('#national .metric').count(), 4);
   assert.equal(await frame.locator('#mix .metric').count(), 4);
   assert.equal(await frame.locator('.exchanges article').count(), 2);
+  const differenceLabel = english ? 'Difference between published balance figures' : 'გამოქვეყნებული მაჩვენებლების შეუსაბამობა';
+  if (await frame.locator('#closure-note').isVisible()) {
+    assert((await frame.locator('#closure').innerText()).startsWith(differenceLabel));
+    assert.match(await frame.locator('#closure').innerText(), / · [+-]?[\d,.]+ MW$/);
+  }
   assert(await stage.evaluate(node => node.ownerDocument.documentElement.scrollWidth <= node.ownerDocument.defaultView.innerWidth));
   const language = english ? 'en' : 'ka';
   const viewport = fallback ? 'mobile' : 'desktop';
   if (output) await stage.screenshot({path: path.join(output, language + '-' + viewport + '.png')});
-  if (output && english) {
-    await frame.locator('.exchanges').screenshot({path: path.join(output, 'exchange-panels-' + viewport + '.png')});
+  if (output) {
+    const prefix = english ? 'exchange-panels-' : 'ka-exchange-panels-';
+    await frame.locator('.details').screenshot({path: path.join(output, prefix + viewport + '.png')});
   }
 
   const resized = {width: dimensions.width, height: dimensions.height + 120};
@@ -136,28 +142,44 @@ async function exercise(browser, dimensions, english, fallback) {
   }
   // Inject test-only presentations after testing the original archive-backed view.
   if (english && !fallback) {
-    const snapshot = await stage.evaluate(() => ({
-      lang: data.lang, outline: data.outline, cities: data.cities, sites: data.sites,
-      refresh_failed: false,
-      periods: [{
+    const scenarios = await stage.evaluate(() => {
+      const original = data;
+      const sample = {
         ...data.periods.at(-1), time: 0, status: 'unconfirmed', wind_confirmed: false,
         values: {wind: 0, import: null}, residual: null,
-      }],
-    }));
-    const send = args => page.evaluate(value => {
-      const frame = document.querySelector('iframe[title$=".system_map"]');
-      frame.contentWindow.postMessage({type: 'streamlit:render', args: value}, location.origin);
-    }, args);
-    await send(snapshot);
-    await frame.locator('#mode[data-status="stale"]').waitFor();
-    assert.equal(await frame.locator('#wind').innerText(), '0');
-    assert(await frame.locator('#wind-quality').isVisible());
-    assert.equal(await frame.locator('#imports strong').innerText(), '—');
-    assert.equal(await frame.locator('#closure').innerText(), 'Balance check unavailable');
-    await send({...snapshot, periods: []});
-    await frame.locator('#mode[data-status="unavailable"]').waitFor();
-    assert.equal(await frame.locator('#wind').innerText(), '—');
-    assert(await frame.locator('#play').isDisabled());
+      };
+      const inspect = periods => {
+        render({...original, refresh_failed: false, periods});
+        const doc = document;
+        return {
+          state: doc.querySelector('#mode').dataset.status,
+          wind: doc.querySelector('#wind').innerText,
+          provisional: !doc.querySelector('#wind-quality').hidden,
+          imports: doc.querySelector('#imports strong').innerText,
+          closure: doc.querySelector('#closure').innerText,
+          note: doc.querySelector('#closure-note').hidden ? null : doc.querySelector('#closure-note').innerText,
+          playbackDisabled: doc.querySelector('#play').disabled,
+        };
+      };
+      try {
+        return {
+          difference: inspect([{...sample, residual: 16.968126}]),
+          missing: inspect([sample]),
+          empty: inspect([]),
+        };
+      } finally { render(original); }
+    });
+    assert.equal(scenarios.difference.closure, differenceLabel + ' · +16.97 MW');
+    assert.match(scenarios.difference.note, /Arithmetic comparison only/);
+    assert.equal(scenarios.missing.state, 'stale');
+    assert.equal(scenarios.missing.wind, '0');
+    assert(scenarios.missing.provisional);
+    assert.equal(scenarios.missing.imports, '—');
+    assert.equal(scenarios.missing.closure, 'Balance check unavailable');
+    assert.equal(scenarios.missing.note, null);
+    assert.equal(scenarios.empty.state, 'unavailable');
+    assert.equal(scenarios.empty.wind, '—');
+    assert(scenarios.empty.playbackDisabled);
   }
   assert.deepEqual(errors, []);
   console.log(language, viewport, mode, 'passed', 'map ready in', bootMs, 'ms');

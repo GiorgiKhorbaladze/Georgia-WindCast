@@ -7,7 +7,9 @@ const words = {
     expand: "⛶ Fullscreen", exit: "⛶ Exit fullscreen", latest: "Latest", play: "Play", pause: "Pause",
     historical: "Historical playback", recent: "Recent source period", unconfirmed: "Quality unconfirmed",
     stale: "Stale reading", unavailable: "Unavailable", trend: "24 h wind trend", source: "GSE source time",
-    retrieved: "Retrieved", balance: "National balance", closure: "Generation + imports − exports − consumption",
+    retrieved: "Retrieved", balance: "National balance", closure: "Difference between published balance figures",
+    closureFormula: "Generation + imports − exports − consumption",
+    closureNote: "Arithmetic comparison only. Measuring grid imbalance requires separate system data.",
     missingClosure: "Balance check unavailable", provenance: "Sources and limitations",
     lines: "National gross total. Verified line-level records are unavailable.",
     zoomIn: "Zoom in", zoomOut: "Zoom out", reset: "Reset map", map: "Georgia geographic reference map",
@@ -21,7 +23,9 @@ const words = {
     expand: "⛶ სრულ ეკრანზე", exit: "⛶ გამოსვლა", latest: "უახლესი", play: "გაშვება", pause: "პაუზა",
     historical: "ისტორიული ჩანაწერები", recent: "ბოლო პერიოდი", unconfirmed: "ხარისხი დაუდასტურებელია",
     stale: "მოძველებული", unavailable: "მიუწვდომელია", trend: "ქარი · 24 სთ", source: "GSE-ის წყაროს დრო",
-    retrieved: "მიღების დრო", balance: "ეროვნული ბალანსი", closure: "გენერაცია + იმპორტი − ექსპორტი − მოხმარება",
+    retrieved: "მიღების დრო", balance: "ეროვნული ბალანსი", closure: "გამოქვეყნებული მაჩვენებლების შეუსაბამობა",
+    closureFormula: "გენერაცია + იმპორტი − ექსპორტი − მოხმარება",
+    closureNote: "ეს არითმეტიკული შედარებაა. სისტემის ფიზიკური დისბალანსის დასადგენად ცალკე გაზომვებია საჭირო.",
     missingClosure: "ბალანსის შემოწმება მიუწვდომელია", provenance: "წყაროები და შეზღუდვები",
     lines: "ეროვნული ჯამი. ხაზების მიხედვით გადამოწმებული მონაცემები მიუწვდომელია.",
     zoomIn: "გადიდება", zoomOut: "შემცირება", reset: "რუკის აღდგენა", map: "საქართველოს საცნობარო რუკა",
@@ -166,8 +170,13 @@ function readings() {
   el("national").replaceChildren(...["consumption", "generation", "import", "export"].map(k => metric(k, values[k])));
   el("mix").replaceChildren(...["hydro", "thermal", "wind", "solar"].map(k => metric(k, values[k])));
   text("retrieved", t("retrieved") + " · " + localTime(period?.retrieved));
-  text("closure", Number.isFinite(period?.residual) ? t("closure") + " = " + fmt(period.residual) : t("missingClosure"));
-  el("closure").dataset.mismatch = String(Number.isFinite(period?.residual) && Math.abs(period.residual) > 1);
+  const residual = period?.residual;
+  const hasBalance = Number.isFinite(residual);
+  const signedDifference = hasBalance && residual >= .005 ? "+" + fmt(residual) : fmt(residual);
+  text("closure", hasBalance ? t("closure") + " · " + signedDifference : t("missingClosure"));
+  el("closure").title = hasBalance ? t("closureFormula") : "";
+  text("closure-note", t("closureNote"));
+  el("closure-note").hidden = !hasBalance;
   interchange("imports", "import", period);
   interchange("exports", "export", period);
   const slider = el("time");

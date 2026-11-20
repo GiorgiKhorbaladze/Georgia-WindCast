@@ -6,7 +6,7 @@ The System map uses a local Streamlit component to place the national wind readi
 
 - **Consumption, total generation, hydro, thermal, wind and solar** come from the corresponding national blocks in one GSE three-minute XML export. **Import and export** are the collector's gross national totals from the same period. Values represent average power in **MW**. The reported wind figure is national and has no connection to any wind-site marker.
 - The source label and collector retrieval time are shown separately in Tbilisi time. A source label more than ten minutes old is stale. A recent period with missing or non-ACT quality metadata in any of the six national blocks, or a failed refresh, has unconfirmed quality. Raw quality metadata and payload hashes are retained in the archive and excluded from component messages.
-- Zero displays as zero. Missing readings display as a dash. The signed balance residual is generation + imports − exports − consumption, calculated from unrounded values. Its magnitude is highlighted above 1 MW as a display threshold. A nonzero residual is retained, and a missing term leaves the check unavailable.
+- Zero displays as zero. Missing readings display as a dash. The signed balance residual is generation + imports − exports − consumption, calculated from unrounded values. The interface labels this as a difference between published balance figures and explains that a physical imbalance requires separate measurements. A nonzero difference is retained, and a missing term leaves the check unavailable.
 - The trend breaks at gaps. The comparison appears only when both wind readings are present, their quality passes the existing ACT check, and their source labels are exactly three minutes apart. The playback slider selects actual stored periods within the preceding 24 hours. Historical playback is labeled explicitly, skips missing timestamps without filling data, and updates all cards together. Speed changes the presentation interval, independent of the source cadence. **Latest** returns to the refreshed view.
 - Frequency remains out of scope. The separate one-minute GSE export requires a source and permission review before collection.
 
@@ -19,6 +19,8 @@ The two fixtures label Azerbaijan, Armenia, and Turkey through subtotals only. T
 The public archive has no per-line history, independent mapping of GSE identifiers, or comparable per-flow quality fields. Imports and exports panels therefore show national gross totals and say that line-level readings are unavailable. No route, endpoint, line-specific measurement, geographic or schematic flow animation is displayed. No ingestion, archive schema or scheduled workflow was expanded.
 
 If approved line-level collection and independently verified geometry become available, animate only time-qualified, validated directional readings. The motion rate would be illustrative and would have no physical meaning. Historical animation would require actual archived line records for the selected period.
+
+See the [pinned archive reconciliation and original XML evidence](../evidence/premium-system-map/reconciliation.md) for audited periods, the reproduced statistics and source access limits.
 
 ## Release and data acquisition gates
 
