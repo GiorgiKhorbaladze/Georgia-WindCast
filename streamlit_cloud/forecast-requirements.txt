@@ -1,0 +1,8 @@
+# Forecast issuing/evaluation job only (GitHub Actions, .github/workflows/forecast.yml).
+# Same pins as requirements.txt / collector-requirements.txt; update in a reviewed PR.
+numpy==2.5.5
+pandas==2.3.3
+httpx==0.28.1
+defusedxml==0.7.1
+pydantic==2.12.4
+tzdata==2026.6
