@@ -20,6 +20,12 @@ The public archive has no per-line history, independent mapping of GSE identifie
 
 If approved line-level collection and independently verified geometry become available, animate only time-qualified, validated directional readings. The motion rate would be illustrative and would have no physical meaning. Historical animation would require actual archived line records for the selected period.
 
+## Release and data acquisition gates
+
+The Streamlit README records owner-reported authorization for the existing aggregate use. [Issue #18](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/issues/18) still tracks written GSE terms for automated retrieval and public redistribution, and this review did not locate those written terms. The scope of any existing permission should be confirmed before a public rollout. The PR uses the same archive and activates no collection or publication.
+
+Before a line-level phase, get written approval for public line readings and independently reusable geometry. Define a reviewed registry mapping stable source identifiers to named interconnections and neighboring countries. Establish source completeness and quality semantics, including how absent, substituted, duplicate and subtotal-only records are handled. Persist per-line records separately from the existing backwards-compatible national series, with source period, signed MW, quality, source revision and provenance. Reconcile each archived period, preserve discrepancies, and publish animation only for approved, geographically corroborated lines with confirmed readings. Historic periods without line records must remain empty.
+
 ## Browser behavior
 
 The renderer uses bundled SVG and small HTML overlays. It requires neither WebGL nor GPU acceleration. The explicit fullscreen button requests native browser fullscreen when the frame is allowed to do so. Otherwise a same-origin Streamlit frame expands to the viewport. Both retain the camera and playback selection. The exit button restores the previous page, and Escape exits the immersive fallback or is handled by the browser in native mode. The renderer has no required motion or background animation loop.

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from balance import BLOCKS, inspect_interchange, parse_balance
+from app.ingestion.gse_parser import parse_wind_export
 from store import BalanceRecord
 from system_snapshot import period_payload, snapshot_badge
 from test_pages import NOW, run
@@ -56,7 +57,11 @@ def test_signed_line_and_subtotal_reconcile_with_collector(file):
     body = file.read_bytes()
     label, ties = inspect_interchange(body)
     same_label, balance = parse_balance(body)
-    assert label == same_label
+    wind = parse_wind_export(body)
+    assert label == same_label == wind.period_label_utc
+    assert balance.wind == wind.value_mw
+    identifiers = [(row.block, row.identifier, row.is_subtotal) for row in ties]
+    assert all(row.identifier for row in ties) and len(identifiers) == len(set(identifiers))
     russia = [row for row in ties if "RUSSIA" in row.block]
     assert {row.identifier for row in russia if not row.is_subtotal} == {"Salkhino", "Java", "Nakaduli"}
     assert any(row.is_subtotal for row in russia)

@@ -153,7 +153,9 @@ function readings() {
   text("wind", mw(values.wind));
   el("wind").nextElementSibling.hidden = !Number.isFinite(values.wind);
   text("source-time", t("source") + " · " + localTime(period?.label));
-  el("wind").title = period && !period.wind_confirmed ? t("windUnconfirmed") : "";
+  const windUnconfirmed = Boolean(period && Number.isFinite(values.wind) && !period.wind_confirmed);
+  text("wind-quality", t("windUnconfirmed"));
+  el("wind-quality").hidden = !windUnconfirmed;
   text("trend-label", t("trend"));
   const comparable = prev && period.time - prev.time === 180 && period.wind_confirmed && prev.wind_confirmed &&
     Number.isFinite(values.wind) && Number.isFinite(prev.values.wind);
@@ -297,10 +299,19 @@ el("expand").onclick = async () => {
   fullscreenLabel();
 };
 document.addEventListener("fullscreenchange", fullscreenLabel);
-document.addEventListener("keydown", event => {
-  if (event.key === "Escape" && fallback) { immersive(false); fullscreenLabel(); }
+document.addEventListener("keydown", async event => {
+  if (event.key !== "Escape") return;
+  if (fallback) {
+    immersive(false);
+    fullscreenLabel();
+  } else if (document.fullscreenElement === stage) {
+    await document.exitFullscreen();
+  }
 });
-window.addEventListener("pagehide", () => immersive(false));
+window.addEventListener("pagehide", () => {
+  immersive(false);
+  if (sameOriginParent) sameOriginParent.removeEventListener("resize", resize);
+});
 
 function resize() {
   const mobile = innerWidth < 590;
@@ -337,6 +348,14 @@ window.addEventListener("message", event => {
     render(event.data.args);
   }
 });
+// A height-only change in the host window may leave the iframe dimensions untouched.
+let sameOriginParent = null;
+try {
+  if (window.parent !== window && window.parent.location.origin === location.origin) {
+    sameOriginParent = window.parent;
+    sameOriginParent.addEventListener("resize", resize);
+  }
+} catch { /* native fullscreen and child resize remain available */ }
 new ResizeObserver(resize).observe(document.querySelector("main"));
 window.addEventListener("resize", resize);
 setInterval(() => { if (timer === null && data.periods.length) readings(); }, 30000);
