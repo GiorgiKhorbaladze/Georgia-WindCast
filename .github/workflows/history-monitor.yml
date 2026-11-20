@@ -4,20 +4,19 @@ name: Monitor GSE monthly wind history
 # own state file (history/monitor_state.json) and its own failure status. It only shares the
 # `collect-gse` concurrency group so the two never push to the `data` branch at the same time.
 #
-# The daily wake-up is cheap: GSE is contacted only when >= 72 hours have passed since the
+# The daily wake-up is cheap: GSE is contacted only when >= 20 days have passed since the
 # previous attempt (persisted); otherwise the run logs `skipped_not_due` and makes no request.
 #
-# OWNER GATE: scheduled runs do nothing unless the repository variable
-# HISTORY_MONITOR_ENABLED is set to "true" (Settings > Secrets and variables > Actions >
-# Variables). Leave it unset until GSE reuse rights are confirmed (Issue #18) and the owner
-# authorises automated retrieval. Manual runs below are explicit owner actions.
+# Pause switch: set the repository variable HISTORY_MONITOR_PAUSED to "true" to stop the
+# scheduled runs (Settings > Secrets and variables > Actions > Variables). Manual runs below
+# always work.
 on:
   schedule:
     - cron: "41 3 * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = obey the 72 h gate; force_check = check now; approve = approve pending values"
+        description: "check = obey the 20-day gate; force_check = check now; approve = approve pending values"
         type: choice
         options: [check, force_check, approve]
         default: check
@@ -37,7 +36,7 @@ concurrency:
 
 jobs:
   monitor:
-    if: github.event_name == 'workflow_dispatch' || vars.HISTORY_MONITOR_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' || vars.HISTORY_MONITOR_PAUSED != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

@@ -1,4 +1,4 @@
-"""Issue #52 backend: workbook import, archive/ledger, GSE PDF parsing and the 72-hour monitor.
+"""Issue #52 backend: workbook import, archive/ledger, GSE PDF parsing and the 20-day monitor.
 
 Offline only. PDF tests use trimmed ``pdftotext -layout`` extracts of the genuine GSE yearly
 balance PDFs (2016 dot-decimal, 2020 comma-decimal, 2026 multi-station with a wind total row);
@@ -309,16 +309,16 @@ def test_monitor_first_run_verifies_seed_and_stages_new_months(tmp_path):
     assert len(state["last_page_sha256"]) == 64
 
 
-def test_monitor_skips_without_any_request_before_72_hours(tmp_path):
+def test_monitor_skips_without_any_request_before_20_days(tmp_path):
     fake = FakeGSE({2026: text(2026)})
     run(tmp_path, fake, T0)
     fake.calls.clear()
-    report = run(tmp_path, fake, T0 + timedelta(hours=71, minutes=59))
+    report = run(tmp_path, fake, T0 + timedelta(days=19, hours=23, minutes=59))
     assert report["result"] == "skipped_not_due" and fake.calls == []
-    assert run(tmp_path, fake, T0 + timedelta(hours=72))["result"] == "checked"
+    assert run(tmp_path, fake, T0 + timedelta(days=20))["result"] == "checked"
 
 
-def test_failed_attempt_also_starts_the_72_hour_wait(tmp_path):
+def test_failed_attempt_also_starts_the_20_day_wait(tmp_path):
     fake = FakeGSE({})
     fake.page_status = 403
     assert run(tmp_path, fake, T0)["result"].startswith("discovery_failed")
@@ -333,7 +333,7 @@ def test_unchanged_documents_use_conditional_requests_and_change_nothing(tmp_pat
     run(tmp_path, fake, T0)
     before = (tmp_path / "history" / "wind_monthly_revisions.csv").read_text()
     fake.calls.clear()
-    report = run(tmp_path, fake, T0 + timedelta(hours=73))
+    report = run(tmp_path, fake, T0 + timedelta(days=21))
     assert report["documents"]["2026"] == gb.UNCHANGED and report["changes"] == {}
     sent = dict(fake.calls)[next(u for u, y in fake.urls.items() if y == 2026)]
     assert "If-None-Match" in sent and "If-Modified-Since" in sent
@@ -344,7 +344,7 @@ def test_republished_document_revising_earlier_month_is_held_for_approval(tmp_pa
     fake = FakeGSE({2020: text(2020)})
     run(tmp_path, fake, T0)
     fake.texts[2020] = text(2020).replace("7,91", "8,91").replace("90,8", "91,8")
-    report = run(tmp_path, fake, T0 + timedelta(days=3))
+    report = run(tmp_path, fake, T0 + timedelta(days=20))
     assert report["documents"]["2020"] == gb.UPDATED
     assert report["changes"].get("revision_pending") == 1
     assert report["flags"] and "2020-01" in report["flags"][0]
@@ -371,7 +371,7 @@ def test_document_removed_from_page_is_reported_missing_and_data_kept(tmp_path):
     fake = FakeGSE({2026: text(2026)})
     run(tmp_path, fake, T0)
     fake.page["data"]["contents"][0]["files"] = [f for f in fake.page["data"]["contents"][0]["files"] if f["name"] != "2026"]
-    report = run(tmp_path, fake, T0 + timedelta(days=3))
+    report = run(tmp_path, fake, T0 + timedelta(days=20))
     assert report["documents"]["2026"] == gb.MISSING
     archive, _ = gb.load_archive(tmp_path / "history", SEED)
     assert archive.records[("kartli-gori", 2026, 7)].verification_status == wh.VERIFIED
@@ -391,7 +391,7 @@ def test_incomplete_archive_is_not_reseeded(tmp_path):
 
 def test_workflow_is_owner_gated_and_separate_from_collector():
     wf = (HERE.parents[1] / ".github" / "workflows" / "history-monitor.yml").read_text(encoding="utf-8")
-    assert "vars.HISTORY_MONITOR_ENABLED == 'true'" in wf  # schedule does nothing until enabled
+    assert "vars.HISTORY_MONITOR_PAUSED != 'true'" in wf  # owner pause switch
     assert "history_monitor.py check" in wf and "collector.py" not in wf
     assert "group: collect-gse" in wf and "cancel-in-progress: false" in wf  # never push concurrently
     assert "pull_request" not in wf  # trusted default-branch code only
