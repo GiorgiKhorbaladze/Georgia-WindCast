@@ -16,6 +16,11 @@ const words = {
     position: "Representative location", uncertainty: "uncertainty", period: "Recorded period", speed: "Playback speed",
     failure: "Could not refresh the stored readings.", close: "Close site details", previous: "vs previous 3 min",
     windUnconfirmed: "Wind reading quality unconfirmed",
+    mix: "Generation mix, same source period", keys: "Map: + and − zoom, arrow keys pan, 0 resets.",
+    gate: "Line-level exchange records are not published here: source rights and owner approval are pending. Figures above are national gross totals from the same GSE period.",
+    lineData: "Per-block records (contract v1)", persistent: "unchanged value", listed: "listed by GSE, no individual record",
+    testOnly: "TEST-ONLY FIXTURE: not real data, never shown in production.", noFlows: "No flow in this direction",
+    block: "GSE block", zero: "0 MW",
   },
   ka: {
     title: "ქარის გენერაცია", consumption: "მოხმარება", generation: "ჯამური გენერაცია", import: "იმპორტი",
@@ -32,6 +37,11 @@ const words = {
     position: "საორიენტაციო მდებარეობა", uncertainty: "ცდომილება", period: "ჩანაწერის პერიოდი", speed: "დაკვრის სიჩქარე",
     failure: "შენახული მონაცემების განახლება ვერ მოხერხდა.", close: "ადგილის ინფორმაციის დახურვა",
     previous: "წინა 3 წთ-თან შედარებით", windUnconfirmed: "ქარის მონაცემის ხარისხი დაუდასტურებელია",
+    mix: "გენერაციის სტრუქტურა, იგივე პერიოდი", keys: "რუკა: + და − მასშტაბი, ისრები გადაადგილება, 0 აღდგენა.",
+    gate: "ხაზების მიხედვით გაცვლის მონაცემები აქ არ ქვეყნდება: წყაროს გამოყენების უფლება და მფლობელის თანხმობა ჯერ არ არის. ზემოთ ნაჩვენებია ეროვნული ჯამები GSE-ის იმავე პერიოდიდან.",
+    lineData: "ბლოკების ჩანაწერები (კონტრაქტი v1)", persistent: "უცვლელი მნიშვნელობა", listed: "GSE-ის სიაშია, ცალკე ჩანაწერი არ აქვს",
+    testOnly: "მხოლოდ ტესტი: ეს რეალური მონაცემები არ არის და საიტზე არ ჩანს.", noFlows: "ამ მიმართულებით ნაკადი არ არის",
+    block: "GSE-ის ბლოკი", zero: "0 MW",
   },
 };
 const el = id => document.getElementById(id);
@@ -113,14 +123,90 @@ function metric(key, value) {
   card.append(label, reading);
   return card;
 }
+const MIX = [["hydro", "#4ea8de"], ["thermal", "#f2a65a"], ["wind", "#63dfcc"], ["solar", "#f6d860"]];
+function node(tag, cls, content) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (content !== undefined) n.textContent = content;
+  return n;
+}
+function mixbar(values) {
+  const parts = MIX.map(([key, colour]) => [key, colour, values[key]]);
+  const complete = parts.every(([, , v]) => Number.isFinite(v));
+  el("mix-panel").hidden = !complete;
+  if (!complete) return;
+  const total = parts.reduce((sum, [, , v]) => sum + Math.max(0, v), 0);
+  el("mixbar").replaceChildren(...parts.map(([key, colour, v]) => {
+    const seg = node("span", "seg");
+    seg.style.setProperty("--w", total > 0 ? (Math.max(0, v) / total * 100).toFixed(2) + "%" : "0%");
+    seg.style.setProperty("--c", colour);
+    seg.dataset.key = key;
+    return seg;
+  }));
+  el("mixbar").setAttribute("aria-label", t("mix") + ": " + parts.map(([k, , v]) => t(k) + " " + fmt(v)).join(", "));
+  el("mix-legend").replaceChildren(...parts.map(([key, colour, v]) => {
+    const item = node("span", "mix-item");
+    const dot = node("i"); dot.style.background = colour;
+    item.append(dot, node("span", "", t(key)), node("b", "", mw(v)));
+    return item;
+  }));
+}
+// Contract v1 (docs/contracts/cross_border_flow_v1.md). Rendered ONLY when the document is for the
+// same period and publication is authorized; production passes no document (feature gated).
+function crossBorder(period) {
+  const doc = data.cross_border;
+  if (!doc || doc.contract !== "cross_border_flow/v1" || doc.publication !== "authorized" || !period) return null;
+  const docTime = Math.round(Date.parse(doc.period?.label_utc) / 1000);
+  return docTime === period.time ? doc : null;
+}
+function flowRow(label, record, extra) {
+  const row = node("li", "flow-row");
+  row.tabIndex = 0;
+  row.dataset.sid = record?.source_id ?? label;
+  const name = node("span", "flow-name", label);
+  if (extra) name.append(node("small", "", " · " + extra));
+  const value = node("b", "", record ? fmt(Math.abs(record.mw)) : "—");
+  row.append(name, value);
+  return row;
+}
+function blockRows(doc, direction) {
+  const rows = [];
+  for (const block of doc.blocks) {
+    const records = block.lines.length ? block.lines : [block.subtotal];
+    for (const r of records) {
+      if (r.direction !== direction) continue;
+      const label = r.kind === "line" ? r.identifier + " (" + block.block_country_label + ")" : block.block_country_label + " · " + t("block");
+      const extra = r.availability === "persistent_value" ? t("persistent")
+        : r.published_line ? r.published_line.voltage_kv + " kV" : "";
+      const row = flowRow(label, r, extra);
+      if (r.availability === "persistent_value") row.classList.add("persistent");
+      rows.push(row);
+    }
+  }
+  return rows;
+}
 function interchange(panel, key, period) {
-  const heading = document.createElement("h2");
-  const value = document.createElement("strong");
-  const label = document.createElement("p");
-  heading.textContent = t(key);
-  value.textContent = fmt(period?.values[key]);
-  label.textContent = t("lines");
-  el(panel).replaceChildren(heading, value, label);
+  const article = el(panel);
+  const heading = node("h2", "", t(key));
+  const value = node("strong", "", fmt(period?.values[key]));
+  const children = [heading, value];
+  const doc = crossBorder(period);
+  if (doc) {
+    const list = node("ul", "flows");
+    list.setAttribute("aria-label", t(key) + " · " + t("lineData"));
+    const rows = blockRows(doc, key);
+    if (rows.length) list.append(...rows); else list.append(node("li", "flow-empty", t("noFlows")));
+    children.push(node("p", "flow-caption", t("lineData")), list);
+  }
+  article.replaceChildren(...children);
+}
+function linkHighlight() {
+  for (const row of document.querySelectorAll(".flow-row")) {
+    const on = () => document.querySelectorAll(`.flow-row[data-sid="${row.dataset.sid}"]`).forEach(r => r.classList.add("hot"));
+    const off = () => document.querySelectorAll(".flow-row.hot").forEach(r => r.classList.remove("hot"));
+    row.addEventListener("pointerenter", on); row.addEventListener("pointerleave", off);
+    row.addEventListener("focus", on); row.addEventListener("blur", off);
+  }
 }
 function sparkline(index) {
   const history = data.periods.slice(0, index + 1);
@@ -183,8 +269,15 @@ function readings() {
   el("closure").title = hasBalance ? t("closureFormula") : "";
   text("closure-note", t("closureNote"));
   el("closure-note").hidden = !hasBalance;
+  mixbar(values);
   interchange("imports", "import", period);
   interchange("exports", "export", period);
+  linkHighlight();
+  const doc = crossBorder(period);
+  text("line-gate", doc ? "" : t("gate"));
+  el("line-gate").hidden = Boolean(doc);
+  text("test-only", t("testOnly"));
+  el("test-only").hidden = !(data.cross_border && data.cross_border.test_only);
   const slider = el("time");
   slider.max = Math.max(data.periods.length - 1, 0);
   slider.value = Math.max(0, index);
@@ -222,8 +315,28 @@ el("latest").onclick = () => { stopPlayback(); historicalTime = null; readings()
 el("time").oninput = event => { stopPlayback(); selectIndex(Number(event.target.value)); };
 el("speed").onchange = () => { if (timer !== null) { stopPlayback(); startPlayback(); } };
 
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+let animation = null;
 function moveCamera() {
   camera.setAttribute("transform", `translate(${view.x} ${view.y}) scale(${view.scale})`);
+}
+function animateTo(target) {
+  cancelAnimationFrame(animation);
+  if (reduceMotion.matches) { view = target; moveCamera(); return; }
+  const from = {...view}, start = performance.now(), duration = 260;
+  const step = now => {
+    const k = Math.min(1, (now - start) / duration), e = 1 - Math.pow(1 - k, 3);
+    view = {x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e,
+      scale: from.scale + (target.scale - from.scale) * e};
+    moveCamera();
+    if (k < 1) animation = requestAnimationFrame(step);
+  };
+  animation = requestAnimationFrame(step);
+}
+function zoomTarget(factor, center = {x: 540, y: 318}) {
+  const scale = Math.max(.85, Math.min(8, view.scale * factor));
+  const ratio = scale / view.scale;
+  return {x: center.x - (center.x - view.x) * ratio, y: center.y - (center.y - view.y) * ratio, scale};
 }
 function zoom(factor, center = {x: 540, y: 318}) {
   const scale = Math.max(.85, Math.min(8, view.scale * factor));
@@ -263,9 +376,19 @@ map.addEventListener("pointermove", event => {
 for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
   map.addEventListener(name, event => pointers.delete(event.pointerId));
 }
-el("plus").onclick = () => zoom(1.27);
-el("minus").onclick = () => zoom(1 / 1.27);
-el("reset").onclick = () => { view = {x: 0, y: 0, scale: 1}; moveCamera(); };
+el("plus").onclick = () => animateTo(zoomTarget(1.27));
+el("minus").onclick = () => animateTo(zoomTarget(1 / 1.27));
+el("reset").onclick = () => animateTo({x: 0, y: 0, scale: 1});
+map.addEventListener("keydown", event => {
+  const pan = 40;
+  const moves = {ArrowLeft: [pan, 0], ArrowRight: [-pan, 0], ArrowUp: [0, pan], ArrowDown: [0, -pan]};
+  if (event.key === "+" || event.key === "=") animateTo(zoomTarget(1.27));
+  else if (event.key === "-" || event.key === "_") animateTo(zoomTarget(1 / 1.27));
+  else if (event.key === "0") animateTo({x: 0, y: 0, scale: 1});
+  else if (moves[event.key]) animateTo({...view, x: view.x + moves[event.key][0], y: view.y + moves[event.key][1]});
+  else return;
+  event.preventDefault();
+});
 el("close-site").onclick = () => {
   el("site-info").hidden = true;
   selectedSite?.classList.remove("active");
@@ -354,6 +477,7 @@ function render(args) {
       reset: "reset", "close-site": "close", time: "period", speed: "speed"})) {
     el(id).setAttribute("aria-label", t(key));
   }
+  text("map-keys", t("keys"));
   readings();
   fullscreenLabel();
   resize();
