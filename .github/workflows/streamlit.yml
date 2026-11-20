@@ -34,3 +34,38 @@ jobs:
           uv venv -p 3.12 .venv-col
           uv pip install -p .venv-col -r streamlit_cloud/collector-requirements.txt
           .venv-col/bin/python streamlit_cloud/collector.py --help >/dev/null
+
+  map-browser:
+    name: System map browser regression (Chromium, KA/EN, desktop/phone)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.11.32"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.23.5
+      - name: Install app requirements and Playwright (same version as frontend/package-lock.json)
+        run: |
+          uv venv -p 3.12 .venv-st
+          uv pip install -p .venv-st -r streamlit_cloud/requirements.txt
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw"
+          npm install --no-save --no-package-lock --ignore-scripts playwright@1.65.1
+          npx playwright install --with-deps chromium
+      - name: Run the app against an empty local data branch (deterministic, no data-branch request)
+        run: |
+          mkdir -p "$RUNNER_TEMP/empty-data"
+          (cd "$RUNNER_TEMP/empty-data" && python3 -m http.server 8765 >/dev/null 2>&1 &)
+          cd streamlit_cloud
+          WINDCAST_DATA_BASE_URL=http://127.0.0.1:8765/ nohup ../.venv-st/bin/streamlit run app.py \
+            --server.headless true --server.port 8501 > "$RUNNER_TEMP/streamlit.log" 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8501/_stcore/health >/dev/null && exit 0; sleep 1; done
+          cat "$RUNNER_TEMP/streamlit.log"; exit 1
+      - name: Browser test (includes the site-details / dock overlap regression)
+        env:
+          NODE_PATH: ${{ runner.temp }}/pw/node_modules
+        run: node streamlit_cloud/tests/browser_system_map.cjs
