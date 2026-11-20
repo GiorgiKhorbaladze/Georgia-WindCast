@@ -156,7 +156,7 @@ def test_navigation_keeps_existing_pages_and_adds_history():
     at = run("ka")
     options = at.sidebar.radio[1].options
     assert options == [tr(f"page_{p}", "ka") for p in
-                       ("overview", "system_map", "balance", "analytics", "wind_history", "forecast", "accuracy", "data")]
+                       ("overview", "system_map", "balance", "analytics", "wind_history", "forecast", "gen_forecast", "accuracy", "data")]
 
 
 def test_texts_are_complete_and_follow_house_rules():
