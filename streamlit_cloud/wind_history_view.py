@@ -10,7 +10,7 @@ import io
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from xml.sax.saxutils import escape
+from html import escape  # XML-safe for text and attributes (&, <, >, quotes); no XML parser
 
 import httpx
 import pandas as pd
