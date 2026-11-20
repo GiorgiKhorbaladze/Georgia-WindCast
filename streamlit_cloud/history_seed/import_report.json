@@ -1,0 +1,224 @@
+{
+  "annual_totals": {
+    "kartli-gori": {
+      "2016": {
+        "complete": false,
+        "gwh": 9.02,
+        "months": [
+          10,
+          11,
+          12
+        ]
+      },
+      "2017": {
+        "complete": true,
+        "gwh": 87.74,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2018": {
+        "complete": true,
+        "gwh": 84.28,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2019": {
+        "complete": true,
+        "gwh": 84.7,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2020": {
+        "complete": true,
+        "gwh": 90.84,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2021": {
+        "complete": true,
+        "gwh": 83.36,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2022": {
+        "complete": true,
+        "gwh": 87.5,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2023": {
+        "complete": true,
+        "gwh": 86.11,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2024": {
+        "complete": true,
+        "gwh": 77.57,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2025": {
+        "complete": true,
+        "gwh": 79.41,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      },
+      "2026": {
+        "complete": false,
+        "gwh": 47.27,
+        "months": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      }
+    },
+    "zemo-wind": {
+      "2026": {
+        "complete": false,
+        "gwh": 21.0,
+        "months": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      }
+    }
+  },
+  "assumptions": [
+    "Values are GWh (the workbook follows the GSE balance unit, million kWh).",
+    "Formulas carry no cached values; all totals are recomputed from monthly cells.",
+    "Sheet-3 zeros without a station-sheet value are placeholders, not observations.",
+    "Kartli October 2016 is a reported zero (the GSE 2016 balance also prints 0)."
+  ],
+  "bytes": 15386,
+  "findings": [
+    "zemo-wind 2016-10..2026-02: 113 sheet-3 zeros with a blank station sheet are placeholders - not imported"
+  ],
+  "imported_at": "2026-11-20T00:00:00+00:00",
+  "importer": "workbook-import/1",
+  "records": 123,
+  "sha256": "dd3466701c670ef3cb4c6a8181dda156dbd4e658f85a884409a5f652e28f4311",
+  "sheets": [
+    "ქართლის ქარი",
+    "ზემო ქარი და სულ ქარი",
+    "სრული ბაზა (ანალიტიკა)"
+  ],
+  "verification_status": "owner_compiled_unverified",
+  "workbook": "qaris_sadgurebis_gamomushaveba_2016_2026.xlsx"
+}
