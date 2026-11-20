@@ -172,3 +172,11 @@ def test_quality_information_is_kept_internally():
     assert set(df["quality"]) == {"ACT", "NRE"}  # stored codes untouched
     h = rp.HORIZONS["15min"]
     assert len(rp.deltas(df, h, act_only=True)) < len(rp.deltas(df, h))  # sensitivity option still works internally
+
+
+@pytest.mark.parametrize("lang", ["ka", "en"])
+def test_data_page_credits_upstream_model_sources(lang):
+    # docs/sources/rights.md: Open-Meteo CC BY 4.0, DWD ICON and Copernicus (ERA5) credits
+    import test_pages
+    text = page_text(test_pages.run("data", lang, test_pages.durable_two_days()))
+    assert "Open-Meteo (CC BY 4.0)" in text and "DWD ICON" in text and tr("copernicus_credit", lang) in text
