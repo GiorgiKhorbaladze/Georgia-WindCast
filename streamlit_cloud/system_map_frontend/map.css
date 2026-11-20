@@ -60,7 +60,6 @@ h1,h2,p{margin:0}
 .flow-row.persistent{opacity:.72;border-style:dashed;border-color:#f3bb7666}
 .flow-caption{font-size:.75rem;color:var(--muted);margin-top:.3rem}
 .flow-empty{font-size:.85rem;color:var(--muted)}
-.line-gate{margin-top:10px;font-size:.8rem;color:var(--muted);border-left:2px solid #3b6079;padding-left:.6rem}
 .test-only{margin:8px 0 10px;font-weight:700;color:#1a0b00;background:var(--amber);padding:.4rem .6rem;border-radius:8px;font-size:.8rem}
 .map-tools{position:absolute;right:12px;top:42%;display:grid;gap:5px}
 .map-tools button{min-width:43px;font-size:1.2rem;padding:0}

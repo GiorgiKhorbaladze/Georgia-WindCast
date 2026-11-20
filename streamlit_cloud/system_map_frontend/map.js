@@ -10,14 +10,13 @@ const words = {
     retrieved: "Retrieved", balance: "National balance", closure: "Difference between published balance figures",
     closureFormula: "Generation + imports − exports − consumption",
     closureNote: "Arithmetic comparison only. Measuring grid imbalance requires separate system data.",
-    missingClosure: "Balance check unavailable", provenance: "Sources and limitations",
+    missingClosure: "Balance check unavailable",
     lines: "National gross total. Verified line-level records are unavailable.",
     zoomIn: "Zoom in", zoomOut: "Zoom out", reset: "Reset map", map: "Georgia geographic reference map",
     position: "Representative location", uncertainty: "uncertainty", period: "Recorded period", speed: "Playback speed",
     failure: "Could not refresh the stored readings.", close: "Close site details", previous: "vs previous 3 min",
     windUnconfirmed: "Wind reading quality unconfirmed",
     mix: "Generation mix, same source period", keys: "Map: + and − zoom, arrow keys pan, 0 resets.",
-    gate: "Line-level exchange records are not published here: source rights and owner approval are pending. Figures above are national gross totals from the same GSE period.",
     lineData: "Per-block records (contract v1)", persistent: "unchanged value", listed: "listed by GSE, no individual record",
     testOnly: "TEST-ONLY FIXTURE: not real data, never shown in production.", noFlows: "No flow in this direction",
     block: "GSE block", zero: "0 MW",
@@ -31,14 +30,13 @@ const words = {
     retrieved: "მიღების დრო", balance: "ეროვნული ბალანსი", closure: "გამოქვეყნებული მაჩვენებლების შეუსაბამობა",
     closureFormula: "გენერაცია + იმპორტი − ექსპორტი − მოხმარება",
     closureNote: "ეს არითმეტიკული შედარებაა. სისტემის ფიზიკური დისბალანსის დასადგენად ცალკე გაზომვებია საჭირო.",
-    missingClosure: "ბალანსის შემოწმება მიუწვდომელია", provenance: "წყაროები და შეზღუდვები",
+    missingClosure: "ბალანსის შემოწმება მიუწვდომელია",
     lines: "ეროვნული ჯამი. ხაზების მიხედვით გადამოწმებული მონაცემები მიუწვდომელია.",
     zoomIn: "გადიდება", zoomOut: "შემცირება", reset: "რუკის აღდგენა", map: "საქართველოს საცნობარო რუკა",
     position: "საორიენტაციო მდებარეობა", uncertainty: "ცდომილება", period: "ჩანაწერის პერიოდი", speed: "დაკვრის სიჩქარე",
     failure: "შენახული მონაცემების განახლება ვერ მოხერხდა.", close: "ადგილის ინფორმაციის დახურვა",
     previous: "წინა 3 წთ-თან შედარებით", windUnconfirmed: "ქარის მონაცემის ხარისხი დაუდასტურებელია",
     mix: "გენერაციის სტრუქტურა, იგივე პერიოდი", keys: "რუკა: + და − მასშტაბი, ისრები გადაადგილება, 0 აღდგენა.",
-    gate: "ხაზების მიხედვით გაცვლის მონაცემები აქ არ ქვეყნდება: წყაროს გამოყენების უფლება და მფლობელის თანხმობა ჯერ არ არის. ზემოთ ნაჩვენებია ეროვნული ჯამები GSE-ის იმავე პერიოდიდან.",
     lineData: "ბლოკების ჩანაწერები (კონტრაქტი v1)", persistent: "უცვლელი მნიშვნელობა", listed: "GSE-ის სიაშია, ცალკე ჩანაწერი არ აქვს",
     testOnly: "მხოლოდ ტესტი: ეს რეალური მონაცემები არ არის და საიტზე არ ჩანს.", noFlows: "ამ მიმართულებით ნაკადი არ არის",
     block: "GSE-ის ბლოკი", zero: "0 MW",
@@ -273,9 +271,6 @@ function readings() {
   interchange("imports", "import", period);
   interchange("exports", "export", period);
   linkHighlight();
-  const doc = crossBorder(period);
-  text("line-gate", doc ? "" : t("gate"));
-  el("line-gate").hidden = Boolean(doc);
   text("test-only", t("testOnly"));
   el("test-only").hidden = !(data.cross_border && data.cross_border.test_only);
   const slider = el("time");
@@ -470,7 +465,6 @@ function render(args) {
   text("heading", t("title"));
   text("latest", t("latest"));
   text("balance-heading", t("balance"));
-  text("provenance", t("provenance"));
   text("fetch-status", t("failure"));
   el("fetch-status").hidden = !data.refresh_failed;
   for (const [id, key] of Object.entries({map: "map", trend: "trend", plus: "zoomIn", minus: "zoomOut",
