@@ -18,6 +18,9 @@ PLACES = json.loads((ASSETS / 'georgia-natural-earth-places.json').read_text(enc
 TZ = ZoneInfo('Asia/Tbilisi')
 FIELDS = (*BLOCKS, 'import', 'export')
 MAP = components.declare_component('system_map', path=str(HERE / 'system_map_frontend'))
+# Line-level exchange panels (contract v1, docs/contracts/cross_border_flow_v1.md) stay off until
+# source rights and the owner's go-ahead exist (Issue #18). Production never sends a document.
+CROSS_BORDER_ENABLED = False
 
 
 def snapshot_badge(row, now, refresh_failed):
@@ -59,5 +62,5 @@ def render(lang, reader, now):
         for site in SITES if site.coordinates_verified and site.longitude is not None and site.latitude is not None
     ]
     MAP(lang=lang, periods=period_payload(rows, now, bool(getattr(reader, 'balance_error', None))),
-        refresh_failed=bool(getattr(reader, 'balance_error', None)),
+        refresh_failed=bool(getattr(reader, 'balance_error', None)), cross_border=None,
         outline=OUTLINE, cities=PLACES, sites=sites, key='immersive-system-map')
