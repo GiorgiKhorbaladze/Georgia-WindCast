@@ -56,6 +56,7 @@ h2{font-size:1.15rem}
 #mix .metric,.exchanges article{background:#102235;border:1px solid #304b62;border-radius:12px}
 .reconciliation,#fetch-status{margin:10px 0}
 #closure{font-variant-numeric:tabular-nums}
+.reconciliation-amount{white-space:nowrap}
 #closure-note{margin-top:3px;font-size:.78rem}
 .exchanges{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .exchanges article{padding:14px;display:grid;gap:.4rem}

@@ -117,7 +117,7 @@ function interchange(panel, key, period) {
   const heading = document.createElement("h2");
   const value = document.createElement("strong");
   const label = document.createElement("p");
-  heading.textContent = (key === "import" ? "↘ " : "↗ ") + t(key);
+  heading.textContent = t(key);
   value.textContent = fmt(period?.values[key]);
   label.textContent = t("lines");
   el(panel).replaceChildren(heading, value, label);
@@ -173,7 +173,13 @@ function readings() {
   const residual = period?.residual;
   const hasBalance = Number.isFinite(residual);
   const signedDifference = hasBalance && residual >= .005 ? "+" + fmt(residual) : fmt(residual);
-  text("closure", hasBalance ? t("closure") + " · " + signedDifference : t("missingClosure"));
+  text("closure", hasBalance ? t("closure") + " · " : t("missingClosure"));
+  if (hasBalance) {
+    const amount = document.createElement("span");
+    amount.className = "reconciliation-amount";
+    amount.textContent = signedDifference;
+    el("closure").append(amount);
+  }
   el("closure").title = hasBalance ? t("closureFormula") : "";
   text("closure-note", t("closureNote"));
   el("closure-note").hidden = !hasBalance;
