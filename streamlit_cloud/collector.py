@@ -74,6 +74,12 @@ DEEP_HORIZON_DAYS = 30
 # 404); after the last delay the period is left as a gap. Worst case per unpublished period:
 # 1 + len(GAP_RETRY_DELAYS) requests over about 4 days, always inside the per-run bound.
 GAP_STATUS_KEY = "gap_repair"
+# Deep backfill and gap repair are extra load on GSE. Their per-run budgets were sized for roughly
+# hourly runs; with an external 15-minute trigger (cron-job.org, 19.11.2026) that quadrupled the
+# daily volume (~4,700 requests/day vs the documented 500-1000/day envelope). They now run at most
+# once per EXTRA_INTERVAL; the normal recovery window is unaffected and runs every time.
+EXTRA_INTERVAL = timedelta(minutes=55)
+EXTRA_STATUS_KEY = "extra_last_run_at"
 GAP_RETRY_DELAYS = (timedelta(hours=1), timedelta(hours=6), timedelta(hours=24), timedelta(hours=72))
 
 
@@ -225,9 +231,15 @@ class Collector:
 
         deep = status.get("deep_backfill", {})
         gaps = status.get(GAP_STATUS_KEY, {})
-        if self.deep_per_run and report.failures == 0 and report.integrity_error is None:
+        last_extra = status.get(EXTRA_STATUS_KEY)
+        extra_due = last_extra is None or now - datetime.fromisoformat(last_extra) >= EXTRA_INTERVAL
+        if extra_due and self.deep_per_run and report.failures == 0 and report.integrity_error is None:
+            status[EXTRA_STATUS_KEY] = now.isoformat()
+        else:
+            extra_due = False
+        if extra_due:
             gaps = self._repair_gaps(now, labels[-1], deep, gaps, report)
-        if self.deep_per_run and report.failures == 0 and report.integrity_error is None and not deep.get("done"):
+        if extra_due and not deep.get("done") and report.failures == 0 and report.integrity_error is None:
             deep = self._deep_backfill(now, labels[-1], deep, report)
 
         latest = max(
