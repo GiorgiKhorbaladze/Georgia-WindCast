@@ -490,6 +490,9 @@ try {
   }
 } catch { /* native fullscreen and child resize remain available */ }
 new ResizeObserver(resize).observe(document.querySelector("main"));
+// Site details sit just above the bottom dock (metrics, mix, playback), whatever its height.
+const dock = document.querySelector(".stage-bottom");
+new ResizeObserver(() => el("stage").style.setProperty("--dock", dock.offsetHeight + "px")).observe(dock);
 window.addEventListener("resize", resize);
 setInterval(() => { if (timer === null && data.periods.length) readings(); }, 30000);
 msg("streamlit:componentReady", {apiVersion: 1});
