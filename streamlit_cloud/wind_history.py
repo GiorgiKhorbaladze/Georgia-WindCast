@@ -5,7 +5,7 @@ Archive layout (``history/`` on the ``data`` branch, seeded from ``history_seed/
 * ``wind_monthly.csv``: the current view, one row per (station_id, year, month).
 * ``wind_monthly_revisions.csv``: append-only ledger of every change, never rewritten.
 * ``sources.json``: registry of official GSE documents (hash, ETag, Last-Modified, state).
-* ``monitor_state.json``: persisted timestamps of the three-day GSE check.
+* ``monitor_state.json``: persisted timestamps of the 20-day GSE check.
 
 Rules: values are stored in GWh exactly as published (GSE prints "million kWh", which is GWh).
 A month the source leaves blank is *not reported* and has no row; a printed 0 is a reported zero.

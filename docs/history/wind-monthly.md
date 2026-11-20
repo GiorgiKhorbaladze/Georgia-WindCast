@@ -23,8 +23,6 @@ decimals with space thousands (`1 102,67`). Kartli's row label changed from
 `ქართლის ქარის ელ.სადგური` (2016-2025) to `ქართლის ქარის ელექტროსადგური` (2026). The 2026 file
 adds Zemo, Ruisi and a `სულ ქარის სადგურები` total row.
 
-GSE has not published reuse terms (see `docs/sources/rights.md`, Issue #18). **Automated retrieval
-and redistribution stay disabled until the owner confirms rights** (see "Activation").
 
 ## Storage (`data` branch, `history/`)
 
@@ -103,8 +101,9 @@ owner before approval (likely the first full month after commissioning; not veri
 
 ## Monitor (`.github/workflows/history-monitor.yml`)
 
-- Wakes daily at 03:41 UTC; contacts GSE only when ≥ 72 h have passed since the previous
-  **attempt** (successful or not). Earlier wake-ups report `skipped_not_due` with no request.
+- Wakes daily at 03:41 UTC; contacts GSE only when ≥ 20 days have passed since the previous
+  **attempt** (successful or not). Monthly balances are published with a lag of weeks, so a
+  shorter interval would only repeat requests. Earlier wake-ups report `skipped_not_due` with no request.
 - One page request, then one conditional request per yearly document from 2016
   (`If-None-Match` / `If-Modified-Since`). Unchanged hashes are not re-parsed.
 - Document states: `unchanged`, `new`, `updated`, `missing` (removed from the page; data kept),
@@ -119,14 +118,11 @@ owner before approval (likely the first full month after commissioning; not veri
 New wind farms: add the exact GSE row label to `STATIONS` in `streamlit_cloud/wind_history.py`
 (reviewed PR). Until then the document is quarantined as `unsupported_structure`.
 
-## Activation (owner actions)
+## Operation (owner actions)
 
-1. Confirm GSE reuse rights (Issue #18).
-2. Merge PR A, then run the workflow manually (`mode: force_check`) once and review the report.
-3. Approve pending values: `mode: approve`, `approve_through: <revision id>`, `reason: …`.
-4. Set repository variable `HISTORY_MONITOR_ENABLED=true` to enable the scheduled three-day check.
-
-Until step 4 the scheduled run is skipped by GitHub (`if:` on the job), costing nothing.
+- Manual check now: run the workflow with `mode: force_check` and review the report.
+- Approve pending values: `mode: approve`, `approve_through: <revision id>`, `reason: …`.
+- Pause the scheduled check: set the repository variable `HISTORY_MONITOR_PAUSED=true`.
 
 ## Re-running the import
 

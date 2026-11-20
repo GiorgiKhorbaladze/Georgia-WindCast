@@ -1,8 +1,8 @@
-"""CLI for the three-day GSE balance monitor and owner approvals (Issue #52).
+"""CLI for the 20-day GSE balance monitor and owner approvals (Issue #52).
 
 ``python history_monitor.py check --data-dir DATA [--force]``
     Runs one check against ``DATA/history`` (a checkout of the ``data`` branch). Exits 0 without
-    contacting GSE when the previous successful check is younger than 72 hours.
+    contacting GSE when the previous attempt is younger than 20 days.
 
 ``python history_monitor.py approve --data-dir DATA --through REVISION --reason TEXT``
     Owner approval: every pending official-document value with a revision id up to REVISION
@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("check")
     c.add_argument("--data-dir", type=Path, required=True)
-    c.add_argument("--force", action="store_true", help="ignore the 72-hour gate (manual run)")
+    c.add_argument("--force", action="store_true", help="ignore the 20-day gate (manual run)")
     a = sub.add_parser("approve")
     a.add_argument("--data-dir", type=Path, required=True)
     a.add_argument("--through", type=int, required=True)

@@ -1,11 +1,11 @@
-"""Official GSE yearly electricity balances: discovery, PDF parsing and the three-day monitor.
+"""Official GSE yearly electricity balances: discovery, PDF parsing and the 20-day monitor.
 
 Source: the GSE "ფაქტიური ბალანსი" (Actual balance) page. Its document links are discovered from
 the page's own content API at every check (``admin.gse.com.ge/api/ka/menu/<slug>``); no document
 URL is hard-coded or guessed. Each yearly PDF is one page exported from a spreadsheet, values in
 million kWh (= GWh), months January-December plus a total column.
 
-The monitor contacts GSE at most once every 72 hours, counted from the previous *attempt*
+The monitor contacts GSE at most once every 20 days, counted from the previous *attempt*
 (persisted ``last_attempt_at``, whether it succeeded or not); earlier scheduled wake-ups log
 ``skipped_not_due`` and make no request. A manual ``--force`` run is the only exception. Documents are fetched conditionally (ETag /
 Last-Modified) and compared by SHA-256, so an unchanged document is never re-parsed. Every value
@@ -40,7 +40,7 @@ PAGE_API = "https://admin.gse.com.ge/api/ka/menu/faqtiuri-balansi-125"
 PAGE_PUBLIC = "https://gse.com.ge/momkhmareblebistvis/monatsemebi-elektroenergetikuli-sistemidan/faqtiuri-balansi"
 ALLOWED_HOSTS = ("admin.gse.com.ge",)
 FIRST_YEAR = 2016  # first year with a wind farm in the balance (Kartli, October 2016)
-MIN_INTERVAL = timedelta(hours=72)
+MIN_INTERVAL = timedelta(days=20)  # monthly balances appear with a lag of weeks
 MAX_PDF_BYTES = 5_000_000
 PARSER_VERSION = "gse-balance-pdf/1"
 MONTH_TOKENS = ("ianvari", "Tebervali", "marti", "aprili", "maisi", "ivnisi", "ivlisi", "agvisto",
