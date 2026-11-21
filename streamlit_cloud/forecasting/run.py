@@ -163,7 +163,8 @@ def cmd_sources(out: Path, now: datetime) -> dict:
             return r.status_code, r.content, {k.lower(): v for k, v in r.headers.items()}
         for source in ("gfs", "ecmwf"):
             try:
-                results.append(ws.collect(out, source, ws.Http(get), now))
+                results.append(ws.collect(out, source, ws.Http(get), datetime.now(UTC).replace(microsecond=0),
+                                          clock=lambda: datetime.now(UTC).replace(microsecond=0)))
             except Exception as exc:  # reported, never fatal for the other source
                 results.append({"source": source, "result": "failed", "error": f"{type(exc).__name__}: {exc}"[:300]})
     return {"result": "sources", "sources": results}

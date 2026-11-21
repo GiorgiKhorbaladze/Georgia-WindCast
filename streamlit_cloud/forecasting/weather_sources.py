@@ -67,14 +67,14 @@ class Http:
 
     def fetch(self, url: str, rng: tuple[int, int] | None = None) -> tuple[bytes, dict]:
         headers = {"Range": f"bytes={rng[0]}-{rng[1]}"} if rng else {}
-        for attempt in range(5):
+        for attempt in range(8):
             status, body, hdrs = self.get(url, headers)
             self.requests += 1
             if status in (200, 206):
                 self.bytes += len(body)
                 return body, hdrs
             if status in (429, 500, 503):
-                self.sleep(2 ** attempt)
+                self.sleep(min(30, 2 ** attempt))  # S3 SlowDown: back off up to ~2 minutes in total
                 continue
             raise SourceError(f"http {status} for {url}")
         raise SourceError(f"gave up after retries: {url}")
@@ -172,32 +172,53 @@ def wind(u: float, v: float) -> tuple[float, float]:
     return math.hypot(u, v), (math.degrees(math.atan2(-u, -v)) + 360.0) % 360.0
 
 
-def interval_precip(acc: dict[tuple[int, int], float], steps: list[int]) -> dict[int, float]:
-    """Precipitation (mm) in (previous step, step] from accumulations over (start, end] periods."""
-    out = {}
+# Largest negative step change accepted as GRIB packing noise, in native units (GFS kg/m2 = mm,
+# IFS metres). Anything more negative is an inconsistent source, never clipped to dry weather.
+PACKING_TOL = {"gfs": 0.05, "ecmwf": 0.00005}
+
+
+def interval_precip(acc: dict[tuple[int, int], float], steps: list[int], tol: float = 0.05,
+                    flags: list | None = None) -> dict[int, float]:
+    """Precipitation in (previous step, step] from accumulations over (start, end] periods.
+
+    Missing or non-finite inputs give NO value (never 0). A difference below -tol is reported in
+    ``flags`` and gives no value; only -tol <= v < 0 (packing noise) is set to 0."""
+    def ok(v):
+        return v is not None and math.isfinite(v)
+
+    out: dict[int, float] = {}
     for prev, step in zip(steps, steps[1:]):
+        value = None
         if (prev, step) in acc:
-            out[step] = acc[(prev, step)]
-            continue
-        for (s, e), v in acc.items():
-            if e == step and (s, prev) in acc:
-                out[step] = v - acc[(s, prev)]
-                break
-            if e == step and s == prev:
-                out[step] = v
-                break
+            value = acc[(prev, step)] if ok(acc[(prev, step)]) else None
         else:
-            if (0, step) in acc and prev == 0:
-                out[step] = acc[(0, step)]
-    return {k: max(0.0, v) for k, v in out.items()}  # tiny negative packing noise -> 0
+            for (s0, e), v in acc.items():
+                if e != step:
+                    continue
+                if s0 == prev:
+                    value = v if ok(v) else None
+                    break
+                base = acc.get((s0, prev)) if prev != s0 else 0.0
+                if (s0, prev) in acc or prev == s0:
+                    value = (v - base) if ok(v) and ok(base) else None
+                    break
+        if value is None:
+            continue
+        if value < -tol:
+            if flags is not None:
+                flags.append(f"negative accumulation change {value:.4g} at step {step}")
+            continue
+        out[step] = max(0.0, value)
+    return out
 
 
 def normalise(source: str, raw: dict[tuple[str, int, int], float], acc: dict[int, dict], run: datetime,
-              steps: list[int]) -> pd.DataFrame:
+              steps: list[int], flags: list | None = None) -> pd.DataFrame:
     """raw[(field, step, point_index)] (native units) -> canonical long table."""
+    flags = [] if flags is None else flags
     rows = []
     for i, p in enumerate(POINTS):
-        precip = interval_precip({k: v for k, v in acc.get(i, {}).items()}, steps)
+        precip = interval_precip(dict(acc.get(i, {})), steps, PACKING_TOL.get(source, 0.05), flags)
         for step in steps:
             g = lambda k: raw.get((k, step, i), math.nan)  # noqa: E731
             valid = run + timedelta(hours=step)
@@ -239,6 +260,7 @@ class RunResult:
     published: str  # newest S3 LastModified among the files used
     messages: list[dict] = field(default_factory=list)
     cells: list[dict] = field(default_factory=list)
+    flags: list[str] = field(default_factory=list)
 
 
 def _messages(source: str, http: Http, run: datetime, step: int) -> list[Message]:
@@ -255,11 +277,13 @@ def _messages(source: str, http: Http, run: datetime, step: int) -> list[Message
 def fetch_run(source: str, run: datetime, http: Http, steps: tuple[int, ...] = STEPS) -> RunResult:
     raw: dict = {}
     acc: dict[int, dict] = {}
-    log, cells, published = [], None, ""
+    log, cells, published = [], None, None
     for step in steps:
         for m in _messages(source, http, run, step):
             body, hdrs = http.fetch(m.url, (m.offset, m.offset + m.length - 1))
-            published = max(published, hdrs.get("last-modified", ""))
+            lm = _http_date(hdrs.get("last-modified", ""))
+            if lm is not None and (published is None or lm > published):
+                published = lm
             values = decode_points(body)
             if cells is None:
                 cells = [dict(point=p.id, grid_latitude=la, grid_longitude=lo) for p, (_v, la, lo) in zip(POINTS, values)]
@@ -268,12 +292,25 @@ def fetch_run(source: str, run: datetime, http: Http, steps: tuple[int, ...] = S
                     acc.setdefault(i, {})[m.period] = v
                 else:
                     raw[(m.key, step, i)] = v
-            log.append(dict(field=m.key, step=step, url=m.url, offset=m.offset, length=m.length,
-                            sha256=hashlib.sha256(body).hexdigest()))
+            log.append(dict(field=m.key, step=step, period=list(m.period) if m.period else None, url=m.url,
+                            offset=m.offset, length=m.length, sha256=hashlib.sha256(body).hexdigest(),
+                            last_modified=lm.isoformat() if lm else None))
     if not log:
         raise SourceError(f"{source}: no messages found for {run:%Y-%m-%d %HZ}")
-    frame = normalise(source, raw, acc, run, list(steps))
-    return RunResult(source, run, frame, published, log, cells or [])
+    flags: list = []
+    frame = normalise(source, raw, acc, run, list(steps), flags)
+    res = RunResult(source, run, frame, published.isoformat() if published else "", log, cells or [])
+    res.flags = flags
+    return res
+
+
+def _http_date(value: str) -> datetime | None:
+    from email.utils import parsedate_to_datetime
+
+    try:
+        return parsedate_to_datetime(value).astimezone(UTC) if value else None
+    except (TypeError, ValueError):
+        return None
 
 
 def latest_complete_run(source: str, http: Http, now: datetime, steps: tuple[int, ...] = STEPS) -> datetime | None:
@@ -295,8 +332,13 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
-def collect(out: Path, source: str, http: Http, now: datetime, steps: tuple[int, ...] = STEPS) -> dict:
-    """Store the newest fully published run of ``source`` once; nothing if it is already stored."""
+def collect(out: Path, source: str, http: Http, now: datetime, steps: tuple[int, ...] = STEPS,
+            clock: Callable[[], datetime] | None = None) -> dict:
+    """Store the newest fully published run of ``source`` once; nothing if it is already stored.
+
+    ``retrieved`` (the as-of availability time) is taken from ``clock`` AFTER the last byte was
+    downloaded and validated, not at the job start; ``started`` records the attempt start."""
+    clock = clock or utcnow
     root = out / ROOT / source
     manifest_path = root / "manifest.json"
     manifest = _load(manifest_path)
@@ -306,20 +348,26 @@ def collect(out: Path, source: str, http: Http, now: datetime, steps: tuple[int,
     if any(r["run"] == run.isoformat() for r in manifest.get("runs", [])):
         return {"source": source, "result": "unchanged", "run": run.isoformat()}
     res = fetch_run(source, run, http, steps)
+    retrieved = clock()
     root.mkdir(parents=True, exist_ok=True)
     (root / "runs").mkdir(exist_ok=True)
     csv = res.frame.to_csv(index=False).encode()
     name = f"{run:%Y%m%dT%H%MZ}.csv.gz"
     with gzip.GzipFile(root / "runs" / name, "wb", mtime=0) as fh:
         fh.write(csv)
-    entry = dict(run=run.isoformat(), retrieved=now.isoformat(), published=res.published, file=f"runs/{name}",
-                 sha256=hashlib.sha256(csv).hexdigest(), steps=list(steps), cells=res.cells,
-                 messages=len(res.messages), message_sha256=hashlib.sha256(
-                     "".join(m["sha256"] for m in res.messages).encode()).hexdigest(),
+    evidence = json.dumps(res.messages, indent=0).encode()
+    ev_name = f"{run:%Y%m%dT%H%MZ}.messages.json.gz"
+    with gzip.GzipFile(root / "runs" / ev_name, "wb", mtime=0) as fh:
+        fh.write(evidence)
+    entry = dict(run=run.isoformat(), started=now.isoformat(), retrieved=retrieved.isoformat(),
+                 published=res.published, file=f"runs/{name}", sha256=hashlib.sha256(csv).hexdigest(),
+                 evidence=f"runs/{ev_name}", evidence_sha256=hashlib.sha256(evidence).hexdigest(),
+                 steps=list(steps), cells=res.cells, messages=len(res.messages), flags=res.flags,
                  values=int(len(res.frame)), bytes=http.bytes, requests=http.requests)
     runs = [r for r in manifest.get("runs", []) if r["run"] != entry["run"]] + [entry]
     manifest_path.write_text(json.dumps({"source": source, "runs": sorted(runs, key=lambda r: r["run"])}, indent=1) + "\n")
     return {"source": source, "result": "stored", "run": run.isoformat(), "values": entry["values"],
+            "flags": len(res.flags),
             "bytes": http.bytes, "requests": http.requests}
 
 
