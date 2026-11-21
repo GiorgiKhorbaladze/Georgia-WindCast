@@ -51,7 +51,7 @@ def test_precipitation_is_de_accumulated_without_inventing_values():
     gfs = {(0, 3): 1.0, (0, 6): 2.5, (6, 9): 0.4}
     assert ws.interval_precip(gfs, [0, 3, 6, 9]) == {3: 1.0, 6: 1.5, 9: 0.4}
     ifs = {(0, 3): 0.001, (0, 6): 0.003}
-    out = ws.interval_precip(ifs, [0, 3, 6, 9])
+    out = ws.interval_precip(ifs, [0, 3, 6, 9], tol=0.00005)
     assert out[3] == pytest.approx(0.001) and out[6] == pytest.approx(0.002) and 9 not in out  # no value at 9 h
 
 
@@ -133,7 +133,7 @@ def test_collect_stores_canonical_table_once_with_provenance(tmp_path):
     steps = (0, 3, 6)
     s3 = FakeS3(steps)
     now = RUN + timedelta(hours=8)
-    res = ws.collect(tmp_path, "ecmwf", ws.Http(s3.get, sleep=lambda s: None), now, steps)
+    res = ws.collect(tmp_path, "ecmwf", ws.Http(s3.get, sleep=lambda s: None), now, steps, clock=lambda: now)
     assert res["result"] == "stored"
     n = s3.requests
     assert ws.collect(tmp_path, "ecmwf", ws.Http(s3.get, sleep=lambda s: None), now, steps)["result"] == "unchanged"
@@ -147,7 +147,7 @@ def test_collect_stores_canonical_table_once_with_provenance(tmp_path):
     first = df[(df.valid_utc == RUN)]
     assert "wind_gusts_10m" not in set(first["variable"]) and "precipitation" not in set(first["variable"])
     entry = json.loads((tmp_path / ws.ROOT / "ecmwf" / "manifest.json").read_text())["runs"][0]
-    assert entry["retrieved"] == now.isoformat() and entry["published"].startswith("Fri, 20 Nov 2026")
+    assert entry["retrieved"] == now.isoformat() and entry["published"] == "2026-11-20T19:34:01+00:00"
     runs = ws.available_runs(tmp_path, "ecmwf")
     assert asof(runs, now - timedelta(minutes=1)) is None and asof(runs, now) == Run(RUN, now)
 
@@ -190,3 +190,68 @@ def test_variant_labels_name_the_source():
     import forecast_page
     assert forecast_page._variant_label("gfs_local_plus_west", "en").startswith("NOAA GFS: ")
     assert forecast_page._variant_label("gse_only", "ka") == "მხოლოდ ფაქტობრივი გენერაცია"
+
+
+
+# --- QA W1/W2/provenance (#65 audit, 21.11.2026) -------------------------------------------
+def test_W1_missing_or_inconsistent_precipitation_is_never_dry():
+    assert ws.interval_precip({(0, 3): math.nan}, [0, 3]) == {}  # NaN is missing, not 0 mm
+    assert ws.interval_precip({}, [0, 3]) == {}  # no accumulation at all: no value
+    assert ws.interval_precip({(0, 6): 2.0}, [0, 3, 6]) == {}  # base (0,3) missing: no value
+    flags = []
+    assert ws.interval_precip({(0, 3): 10.0, (0, 6): 2.0}, [0, 3, 6], tol=0.05, flags=flags) == {3: 10.0}
+    assert flags and "negative" in flags[0]  # -8 mm is flagged, not hidden as 0
+    assert ws.interval_precip({(0, 3): 1.0, (0, 6): 0.98}, [0, 3, 6], tol=0.05) == {3: 1.0, 6: 0.0}  # packing noise
+    assert ws.interval_precip({(0, 3): 0.001, (0, 6): 0.003}, [0, 3, 6], tol=0.00005)[6] == pytest.approx(0.002)
+
+
+def test_W2_run_becomes_available_only_after_retrieval_completes(tmp_path):
+    steps = (0, 3, 6)
+    start = RUN + timedelta(hours=8)
+    done = start + timedelta(minutes=5)
+    ws.collect(tmp_path, "ecmwf", ws.Http(FakeS3(steps).get, sleep=lambda s: None), start, steps, clock=lambda: done)
+    entry = json.loads((tmp_path / ws.ROOT / "ecmwf" / "manifest.json").read_text())["runs"][0]
+    assert entry["started"] == start.isoformat() and entry["retrieved"] == done.isoformat()
+    runs = ws.available_runs(tmp_path, "ecmwf")
+    assert asof(runs, start + timedelta(minutes=2)) is None  # issue during the download: excluded
+    assert asof(runs, done) is not None
+
+
+def test_W2_each_source_gets_its_own_completion_time(tmp_path):
+    from forecasting import run as frun
+    times = iter([RUN + timedelta(hours=8, minutes=m) for m in (3, 9)])
+    import types
+    stub = types.SimpleNamespace()
+
+    def fake_collect(out, source, http, now, steps=ws.STEPS, clock=None):
+        return {"source": source, "retrieved": clock().isoformat()}
+    orig = ws.collect
+    ws.collect = fake_collect
+    try:
+        frun_dt = frun.datetime
+        class Clock(frun_dt):
+            @classmethod
+            def now(cls, tz=None):
+                return next(times)
+        frun.datetime = Clock
+        res = frun.cmd_sources(tmp_path, RUN)
+    finally:
+        ws.collect, frun.datetime = orig, frun_dt
+    r = {x["source"]: x.get("retrieved") for x in res["sources"] if x["source"] in ("gfs", "ecmwf")}
+    assert r["gfs"] != r["ecmwf"]
+
+
+def test_provenance_keeps_every_message_and_parses_publication_dates(tmp_path):
+    steps = (0, 3)
+    now = RUN + timedelta(hours=8)
+    ws.collect(tmp_path, "ecmwf", ws.Http(FakeS3(steps).get, sleep=lambda s: None), now, steps, clock=lambda: now)
+    root = tmp_path / ws.ROOT / "ecmwf"
+    entry = json.loads((root / "manifest.json").read_text())["runs"][0]
+    import gzip, hashlib
+    raw = gzip.decompress((root / entry["evidence"]).read_bytes())
+    assert hashlib.sha256(raw).hexdigest() == entry["evidence_sha256"]
+    msgs = json.loads(raw)
+    assert len(msgs) == entry["messages"] == 2 * 11
+    assert all(m["sha256"] and m["offset"] >= 0 and m["length"] > 0 and m["last_modified"] for m in msgs)
+    assert {(m["field"], m["step"]) for m in msgs} >= {("t2", 0), ("tp", 3)}
+    assert ws._http_date("Sat, 21 Nov 2026 00:27:03 GMT") > ws._http_date("Fri, 20 Nov 2026 23:59:59 GMT")
