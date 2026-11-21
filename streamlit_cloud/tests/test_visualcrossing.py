@@ -25,7 +25,7 @@ def body(wind_kmh=36.0, temp=8.0):
 
 def test_collect_stores_one_daily_run_without_the_key(tmp_path):
     calls = []
-    res = vc.collect(tmp_path, KEY, lambda u: calls.append(u) or (200, body()), NOW)
+    res = vc.collect(tmp_path, KEY, lambda u: calls.append(u) or (200, body()), NOW, clock=lambda: NOW)
     assert res["result"] == "stored" and len(calls) == len(POINTS) and all(KEY in u for u in calls)
     stored = "".join(p.read_bytes().decode("latin-1") for p in tmp_path.rglob("*") if p.is_file())
     assert KEY not in stored  # neither manifest nor gzip table contains the key

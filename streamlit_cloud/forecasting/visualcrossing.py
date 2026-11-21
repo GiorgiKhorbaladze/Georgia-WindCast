@@ -73,7 +73,8 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
-def collect(out: Path, key: str | None, get: Callable[[str], tuple[int, bytes]], now: datetime) -> dict:
+def collect(out: Path, key: str | None, get: Callable[[str], tuple[int, bytes]], now: datetime,
+            clock: Callable[[], datetime] | None = None) -> dict:
     if not key:
         return {"source": "visualcrossing", "result": "no_key"}
     root = out / ROOT
@@ -88,13 +89,14 @@ def collect(out: Path, key: str | None, get: Callable[[str], tuple[int, bytes]],
             return {"source": "visualcrossing", "result": "failed", "error": f"http {status} at {p.id}"}
         rows += parse(p.id, body)
     df = pd.DataFrame(rows, columns=["point", "valid_utc", "variable", "value"])
+    retrieved = (clock or (lambda: datetime.now(UTC).replace(microsecond=0)))()  # after the last response
     run = now.replace(minute=0, second=0, microsecond=0)
     csv = df.to_csv(index=False).encode()
     (root / "runs").mkdir(parents=True, exist_ok=True)
     name = f"{run:%Y%m%dT%H%MZ}.csv.gz"
     with gzip.GzipFile(root / "runs" / name, "wb", mtime=0) as fh:
         fh.write(csv)
-    runs.append(dict(run=run.isoformat(), retrieved=now.isoformat(), file=f"runs/{name}",
+    runs.append(dict(run=run.isoformat(), started=now.isoformat(), retrieved=retrieved.isoformat(), file=f"runs/{name}",
                      sha256=hashlib.sha256(csv).hexdigest(), values=int(len(df)), requests=len(POINTS),
                      url_template=public_url(0, 0)))
     (root / "manifest.json").write_text(json.dumps({"source": "visualcrossing", "runs": runs}, indent=1) + "\n")
