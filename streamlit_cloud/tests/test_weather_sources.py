@@ -175,7 +175,8 @@ def test_tournament_builds_a_variant_per_source_and_predictor_set(tmp_path, monk
 
     calls = []
     monkeypatch.setattr(tournament, "run", lambda obs, weather=None: calls.append(weather) or
-                        {"status": {}, "scores": [], "predictions": __import__("pandas").DataFrame()})
+                        {"status": {}, "scores": [], "notes": [], "excluded": [], "weather_features": [],
+                         "predictions": __import__("pandas").DataFrame()})  # full run() shape, incl. #67 keys
     monkeypatch.setattr(frun, "load_obs", lambda *a, **k: __import__("pandas").Series(dtype=float))
     s3 = FakeS3((0, 3, 6))
     ws.collect(tmp_path, "ecmwf", ws.Http(s3.get, sleep=lambda s: None), RUN + timedelta(hours=8), (0, 3, 6))
