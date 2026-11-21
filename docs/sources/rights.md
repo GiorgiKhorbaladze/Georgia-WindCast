@@ -10,9 +10,9 @@ was verified, what was not, and which decisions belong to the owner. It is not l
 | Written terms of use / data licence for the real-time XML | **Not found** | GSE site menu (`admin.gse.com.ge/api/en/menu`, 181 entries) has no terms-of-use or data-licence page. The documents titled "Terms and Conditions of Contract" are a procurement draft contract, a contractor confidentiality agreement and a privacy policy for `dispapp.gse.com.ge`; none covers reuse of public power-system data. |
 | `robots.txt` | `gse.com.ge`: `Allow: /`; `admin.gse.com.ge`: `Disallow:` (empty) | Crawler etiquette only; **not a licence or permission**. |
 | Copyright notice in the XML files | none | The files carry no copyright or licence statement. |
-| Authorization for the current use | Handled by the owner | Correspondence with the source is kept outside this repository. |
+| Authorization for the current use | Owner decision | No authorization document was reviewed in this repository. |
 | Line-level exchange records (`Intercha`/`IntchSum`) | **Not published** | Contract v1 (`docs/contracts/cross_border_flow_v1.md`) ships with `publication: "not_authorized"`; nothing collects or shows them. Enabling them is a separate owner decision. |
-| Polling load | About 1,300 requests/day (PR #51) | GSE has published no rate limit. |
+| Polling load | Typically about 1,300 requests/day; upper bound about 1,800/day (PR #51 budget: 96 runs, extra work at most hourly) | GSE has published no rate limit. |
 
 The project shows GSE national aggregates and the monthly balance documents with attribution to
 GSE; line-level records stay unpublished (see above).
@@ -49,4 +49,4 @@ network GIS needs separate rights and a security review.
 
 1. Publication of line-level records (contract v1 gate), if ever wanted.
 2. Open-Meteo use category confirmed as non-commercial.
-3. Polling cadence: currently every 15 minutes (cron-job.org), about 1,300 requests/day.
+3. Polling cadence: currently every 15 minutes (cron-job.org), typically about 1,300 and at most about 1,800 requests/day.
