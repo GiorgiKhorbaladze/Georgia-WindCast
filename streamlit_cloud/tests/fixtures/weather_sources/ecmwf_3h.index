@@ -1,0 +1,12 @@
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "msl", "_offset": 0, "_length": 510981}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "sp", "_offset": 5013878, "_length": 537522}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "100v", "_offset": 6861256, "_length": 763173}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "levtype": "sfc", "step": "3", "param": "10fg", "_offset": 8375706, "_length": 643258}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "skt", "_offset": 9388110, "_length": 325852}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "levtype": "sfc", "step": "3", "param": "tp", "_offset": 14496480, "_length": 339074}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "tcc", "_offset": 17767749, "_length": 464500}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "10u", "_offset": 18500764, "_length": 735926}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "10v", "_offset": 21174917, "_length": 730272}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "2t", "_offset": 21905189, "_length": 318309}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "2d", "_offset": 22645667, "_length": 337055}
+{"domain": "g", "date": "20261120", "time": "1200", "expver": "0001", "class": "od", "type": "fc", "stream": "oper", "step": "3", "levtype": "sfc", "param": "100u", "_offset": 22982722, "_length": 761571}
