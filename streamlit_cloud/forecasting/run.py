@@ -196,13 +196,21 @@ def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "tournament",
-                                    "seed", "publish", "verify"])
+                                    "seed", "publish", "verify", "check-private"])
     ap.add_argument("--data-dir", type=Path)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--public-dir", type=Path, help="public forecast-data checkout (archive commands, weather)")
     ap.add_argument("--force", action="store_true", help="evaluate even if the last run is recent")
     a = ap.parse_args(argv)
     now = datetime.now(UTC).replace(microsecond=0)
+    if a.cmd == "check-private":
+        import os
+
+        from forecasting import archive
+
+        print(json.dumps(archive.check_private(os.environ["ARCHIVE_REPO"], os.environ["GITHUB_REPOSITORY"],
+                                               os.environ.get("GITHUB_TOKEN"))))
+        return 0
     if a.cmd in ("seed", "publish", "verify"):
         from forecasting import archive
 

@@ -80,9 +80,17 @@ jobs:
           else
             git checkout -q --orphan main
           fi
-      - name: Verify the archive against the public commitments
+      - name: Confirm the archive repository is private (fail closed)
+        env:
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: code/streamlit_cloud
-        run: ../../venv/bin/python -m forecasting.run verify --out-dir ../../archive --public-dir ../../pub
+        run: ../../venv/bin/python -m forecasting.run check-private --out-dir ../../archive
+      - name: Absorb any ledger still on the public side, then verify against the public commitments
+        working-directory: code/streamlit_cloud
+        run: |
+          ../../venv/bin/python -m forecasting.run seed --out-dir ../../archive --public-dir ../../pub
+          ../../venv/bin/python -m forecasting.run verify --out-dir ../../archive --public-dir ../../pub
       - name: Tournament (predictions into the private archive; weather read from the public branch)
         working-directory: code/streamlit_cloud
         run: ../../venv/bin/python -W ignore -m forecasting.run tournament --data-dir ../../data --out-dir ../../archive --public-dir ../../pub
@@ -90,9 +98,14 @@ jobs:
         run: |
           cd archive
           git add -A
-          if git diff --cached --quiet; then echo "archive unchanged"; exit 0; fi
+          if git diff --cached --quiet; then
+            echo "archive unchanged"; echo "ARCHIVE_COMMIT=$(git rev-parse HEAD 2>/dev/null)" >> "$GITHUB_ENV"; exit 0
+          fi
           git commit -q -m "tournament $(date -u +%Y-%m-%d)"
-          for i in 1 2 3 4; do git push -q origin main && exit 0; sleep $((i * 5)); done
+          for i in 1 2 3 4; do
+            if git push -q origin main; then echo "ARCHIVE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"; exit 0; fi
+            sleep $((i * 5))
+          done
           exit 1
       - name: Public projection (scores only) with a leak scan
         working-directory: code/streamlit_cloud

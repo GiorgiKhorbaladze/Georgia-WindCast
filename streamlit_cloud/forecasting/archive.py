@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import io
 import json
+import os
+import re
 import shutil
 from pathlib import Path
 
@@ -41,6 +42,7 @@ FORBIDDEN_COLUMNS = frozenset({"prediction_mw", "q10_mw", "q90_mw", "mw", "pred"
 # Aggregates over many days/cases that ARE published (bias here is a whole-window mean per horizon).
 AGGREGATE_FILES = ("evaluation/leaderboard.json", "evaluation/tournament.json")
 COMMITMENTS = Path("commitments") / "ledger.json"
+RUNS_LOG = Path("commitments") / "runs.jsonl"  # one line per publish, with the GitHub Actions run
 PUBLIC_SCAN_SKIP = ("weather", ".git")
 
 
@@ -72,23 +74,42 @@ def private_paths(root: Path) -> list[Path]:
     return found
 
 
-def seed(archive: Path, public: Path) -> dict:
-    """Copy the old public ledger into an EMPTY archive (one-off migration), verifying every file.
-
-    The public copies are not deleted here: ``publish`` removes them only after the archive has
-    been pushed, so an interrupted run never loses data."""
-    if (archive / "state.json").exists() or ledger_files(archive):
-        return {"result": "archive_not_empty", "files": 0}
-    copied = []
+def _public_private_files(public: Path) -> list[Path]:
+    out = []
     for src in private_paths(public):
-        items = [p for p in src.rglob("*") if p.is_file()] if src.is_dir() else [src]
-        for f in items:
-            dst = archive / f.relative_to(public)
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(f, dst)
-            if sha256(dst) != sha256(f):
-                raise IntegrityError(f"copy of {f.relative_to(public)} differs from the source")
-            copied.append(str(f.relative_to(public)))
+        out.extend(sorted(p for p in src.rglob("*") if p.is_file()) if src.is_dir() else [src])
+    return out
+
+
+def _is_ledger(rel: Path) -> bool:
+    return rel.suffixes[-2:] == [".csv", ".gz"] and "ledger" in rel.parts
+
+
+def _prefix(short: bytes, long: bytes) -> bool:
+    return long[:len(short)] == short
+
+
+def seed(archive: Path, public: Path) -> dict:
+    """Absorb every private file still on the public side into the archive, verifying each copy.
+
+    Safe to run before every forecast AND tournament run, in any order and after any interruption:
+    a file missing from the archive is copied and hash-checked; a ledger present in both must be a
+    byte prefix of the archived one (append-only), otherwise the run stops instead of guessing.
+    The public copies are not deleted here: ``publish`` removes them only after the archive has
+    been pushed, and only when ``covered`` confirms every one of them is in the archive."""
+    copied = []
+    for f in _public_private_files(public):
+        rel = f.relative_to(public)
+        dst = archive / rel
+        if dst.exists():
+            if _is_ledger(rel) and not _prefix(f.read_bytes(), dst.read_bytes()):
+                raise IntegrityError(f"public {rel} holds rows the archive does not; refusing to continue")
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(f, dst)
+        if sha256(dst) != sha256(f):
+            raise IntegrityError(f"copy of {rel} differs from the source")
+        copied.append(str(rel))
     for name in ("history_backtest.csv", "history_live.csv", "leaderboard.json", "tournament.json"):
         f = public / "evaluation" / name
         if f.exists() and not (archive / "evaluation" / name).exists():
@@ -96,7 +117,22 @@ def seed(archive: Path, public: Path) -> dict:
             shutil.copy2(f, archive / "evaluation" / name)
     if (public / "constraints.csv").exists() and not (archive / "constraints.csv").exists():
         shutil.copy2(public / "constraints.csv", archive / "constraints.csv")
-    return {"result": "seeded", "files": len(copied)}
+    return {"result": "seeded" if copied else "nothing_to_seed", "files": len(copied)}
+
+
+def covered(archive: Path, public: Path) -> None:
+    """Every private file on the public side must already be in the archive (ledgers as a byte
+    prefix of the archived file) before anything is removed from the public side."""
+    missing, diverged = [], []
+    for f in _public_private_files(public):
+        rel = f.relative_to(public)
+        dst = archive / rel
+        if not dst.exists():
+            missing.append(str(rel))
+        elif _is_ledger(rel) and not _prefix(f.read_bytes(), dst.read_bytes()):
+            diverged.append(str(rel))
+    if missing or diverged:
+        raise IntegrityError(f"public files not in the archive: missing={missing} diverged={diverged}")
 
 
 def _sanitized_history(src: Path) -> str:
@@ -128,8 +164,27 @@ def _rows(path: Path) -> int:
     return max(0, sum(1 for line in text.splitlines() if line.strip()) - 1)
 
 
+def _log_run(public: Path, digest: str) -> None:
+    """Time evidence beyond the git commit date (which the committer sets): the GitHub Actions run
+    that published this state. Its id, attempt and start time are recorded by GitHub itself
+    (GET /repos/{repo}/actions/runs/{run_id}); the same digest is printed in the public run log.
+    The archive commit SHA links the public line to the private state."""
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    if not run_id:  # local or test invocation: nothing to attest
+        return
+    entry = {"commitments_sha256": digest, "run_id": int(run_id),
+             "run_attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")),
+             "workflow": os.environ.get("GITHUB_WORKFLOW", ""), "repository": os.environ.get("GITHUB_REPOSITORY", ""),
+             "archive_commit": os.environ.get("ARCHIVE_COMMIT", "")}
+    path = public / RUNS_LOG
+    with path.open("a") as fh:
+        fh.write(json.dumps(entry, sort_keys=True) + "\n")
+    print(f"commitments_sha256={digest} run_id={run_id}")
+
+
 def publish(archive: Path, public: Path) -> dict:
     """Write the public projection of the archive and remove every private path from the public tree."""
+    covered(archive, public)  # AR1: never delete a public ledger the archive does not hold
     removed = []
     for p in private_paths(public):
         removed.append(str(p.relative_to(public)))
@@ -147,48 +202,108 @@ def publish(archive: Path, public: Path) -> dict:
         (ev_dst / f"day_ahead_summary_{kind}.json").write_text(
             json.dumps(_day_ahead_summary(ev_src / f"day_ahead_{kind}.csv"), indent=1) + "\n")
     (public / COMMITMENTS).parent.mkdir(parents=True, exist_ok=True)
-    (public / COMMITMENTS).write_text(json.dumps(commitments(archive), indent=1, sort_keys=True) + "\n")
+    com = commitments(archive)
+    text = json.dumps(com, indent=1, sort_keys=True) + "\n"
+    (public / COMMITMENTS).write_text(text)
+    _log_run(public, hashlib.sha256(text.encode()).hexdigest())
     scan(public)
     return {"result": "published", "removed_from_public": removed}
 
 
-def _columns(path: Path) -> set[str]:
-    raw = path.read_bytes()
-    if path.suffix == ".gz":
-        raw = gzip.decompress(raw)
-    name = path.name.removesuffix(".gz")
-    if name.endswith(".csv"):
-        head = raw.decode("utf-8", "replace").split("\n", 1)[0]
-        return {c.strip() for c in head.split(",")}
-    if name.endswith(".json"):
-        keys: set[str] = set()
+# AR2: the public tree is an allowlist, not a denylist. Outside weather/ only these files may exist.
+PUBLIC_ALLOWED = ("README.md", "constraints.csv", str(COMMITMENTS), str(RUNS_LOG),
+                  "evaluation/leaderboard.json", "evaluation/tournament.json",
+                  "evaluation/history_backtest.csv", "evaluation/history_live.csv",
+                  "evaluation/day_ahead_summary_live.json", "evaluation/day_ahead_summary_backtest.json")
+HISTORY_COLUMNS = frozenset({"day", "cadence", "horizon_min", "model_id", "cases", "mae", "rmse"})
+CONSTRAINT_COLUMNS = None  # owner-maintained input (curtailment notes), never a forecast; not parsed
+# In public JSON every number must sit under one of these keys (scores, counts, provenance).
+# Any other numeric leaf, or a string that is a bare number, is treated as a possible forecast value.
+NUMERIC_KEYS = frozenset({
+    "mae", "rmse", "bias", "skill", "skill_90ci", "mae_mwh", "cases", "days", "independent_days",
+    "common_cases", "forecasts", "matured", "complete", "incomplete_or_missing", "late_share",
+    "horizon_min", "horizon_h", "horizons_h", "model_version", "min_cases", "min_days", "weather_runs",
+    "runs", "rows", "bytes", "run_id", "run_attempt", "run_number"})
+BIAS_FILES = ("evaluation/leaderboard.json", "evaluation/tournament.json")  # whole-window bias only
+_NUMBER = re.compile(r"^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$")
 
-        def walk(o):
-            if isinstance(o, dict):
-                keys.update(o)
-                for v in o.values():
-                    walk(v)
-            elif isinstance(o, list):
-                for v in o:
-                    walk(v)
-        walk(json.load(io.BytesIO(raw)))
-        return keys
-    return set()
+
+def _json_leaks(obj, rel: str) -> list[str]:
+    bad: list[str] = []
+
+    def walk(o, key, path):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in FORBIDDEN_COLUMNS and not (k == "bias" and rel in BIAS_FILES):
+                    bad.append(f"{path}.{k}")
+                walk(v, k, f"{path}.{k}")
+        elif isinstance(o, list):
+            for i, v in enumerate(o):
+                walk(v, key, f"{path}[{i}]")
+        elif isinstance(o, bool) or o is None:
+            return
+        elif isinstance(o, (int, float)):
+            if key not in NUMERIC_KEYS:
+                bad.append(f"{path}={o!r}")
+        elif isinstance(o, str) and _NUMBER.match(o) and key not in NUMERIC_KEYS:
+            bad.append(f"{path}={o!r}")
+    walk(obj, None, "$")
+    return bad
 
 
 def scan(public: Path) -> None:
-    """Refuse a public tree that still holds a private path or a forecast column outside the
-    whole-window aggregates."""
+    """Refuse a public tree that holds a private path, a file outside the allowlist, a CSV column
+    outside its schema, or a JSON number that is not a score, count or provenance field."""
     left = [str(p.relative_to(public)) for p in private_paths(public)]
     if left:
         raise LeakError(f"private paths on the public side: {left}")
-    for p in public.rglob("*"):
+    for p in sorted(public.rglob("*")):
         rel = p.relative_to(public)
-        if not p.is_file() or rel.parts[0] in PUBLIC_SCAN_SKIP or str(rel) in AGGREGATE_FILES:
+        if not p.is_file() or rel.parts[0] in PUBLIC_SCAN_SKIP:
             continue
-        bad = _columns(p) & FORBIDDEN_COLUMNS
-        if bad:
-            raise LeakError(f"{rel} holds forecast columns {sorted(bad)}")
+        r = rel.as_posix()
+        if r not in PUBLIC_ALLOWED:
+            raise LeakError(f"{r} is not an allowed public file")
+        if r.startswith("evaluation/history_"):
+            head = set(p.read_text().split("\n", 1)[0].strip().split(",")) - {""}
+            if head - HISTORY_COLUMNS:
+                raise LeakError(f"{r} has columns outside the public schema: {sorted(head - HISTORY_COLUMNS)}")
+        elif r.endswith(".json"):
+            bad = _json_leaks(json.loads(p.read_text()), r)
+            if bad:
+                raise LeakError(f"{r} holds values that are not scores or counts: {bad[:5]}")
+        elif r.endswith(".jsonl"):
+            for n, line in enumerate(p.read_text().splitlines()):
+                bad = _json_leaks(json.loads(line), r) if line.strip() else []
+                if bad:
+                    raise LeakError(f"{r} line {n + 1}: {bad[:5]}")
+
+
+def private_status(status: int, body: dict | None, archive_repo: str, public_repo: str) -> str:
+    """Decide from GET /repos/{archive_repo} (made with this public repository's GITHUB_TOKEN)
+    whether the archive is private. 200 with private=false: public, refuse. 404: not visible to a
+    token without access, i.e. private (the SSH clone that ran before proves it exists and the
+    deploy key can reach it). Anything else (rate limit, outage): refuse, fail closed."""
+    if archive_repo.lower() == public_repo.lower():
+        raise LeakError("the archive must be a separate repository, not this public one")
+    if status == 200 and body is not None:
+        if body.get("private") is True and body.get("visibility", "private") != "public":
+            return "private"
+        raise LeakError(f"archive repository {archive_repo} is public; refusing to write forecasts to it")
+    if status == 404:
+        return "private"
+    raise LeakError(f"could not confirm that {archive_repo} is private (HTTP {status}); refusing")
+
+
+def check_private(archive_repo: str, public_repo: str, token: str | None) -> dict:
+    import httpx
+
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    r = httpx.get(f"https://api.github.com/repos/{archive_repo}", headers=headers, timeout=20)
+    body = r.json() if r.status_code == 200 else None
+    return {"result": private_status(r.status_code, body, archive_repo, public_repo)}
 
 
 def verify(archive: Path, public: Path) -> dict:

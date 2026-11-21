@@ -95,7 +95,7 @@ def test_seed_copies_every_file_byte_for_byte_and_never_overwrites_an_archive(tm
     before = {p.relative_to(pub): archive.sha256(p) for p in archive.ledger_files(pub)}
     assert archive.seed(arc, pub)["files"] >= 6
     assert {p.relative_to(arc): archive.sha256(p) for p in archive.ledger_files(arc)} == before
-    assert archive.seed(arc, pub)["result"] == "archive_not_empty"
+    assert archive.seed(arc, pub)["result"] == "nothing_to_seed"  # idempotent, nothing overwritten
 
 
 def test_corruption_or_partial_restore_is_detected(tmp_path):
@@ -156,3 +156,158 @@ def test_workflows_never_write_values_to_the_public_branch_and_stop_without_the_
         assert "--out-dir ../../out" not in wf
     import mwmodel
     assert mwmodel.PUBLISH_FORECAST is False
+
+
+# --- QA round 1: AR1 (ledger loss on a tournament-first run), AR2 (JSON leaks), private target ---
+
+def tournament_run(arc, pub):
+    """What forecast-tournament.yml does: seed, verify, write predictions to the archive, publish."""
+    archive.seed(arc, pub)
+    archive.verify(arc, pub)
+    (arc / "evaluation").mkdir(parents=True, exist_ok=True)
+    (arc / "evaluation" / "tournament_gse_only.csv.gz").write_bytes(gzip.compress(b"model_id,pred\np,9.87\n"))
+    (arc / "evaluation" / "tournament.json").write_text(json.dumps(
+        {"variants": {"gse_only": {"status": {"p": "available"}, "scores": [{"horizon_h": 1, "mae": 2.0}]}}}))
+    archive.publish(arc, pub)
+
+
+def forecast_run(arc, pub, issued):
+    archive.seed(arc, pub)
+    archive.verify(arc, pub)
+    ledger.append(arc, recs(issued))
+    archive.publish(arc, pub)
+
+
+def test_AR1_tournament_first_run_never_drops_the_public_ledger(tmp_path):
+    pub, arc = old_public(tmp_path), tmp_path / "archive"
+    arc.mkdir()
+    before = {p.relative_to(pub): p.read_bytes() for p in archive.ledger_files(pub)}
+    tournament_run(arc, pub)
+    assert {p.relative_to(arc): p.read_bytes() for p in archive.ledger_files(arc)} == before
+    assert not archive.ledger_files(pub)
+
+
+def test_AR1_publish_refuses_to_remove_a_ledger_the_archive_lacks(tmp_path):
+    pub, arc = old_public(tmp_path), tmp_path / "archive"
+    arc.mkdir()
+    with pytest.raises(archive.IntegrityError, match="missing"):
+        archive.publish(arc, pub)  # no seed: nothing may be deleted
+    assert archive.ledger_files(pub)
+
+
+def test_AR1_public_rows_the_archive_lacks_stop_the_run(tmp_path):
+    pub, arc = old_public(tmp_path), tmp_path / "archive"
+    arc.mkdir()
+    archive.seed(arc, pub)
+    ledger.append(pub, recs(T0 + timedelta(minutes=30)))  # e.g. an old-format run after the seed
+    with pytest.raises(archive.IntegrityError, match="refusing"):
+        archive.seed(arc, pub)
+    with pytest.raises(archive.IntegrityError, match="diverged"):
+        archive.publish(arc, pub)
+
+
+@pytest.mark.parametrize("order", [("f", "t", "f"), ("t", "f", "t"), ("t", "t", "f"), ("f", "f", "t")])
+def test_any_order_of_forecast_and_tournament_runs_keeps_every_row(tmp_path, order):
+    pub, arc = old_public(tmp_path), tmp_path / "archive"
+    arc.mkdir()
+    n0 = len(ledger.read_all(pub))
+    for k, step in enumerate(order):
+        tournament_run(arc, pub) if step == "t" else forecast_run(arc, pub, T0 + timedelta(minutes=15 * (k + 1)))
+        archive.scan(pub)
+        assert archive.verify(arc, pub)["result"] == "verified"
+    assert len(ledger.read_all(arc)) == n0 + 4 * order.count("f")
+
+
+def test_interrupted_migration_at_every_step_loses_nothing(tmp_path):
+    pub, arc = old_public(tmp_path), tmp_path / "archive"
+    arc.mkdir()
+    original = {p.relative_to(pub): p.read_bytes() for p in archive.ledger_files(pub)}
+    # 1) seeded but the archive push failed: the runner's copy is gone, public untouched
+    archive.seed(arc, pub)
+    shutil.rmtree(arc)
+    arc.mkdir()
+    # 2) next run seeds again, archive pushed, but the public push failed (public still full)
+    archive.seed(arc, pub)
+    staged = tmp_path / "staged_pub"
+    shutil.copytree(pub, staged)
+    archive.publish(arc, staged)  # never pushed
+    # 3) next run: archive already holds everything, seed is a no-op, publish completes
+    assert archive.seed(arc, pub)["result"] == "nothing_to_seed"
+    archive.publish(arc, pub)
+    assert {p.relative_to(arc): p.read_bytes() for p in archive.ledger_files(arc)} == original
+    assert archive.verify(arc, pub)["result"] == "verified"
+
+
+@pytest.mark.parametrize("payload", [
+    {"live": {"leaderboard": [{"mae": 1.0, "value": 12.3}]}},       # number under an unknown key
+    {"live": {"latest": [{"model_id": "p", "mw": 12.3}]}},          # forbidden key
+    {"live": {"note": "12.3456"}},                                   # number hidden in a string
+    {"live": {"series": [[1, 12.3], [2, 13.1]]}},                    # bare numbers in nested lists
+    {"variants": {"x": {"scores": [{"mae": 1, "pred": 3.0}]}}},      # tournament-style forbidden key
+])
+def test_AR2_public_json_may_hold_only_scores_counts_and_provenance(tmp_path, payload):
+    pub, arc = migrate(tmp_path)
+    archive.scan(pub)
+    (pub / "evaluation" / "leaderboard.json").write_text(json.dumps(payload))
+    with pytest.raises(archive.LeakError):
+        archive.scan(pub)
+
+
+def test_AR2_unknown_public_files_and_extra_history_columns_are_refused(tmp_path):
+    pub, _ = migrate(tmp_path)
+    (pub / "evaluation" / "notes.txt").write_text("12.3")
+    with pytest.raises(archive.LeakError, match="not an allowed public file"):
+        archive.scan(pub)
+    (pub / "evaluation" / "notes.txt").unlink()
+    (pub / "evaluation" / "history_live.csv").write_text("day,model_id,mae,mean_forecast\nd,p,1,12.3\n")
+    with pytest.raises(archive.LeakError, match="schema"):
+        archive.scan(pub)
+
+
+def test_AR2_real_leaderboard_and_tournament_shapes_pass_the_scan(tmp_path):
+    from pathlib import Path
+    fix = Path(__file__).resolve().parent / "fixtures" / "forecast"
+    pub, _ = migrate(tmp_path)
+    for name in ("leaderboard.json", "tournament.json"):
+        shutil.copy2(fix / name, pub / "evaluation" / name)
+    archive.scan(pub)
+
+
+@pytest.mark.parametrize("status, body, ok", [
+    (404, None, True),                                              # invisible to a token without access
+    (200, {"private": True, "visibility": "private"}, True),
+    (200, {"private": False, "visibility": "public"}, False),       # public repository: refuse
+    (403, None, False), (500, None, False),                         # cannot confirm: fail closed
+])
+def test_archive_repository_must_be_private(status, body, ok):
+    if ok:
+        assert archive.private_status(status, body, "o/archive", "o/Georgia-WindCast") == "private"
+    else:
+        with pytest.raises(archive.LeakError):
+            archive.private_status(status, body, "o/archive", "o/Georgia-WindCast")
+    with pytest.raises(archive.LeakError, match="separate"):
+        archive.private_status(404, None, "o/Georgia-WindCast", "O/georgia-windcast")
+
+
+def test_each_publish_records_the_github_actions_run_as_time_evidence(tmp_path, monkeypatch, capsys):
+    pub, arc = migrate(tmp_path)
+    monkeypatch.setenv("GITHUB_RUN_ID", "44886043338")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    monkeypatch.setenv("GITHUB_WORKFLOW", "Issue and score experimental wind forecasts")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/Georgia-WindCast")
+    monkeypatch.setenv("ARCHIVE_COMMIT", "a" * 40)
+    archive.publish(arc, pub)
+    line = json.loads((pub / archive.RUNS_LOG).read_text().splitlines()[-1])
+    import hashlib
+    assert line["run_id"] == 44886043338 and line["run_attempt"] == 2 and line["archive_commit"] == "a" * 40
+    assert line["commitments_sha256"] == hashlib.sha256((pub / archive.COMMITMENTS).read_bytes()).hexdigest()
+    assert f"commitments_sha256={line['commitments_sha256']}" in capsys.readouterr().out  # also in the public run log
+
+
+def test_workflows_check_privacy_seed_before_every_run_and_record_the_archive_commit():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / ".github/workflows"
+    for name in ("forecast.yml", "forecast-tournament.yml"):
+        wf = (root / name).read_text(encoding="utf-8")
+        assert wf.index("check-private") < wf.index("run seed") < wf.index("run verify") < wf.index("run publish")
+        assert 'ARCHIVE_COMMIT=$(git rev-parse HEAD)' in wf
