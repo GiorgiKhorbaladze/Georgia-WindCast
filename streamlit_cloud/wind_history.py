@@ -22,7 +22,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import UTC, datetime
 
 SCHEMA_VERSION = "wind_monthly/v1"
@@ -97,8 +97,12 @@ COLUMNS_V1 = COLUMNS[:-1]  # files written before the printed precision was stor
 LEDGER_COLUMNS = (
     "revision_id", "recorded_at", "action", "station_id", "year", "month", "old_energy",
     "new_energy", "old_status", "new_status", "source_kind", "source_url", "source_document_id",
-    "source_sha256", "reason",
+    "source_sha256", "reason", "decimals",
 )
+LEDGER_COLUMNS_V1 = LEDGER_COLUMNS[:-1]  # ledgers written before precision was stored per revision
+# Largest difference ever accepted as "the same value" (rounding of 2-decimal sources). Printed
+# precision can only narrow it; a coarse or unknown precision never widens it to e.g. +-0.5 GWh.
+MAX_MATCH_TOL = 0.005 + 1e-9
 
 
 class HistoryFormatError(ValueError):
@@ -147,6 +151,7 @@ class Revision:
     source_document_id: str
     source_sha256: str
     reason: str
+    decimals: int | None = None  # printed precision of new_energy (None: not recorded)
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,20 +240,21 @@ def render_ledger(revisions: Iterable[Revision]) -> str:
     for rev in revisions:
         row = asdict(rev)
         row["old_energy"], row["new_energy"] = _fmt(rev.old_energy), _fmt(rev.new_energy)
+        row["decimals"] = "" if rev.decimals is None else rev.decimals
         writer.writerow([row[c] for c in LEDGER_COLUMNS])
     return out.getvalue()
 
 
 def parse_ledger(text: str) -> list[Revision]:
     reader = csv.DictReader(io.StringIO(text))
-    if tuple(reader.fieldnames or ()) != LEDGER_COLUMNS:
+    if tuple(reader.fieldnames or ()) not in (LEDGER_COLUMNS, LEDGER_COLUMNS_V1):
         raise HistoryFormatError(f"unexpected ledger columns {reader.fieldnames!r}")
     out = []
     for row in reader:
         out.append(Revision(**{
             **row, "revision_id": int(row["revision_id"]), "year": int(row["year"]),
             "month": int(row["month"]), "old_energy": _opt_float(row["old_energy"]),
-            "new_energy": _opt_float(row["new_energy"]),
+            "new_energy": _opt_float(row["new_energy"]), "decimals": _opt_int(row.get("decimals") or ""),
         }))
     ids = [r.revision_id for r in out]
     if ids != sorted(ids) or len(set(ids)) != len(ids):
@@ -287,6 +293,7 @@ def tolerance(*decimals: int) -> float:
 class Archive:
     records: dict[tuple[str, int, int], MonthRecord]
     ledger: list[Revision]
+    seed_decimals: dict = field(default_factory=dict)  # printed precision of reviewed seed cells
 
     @classmethod
     def empty(cls) -> Archive:
@@ -305,15 +312,26 @@ class Archive:
         return (self.ledger[-1].revision_id + 1) if self.ledger else 1
 
     def _log(self, now: str, action: str, obs: Observation | MonthRecord, old: MonthRecord | None,
-             new_energy: float | None, new_status: str, reason: str) -> int:
+             new_energy: float | None, new_status: str, reason: str, decimals: int | None = None) -> int:
         rid = self._next_id()
         self.ledger.append(Revision(
             rid, now, action, obs.station_id, obs.year, obs.month,
             None if old is None else old.energy, new_energy,
             "" if old is None else old.verification_status, new_status, obs.source_kind,
             obs.source_url, obs.source_document_id, obs.source_sha256, reason,
+            obs.decimals if decimals is None else decimals,
         ))
         return rid
+
+    def _origin_decimals(self, rec: MonthRecord) -> int | None:
+        """Printed precision of the value's ORIGINAL source, when it is provable: the value was
+        inserted from the owner workbook and the reviewed seed records that cell's precision."""
+        first = next((r for r in self.ledger if (r.station_id, r.year, r.month) == rec.key), None)
+        if first is None or first.action != "insert" or first.source_kind != "owner_workbook":
+            return None
+        if first.new_energy is None or abs(first.new_energy - rec.energy) > 1e-9:
+            return None
+        return self.seed_decimals.get(rec.key)
 
     def apply(self, obs: Observation, now: datetime, *, initial_status: str) -> str:
         """Reconcile one observation. Returns what happened (``unchanged`` means idempotent)."""
@@ -328,28 +346,46 @@ class Archive:
                 obs.station_id, obs.year, obs.month, obs.energy, initial_status, revision_id=rid,
                 last_modified=stamp, note=obs.note, decimals=obs.decimals, **src)
             return "inserted"
-        # Rounding tolerance from the PRINTED precision of both values. The stored float cannot tell
-        # "6.00" from "6.0" or "6"; when the old precision was not recorded, only the new one counts.
-        tol = tolerance(obs.decimals, old.decimals) if old.decimals is not None else tolerance(obs.decimals)
+        # Rounding tolerance from the PRINTED precision of both values, capped at MAX_MATCH_TOL. The
+        # stored float cannot tell "6.00" from "6"; unknown precision never widens the tolerance.
+        tol = min(tolerance(obs.decimals, old.decimals) if old.decimals is not None else tolerance(obs.decimals),
+                  MAX_MATCH_TOL)
         same_value = abs(old.energy - obs.energy) <= tol
         if obs.source_sha256 == old.source_sha256 and old.decimals is None and old.source_kind == obs.source_kind:
-            # Legacy record (precision not stored) re-read from the very document it cites. That document
-            # already matched it under the old rule, so record the precision instead of re-judging it:
-            # the document's own precision when the values are identical, else the stored value's.
-            if abs(old.energy - obs.energy) <= tolerance(obs.decimals, _decimals(old.energy)):
-                dec = obs.decimals if abs(old.energy - obs.energy) < 1e-9 else _decimals(old.energy)
+            # Legacy record (precision not stored) re-read from the very document it cites. Its earlier
+            # match is NOT taken on trust (it may come from the old +-0.5 GWh tolerance):
+            # - identical values: the document's printed precision is recorded;
+            # - different values: accepted only as rounding of a source whose precision is provable
+            #   (owner workbook cell, from the reviewed seed) and within MAX_MATCH_TOL;
+            # - otherwise the record is quarantined as a conflict with the document value pending.
+            exact = abs(old.energy - obs.energy) < 1e-9
+            origin = None if exact else self._origin_decimals(old)
+            if exact or (origin is not None and abs(old.energy - obs.energy) <= min(tolerance(obs.decimals, origin),
+                                                                                    MAX_MATCH_TOL)):
+                dec = obs.decimals if exact else origin
+                src_note = "document" if exact else "owner workbook (seed)"
                 rid = self._log(stamp, "precision", obs, old, old.energy, old.verification_status,
-                                f"printed precision recorded: {dec} decimals")
-                # Metadata only: the record keeps the revision id of its value, so an approval that
-                # names the reviewed revision (approve_keys) stays valid. The ledger has entry ``rid``.
-                del rid
+                                f"printed precision recorded from the {src_note}: {dec} decimals", decimals=dec)
+                del rid  # metadata only: the value's revision id stays, so reviewed approvals stay valid
                 self.records[old.key] = replace(old, decimals=dec, last_modified=stamp)
                 return "precision_recorded"
+            rid = self._log(stamp, "conflict", obs, old, obs.energy, CONFLICT,
+                            "legacy match not confirmed at printed precision; quarantined for review")
+            self.records[old.key] = replace(old, verification_status=CONFLICT, pending_energy=obs.energy,
+                                            pending_revision_id=rid, last_modified=stamp)
+            return "legacy_conflict"
         if obs.source_sha256 == old.source_sha256 and same_value:
             return "unchanged"  # the very same document again
         if obs.source_kind == "owner_workbook":
             return "unchanged" if same_value else "owner_differs"  # re-import never overrides
         # An official document speaks about a record already in the archive.
+        if same_value and old.pending_revision_id is not None:
+            # The newest document agrees with the DISPLAYED value again: the earlier proposal is
+            # superseded and must never be approvable afterwards (QA D).
+            self._log(stamp, "withdraw", obs, old, old.energy, old.verification_status,
+                      f"proposal {old.pending_revision_id} superseded: newest document matches the displayed value")
+            old = replace(old, pending_energy=None, pending_revision_id=None)
+            self.records[old.key] = old
         if same_value:
             if old.verification_status in (OWNER, CONFLICT):
                 rid = self._log(stamp, "verify", obs, old, old.energy, VERIFIED,
@@ -367,7 +403,8 @@ class Archive:
                 self.records[old.key] = replace(old, revision_id=rid, last_modified=stamp, **src)
                 return "provenance_refreshed"
             return "unchanged"
-        if old.pending_energy is not None and abs(old.pending_energy - obs.energy) <= tolerance(obs.decimals):
+        if old.pending_energy is not None and abs(old.pending_energy - obs.energy) <= min(tolerance(obs.decimals),
+                                                                                         MAX_MATCH_TOL):
             return "unchanged"  # this difference is already pending review
         if old.verification_status == PENDING:
             # Not yet public: the newest official value replaces the pending one (logged).
@@ -395,11 +432,11 @@ class Archive:
                                             last_modified=stamp)
                 done.append(key)
             elif rec.pending_revision_id is not None and rec.pending_revision_id <= through_revision:
-                rid = self._log(stamp, "approve", rec, rec, rec.pending_energy, APPROVED, reason)
                 pending = next(r for r in self.ledger if r.revision_id == rec.pending_revision_id)
+                rid = self._log(stamp, "approve", rec, rec, rec.pending_energy, APPROVED, reason, decimals=pending.decimals)
                 self.records[key] = replace(
                     rec, energy=rec.pending_energy, verification_status=APPROVED, revision_id=rid,
-                    last_modified=stamp, pending_energy=None, pending_revision_id=None,
+                    last_modified=stamp, pending_energy=None, pending_revision_id=None, decimals=pending.decimals,
                     source_kind=pending.source_kind, source_url=pending.source_url,
                     source_document_id=pending.source_document_id, source_sha256=pending.source_sha256)
                 done.append(key)
@@ -448,10 +485,10 @@ def approve_keys(archive: Archive, now: datetime, keys: list[tuple[str, int, int
             archive.records[rec.key] = replace(rec, verification_status=APPROVED, revision_id=rid, last_modified=stamp)
         else:
             pending = next(r for r in archive.ledger if r.revision_id == rec.pending_revision_id)
-            rid = archive._log(stamp, "approve", rec, rec, rec.pending_energy, APPROVED, reason)
+            rid = archive._log(stamp, "approve", rec, rec, rec.pending_energy, APPROVED, reason, decimals=pending.decimals)
             archive.records[rec.key] = replace(
                 rec, energy=rec.pending_energy, verification_status=APPROVED, revision_id=rid,
-                last_modified=stamp, pending_energy=None, pending_revision_id=None,
+                last_modified=stamp, pending_energy=None, pending_revision_id=None, decimals=pending.decimals,
                 source_kind=pending.source_kind, source_url=pending.source_url,
                 source_document_id=pending.source_document_id, source_sha256=pending.source_sha256)
         done.append(rec.key)
