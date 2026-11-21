@@ -178,11 +178,11 @@ async function exercise(browser, dimensions, english, fallback) {
     assert.equal(scenarios.missing.state, 'stale');
     assert.equal(scenarios.missing.wind, '0');
     assert(scenarios.missing.provisional);
-    assert.equal(scenarios.missing.imports, '—');
+    assert.equal(scenarios.missing.imports, '-');
     assert.equal(scenarios.missing.closure, 'Balance check unavailable');
     assert.equal(scenarios.missing.note, null);
     assert.equal(scenarios.empty.state, 'unavailable');
-    assert.equal(scenarios.empty.wind, '—');
+    assert.equal(scenarios.empty.wind, '-');
     assert(scenarios.empty.playbackDisabled);
   }
   assert.deepEqual(errors, []);
