@@ -46,10 +46,11 @@ def load() -> dict:
             out["board"] = json.loads(text)
             tour = fetch("evaluation/tournament.json")
             out["tournament"] = json.loads(tour) if tour else None
-            for key, name in (("history", "history_backtest.csv"), ("history_live", "history_live.csv"),
-                              ("day_ahead", "day_ahead_live.csv")):
+            for key, name in (("history", "history_backtest.csv"), ("history_live", "history_live.csv")):
                 body = fetch(f"evaluation/{name}")
                 out[key] = _csv(body)
+            day = fetch("evaluation/day_ahead_summary_live.json")  # aggregates only; values stay private
+            out["day_ahead"] = json.loads(day) if day else None
     except (httpx.HTTPError, ValueError) as exc:
         out["error"] = type(exc).__name__
     return out
@@ -116,7 +117,7 @@ def render(lang: str) -> None:
     table = pd.DataFrame({
         tr("fc_col_h", lang): [horizon_label(m, lang) for m in df.horizon_min],
         tr("fc_col_model", lang): [model_name(m, lang) for m in df.model_id],
-        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2), "Bias, MW": df.bias.round(2),
+        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2),
         tr("fc_col_skill", lang): [tr("fc_reference", lang) if m == "persistence" else "-" if s is None else f"{s:+.3f}"
                                    for m, s in zip(df.model_id, df.skill, strict=True)],
         tr("fc_col_ci", lang): ["-" if c is None else f"{c[0]:+.2f} ... {c[1]:+.2f}" for c in df.skill_90ci],
@@ -158,16 +159,14 @@ def _history_chart(h: pd.DataFrame, lang: str) -> go.Figure:
     return ui.style(fig, 280, "MAE, MW")
 
 
-def _day_ahead(df: pd.DataFrame | None, lang: str) -> None:
-    if df is None or df.empty or not df["complete"].any():
+def _day_ahead(summary: dict | None, lang: str) -> None:
+    rows = (summary or {}).get("models") or []
+    if not rows:
         st.info(tr("fc_day_none", lang))
         return
-    ok = df[df["complete"]].copy()
-    ok["error_mwh"] = ok.forecast_mwh - ok.actual_mwh
-    g = ok.groupby("model_id")["error_mwh"]
-    st.dataframe(pd.DataFrame({tr("fc_col_model", lang): [model_name(m, lang) for m in g.mean().index],
-                               "MAE, MWh": g.apply(lambda e: e.abs().mean()).round(1).values,
-                               "Bias, MWh": g.mean().round(1).values, tr("fc_col_days", lang): g.size().values}),
+    st.dataframe(pd.DataFrame({tr("fc_col_model", lang): [model_name(r["model_id"], lang) for r in rows],
+                               "MAE, MWh": [r["mae_mwh"] for r in rows],
+                               tr("fc_col_days", lang): [r["days"] for r in rows]}),
                  hide_index=True, width="stretch")
 
 
@@ -194,7 +193,7 @@ def _tournament(t: dict | None, lang: str) -> None:
     st.dataframe(pd.DataFrame({
         tr("fc_col_h", lang): [f"{h} {tr('fc_h', lang)}" for h in df.horizon_h],
         tr("fc_col_model", lang): [model_name(m, lang) for m in df.model_id],
-        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2), "Bias, MW": df.bias.round(2),
+        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2),
         tr("fc_col_skill", lang): [tr("fc_reference", lang) if m == "persistence" else "-" if s is None else f"{s:+.3f}"
                                    for m, s in zip(df.model_id, df.skill, strict=True)],
         tr("fc_col_ci", lang): ["-" if c is None else f"{c[0]:+.2f} ... {c[1]:+.2f}" for c in df.skill_90ci],
