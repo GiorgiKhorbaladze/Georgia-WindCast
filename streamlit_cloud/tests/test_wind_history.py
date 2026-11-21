@@ -395,3 +395,74 @@ def test_workflow_is_owner_gated_and_separate_from_collector():
     assert "history_monitor.py check" in wf and "collector.py" not in wf
     assert "group: collect-gse" in wf and "cancel-in-progress: false" in wf  # never push concurrently
     assert "pull_request" not in wf  # trusted default-branch code only
+
+
+# --- printed precision and selective approval (owner QA findings, 21.11.2026) ----------------
+def test_trailing_zero_precision_is_kept_so_small_revisions_are_not_hidden():
+    a = wh.Archive.empty()
+    a.apply(obs(6.0, sha="v1", decimals=2), T0, initial_status=wh.PENDING)  # printed "6,00"
+    a.approve(T0, 1, "ok")
+    assert a.records[("kartli-gori", 2025, 1)].decimals == 2
+    # 6.00 -> 6.40 is a real revision; before the fix 6.0 was read as 0 decimals (±0.5 GWh)
+    assert a.apply(obs(6.40, sha="v2", decimals=2), T0, initial_status=wh.PENDING) == "revision_pending"
+
+
+def test_legacy_file_without_decimals_parses_and_records_precision_on_reparse():
+    a = wh.Archive.empty()
+    a.apply(obs(6.0, sha="doc", decimals=2), T0, initial_status=wh.PENDING)
+    records, ledger = a.dump()
+    header, *rows = records.splitlines()
+    legacy = "\n".join([header.rsplit(",", 1)[0]] + [r.rsplit(",", 1)[0] for r in rows]) + "\n"
+    b = wh.Archive.load(legacy, ledger)
+    assert b.records[("kartli-gori", 2025, 1)].decimals is None
+    assert b.apply(obs(6.0, sha="doc", decimals=2), T0, initial_status=wh.PENDING) == "precision_recorded"
+    assert b.records[("kartli-gori", 2025, 1)].decimals == 2 and b.ledger[-1].action == "precision"
+    assert b.records[("kartli-gori", 2025, 1)].revision_id == 1  # value revision unchanged: approvals stay valid
+    assert b.apply(obs(6.0, sha="doc", decimals=2), T0, initial_status=wh.PENDING) == "unchanged"
+
+
+def test_unknown_old_precision_never_widens_the_tolerance():
+    a = wh.Archive.load(*_legacy_archive(6.0))
+    # a different document says 6.40: must not be swallowed as "same value"
+    assert a.apply(obs(6.40, sha="other", decimals=2), T0, initial_status=wh.PENDING) in ("conflict", "revision_pending")
+
+
+def _legacy_archive(value):
+    a = wh.Archive.empty()
+    a.apply(obs(value, sha="wb", kind="owner_workbook", decimals=2), T0, initial_status=wh.OWNER)
+    records, ledger = a.dump()
+    header, *rows = records.splitlines()
+    return "\n".join([header.rsplit(",", 1)[0]] + [r.rsplit(",", 1)[0] for r in rows]) + "\n", ledger
+
+
+def _pending_archive():
+    a = wh.Archive.empty()
+    a.apply(obs(6.52, month=8), T0, initial_status=wh.PENDING)  # revision 1
+    a.apply(obs(33.27, month=10), T0, initial_status=wh.PENDING)  # revision 2
+    return a
+
+
+def test_approve_keys_approves_exactly_the_reviewed_records():
+    a = _pending_archive()
+    done = wh.approve_keys(a, T0, wh.parse_keys("kartli-gori:2025-08@1"), "QA ok")
+    assert done == [("kartli-gori", 2025, 8)]
+    assert a.records[("kartli-gori", 2025, 8)].verification_status == wh.APPROVED
+    assert a.records[("kartli-gori", 2025, 10)].verification_status == wh.PENDING  # left for later
+
+
+def test_approve_keys_refuses_stale_or_unknown_revisions_atomically():
+    a = _pending_archive()
+    a.apply(obs(6.60, sha="s2", month=8), T0, initial_status=wh.PENDING)  # value changed after review
+    before = a.dump()
+    with pytest.raises(wh.ApprovalError, match="changed after review"):
+        wh.approve_keys(a, T0, wh.parse_keys("kartli-gori:2025-10@2, kartli-gori:2025-08@1"), "x")
+    assert a.dump() == before  # nothing approved, not even the valid key
+    with pytest.raises(wh.ApprovalError, match="not in the archive"):
+        wh.approve_keys(a, T0, wh.parse_keys("ruisi:2025-08@1"), "x")
+    with pytest.raises(wh.ApprovalError, match="expected"):
+        wh.parse_keys("kartli-gori-2025-08")
+
+
+def test_workflow_offers_keyed_approval():
+    wf = (HERE.parents[1] / ".github" / "workflows" / "history-monitor.yml").read_text(encoding="utf-8")
+    assert "approve_keys" in wf and "history_monitor.py approve-keys" in wf
