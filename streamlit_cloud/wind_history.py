@@ -91,7 +91,9 @@ COLUMNS = (
     "station_id", "name_ka", "name_en", "year", "month", "energy", "unit", "verification_status",
     "source_kind", "source_url", "source_document_id", "source_sha256", "retrieved_at",
     "published_at", "revision_id", "last_modified", "pending_energy", "pending_revision_id", "note",
+    "decimals",
 )
+COLUMNS_V1 = COLUMNS[:-1]  # files written before the printed precision was stored
 LEDGER_COLUMNS = (
     "revision_id", "recorded_at", "action", "station_id", "year", "month", "old_energy",
     "new_energy", "old_status", "new_status", "source_kind", "source_url", "source_document_id",
@@ -121,6 +123,7 @@ class MonthRecord:
     pending_energy: float | None = None
     pending_revision_id: int | None = None
     note: str = ""
+    decimals: int | None = None  # decimals printed by the source of ``energy`` (None: not recorded)
 
     @property
     def key(self) -> tuple[str, int, int]:
@@ -187,13 +190,14 @@ def render_records(records: Iterable[MonthRecord]) -> str:
             r.verification_status, r.source_kind, r.source_url, r.source_document_id, r.source_sha256,
             r.retrieved_at, r.published_at, r.revision_id, r.last_modified, _fmt(r.pending_energy),
             "" if r.pending_revision_id is None else r.pending_revision_id, r.note,
+            "" if r.decimals is None else r.decimals,
         ])
     return out.getvalue()
 
 
 def parse_records(text: str) -> list[MonthRecord]:
     reader = csv.DictReader(io.StringIO(text))
-    if tuple(reader.fieldnames or ()) != COLUMNS:
+    if tuple(reader.fieldnames or ()) not in (COLUMNS, COLUMNS_V1):
         raise HistoryFormatError(f"unexpected columns {reader.fieldnames!r}")
     out: list[MonthRecord] = []
     seen: set[tuple[str, int, int]] = set()
@@ -208,6 +212,7 @@ def parse_records(text: str) -> list[MonthRecord]:
                 revision_id=int(row["revision_id"]), last_modified=row["last_modified"],
                 pending_energy=_opt_float(row["pending_energy"]),
                 pending_revision_id=_opt_int(row["pending_revision_id"]), note=row["note"],
+                decimals=_opt_int(row.get("decimals") or ""),
             )
         except (KeyError, ValueError) as exc:
             raise HistoryFormatError(f"bad row {row!r}: {exc}") from exc
@@ -321,9 +326,25 @@ class Archive:
             rid = self._log(stamp, "insert", obs, None, obs.energy, initial_status, obs.note or "new record")
             self.records[(obs.station_id, obs.year, obs.month)] = MonthRecord(
                 obs.station_id, obs.year, obs.month, obs.energy, initial_status, revision_id=rid,
-                last_modified=stamp, note=obs.note, **src)
+                last_modified=stamp, note=obs.note, decimals=obs.decimals, **src)
             return "inserted"
-        same_value = abs(old.energy - obs.energy) <= tolerance(obs.decimals, _decimals(old.energy))
+        # Rounding tolerance from the PRINTED precision of both values. The stored float cannot tell
+        # "6.00" from "6.0" or "6"; when the old precision was not recorded, only the new one counts.
+        tol = tolerance(obs.decimals, old.decimals) if old.decimals is not None else tolerance(obs.decimals)
+        same_value = abs(old.energy - obs.energy) <= tol
+        if obs.source_sha256 == old.source_sha256 and old.decimals is None and old.source_kind == obs.source_kind:
+            # Legacy record (precision not stored) re-read from the very document it cites. That document
+            # already matched it under the old rule, so record the precision instead of re-judging it:
+            # the document's own precision when the values are identical, else the stored value's.
+            if abs(old.energy - obs.energy) <= tolerance(obs.decimals, _decimals(old.energy)):
+                dec = obs.decimals if abs(old.energy - obs.energy) < 1e-9 else _decimals(old.energy)
+                rid = self._log(stamp, "precision", obs, old, old.energy, old.verification_status,
+                                f"printed precision recorded: {dec} decimals")
+                # Metadata only: the record keeps the revision id of its value, so an approval that
+                # names the reviewed revision (approve_keys) stays valid. The ledger has entry ``rid``.
+                del rid
+                self.records[old.key] = replace(old, decimals=dec, last_modified=stamp)
+                return "precision_recorded"
         if obs.source_sha256 == old.source_sha256 and same_value:
             return "unchanged"  # the very same document again
         if obs.source_kind == "owner_workbook":
@@ -332,7 +353,7 @@ class Archive:
         if same_value:
             if old.verification_status in (OWNER, CONFLICT):
                 rid = self._log(stamp, "verify", obs, old, old.energy, VERIFIED,
-                                f"matches GSE document within ±{tolerance(obs.decimals, _decimals(old.energy)):.4g} GWh")
+                                f"matches GSE document within ±{tol:.4g} GWh")
                 self.records[old.key] = replace(old, verification_status=VERIFIED, revision_id=rid,
                                                 last_modified=stamp, pending_energy=None,
                                                 pending_revision_id=None, **src)
@@ -353,7 +374,7 @@ class Archive:
             rid = self._log(stamp, "revise_pending", obs, old, obs.energy, PENDING,
                             "GSE document changed a value that was still awaiting approval")
             self.records[old.key] = replace(old, energy=obs.energy, revision_id=rid,
-                                            last_modified=stamp, **src)
+                                            last_modified=stamp, decimals=obs.decimals, **src)
             return "pending_updated"
         action, status = ("conflict", CONFLICT) if old.verification_status in (OWNER, CONFLICT) \
             else ("revise_pending", old.verification_status)
@@ -383,6 +404,58 @@ class Archive:
                     source_document_id=pending.source_document_id, source_sha256=pending.source_sha256)
                 done.append(key)
         return done
+
+
+class ApprovalError(ValueError):
+    pass
+
+
+def parse_keys(text: str) -> list[tuple[str, int, int, int]]:
+    """``station:YYYY-MM@revision`` items separated by commas or spaces."""
+    out = []
+    for item in text.replace(",", " ").split():
+        try:
+            station, rest = item.split(":", 1)
+            period, rev = rest.split("@", 1)
+            year, month = period.split("-", 1)
+            out.append((station, int(year), int(month), int(rev)))
+        except ValueError as exc:
+            raise ApprovalError(f"bad key {item!r}; expected station:YYYY-MM@revision") from exc
+    if not out:
+        raise ApprovalError("no keys given")
+    return out
+
+
+def approve_keys(archive: Archive, now: datetime, keys: list[tuple[str, int, int, int]], reason: str) -> list:
+    """Approve exactly the listed records, each at the revision the owner reviewed. All or nothing:
+    if any record is missing, not pending, or has changed since that revision, nothing is approved."""
+    for station, year, month, rev in keys:
+        rec = archive.records.get((station, year, month))
+        if rec is None:
+            raise ApprovalError(f"{station} {year}-{month:02d}: not in the archive")
+        current = rec.revision_id if rec.verification_status == PENDING else rec.pending_revision_id
+        if current is None:
+            raise ApprovalError(f"{station} {year}-{month:02d}: nothing pending")
+        if current != rev:
+            raise ApprovalError(f"{station} {year}-{month:02d}: pending revision is {current}, not {rev} "
+                                "(the value changed after review)")
+    stamp = now.astimezone(UTC).isoformat(timespec="seconds")
+    done = []
+    for station, year, month, _rev in keys:
+        rec = archive.records[(station, year, month)]
+        if rec.verification_status == PENDING:
+            rid = archive._log(stamp, "approve", rec, rec, rec.energy, APPROVED, reason)
+            archive.records[rec.key] = replace(rec, verification_status=APPROVED, revision_id=rid, last_modified=stamp)
+        else:
+            pending = next(r for r in archive.ledger if r.revision_id == rec.pending_revision_id)
+            rid = archive._log(stamp, "approve", rec, rec, rec.pending_energy, APPROVED, reason)
+            archive.records[rec.key] = replace(
+                rec, energy=rec.pending_energy, verification_status=APPROVED, revision_id=rid,
+                last_modified=stamp, pending_energy=None, pending_revision_id=None,
+                source_kind=pending.source_kind, source_url=pending.source_url,
+                source_document_id=pending.source_document_id, source_sha256=pending.source_sha256)
+        done.append(rec.key)
+    return done
 
 
 def _decimals(value: float) -> int:

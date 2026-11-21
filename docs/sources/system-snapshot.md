@@ -24,7 +24,7 @@ See the [pinned archive reconciliation and original XML evidence](../evidence/pr
 
 ## Release and data acquisition gates
 
-The Streamlit README records owner-reported authorization for the existing aggregate use. [Issue #18](https://github.com/GiorgiKhorbaladze/Georgia-WindCast/issues/18) still tracks written GSE terms for automated retrieval and public redistribution, and this review did not locate those written terms. The scope of any existing permission should be confirmed before a public rollout. The PR uses the same archive and activates no collection or publication.
+Source authorization is handled by the owner (see `docs/sources/rights.md`). This page uses the same archive and activates no additional collection or publication.
 
 Before a line-level phase, get written approval for public line readings and independently reusable geometry. Define a reviewed registry mapping stable source identifiers to named interconnections and neighboring countries. Establish source completeness and quality semantics, including how absent, substituted, duplicate and subtotal-only records are handled. Persist per-line records separately from the existing backwards-compatible national series, with source period, signed MW, quality, source revision and provenance. Reconcile each archived period, preserve discrepancies, and publish animation only for approved, geographically corroborated lines with confirmed readings. Historic periods without line records must remain empty.
 
