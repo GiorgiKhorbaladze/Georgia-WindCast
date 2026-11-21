@@ -172,10 +172,26 @@ def cmd_sources(out: Path, now: datetime) -> dict:
                                           clock=lambda: datetime.now(UTC).replace(microsecond=0)))
             except Exception as exc:  # reported, never fatal for the other source
                 results.append({"source": source, "result": "failed", "error": f"{type(exc).__name__}: {exc}"[:300]})
+        import os
+
+        from forecasting import visualcrossing as vc
+
+        # In Actions, requests are made only against this run's reservation, and only if the
+        # workflow pushed it first (VC_RESERVATION_PUSHED=true); otherwise "not_reserved".
+        run_id = os.environ.get("GITHUB_RUN_ID")
+        if run_id and os.environ.get("VC_RESERVATION_PUSHED") != "true":
+            run_id = "unpushed"  # matches no reservation: no request is made
+        try:  # the key comes from the environment only and is never printed or stored
+            results.append(vc.collect(out, os.environ.get("VISUAL_CROSSING_API_KEY"),
+                                      lambda u: (lambda r: (r.status_code, r.content))(client.get(u)), now,
+                                      run_id=run_id))
+        except Exception as exc:
+            results.append({"source": "visualcrossing", "result": "failed", "error": type(exc).__name__})
     return {"result": "sources", "sources": results, "health": source_health(out, results, now)}
 
 
 SOURCE_STALE_HOURS = 18  # 4 runs a day per source plus 4-8 h publication lag: 18 h means >= 2 missed runs
+STALE_HOURS_BY_SOURCE = {"visualcrossing": 30}  # pilot: one request set a day
 
 
 def source_health(out: Path, results: list[dict], now: datetime) -> dict:
@@ -204,11 +220,15 @@ def source_health(out: Path, results: list[dict], now: datetime) -> dict:
         h["newest_run"] = max(runs) if runs else None
         age = (now - datetime.fromisoformat(h["newest_run"])).total_seconds() / 3600 if runs else None
         h["newest_run_age_h"] = None if age is None else round(age, 1)
-        h["stale"] = age is None or age > SOURCE_STALE_HOURS
+        limit = STALE_HOURS_BY_SOURCE.get(src, SOURCE_STALE_HOURS)
+        h["stale"] = age is None or age > limit
+        if r.get("result") == "no_key":
+            h["stale"] = False  # pilot not configured: reported in the result, not an outage
         if h["stale"]:
-            alert.append(f"{src}: no stored run newer than {SOURCE_STALE_HOURS} h")
+            alert.append(f"{src}: no stored run newer than {limit} h")
         sources[src] = h
-    if results and all(r.get("result") == "failed" for r in results):
+    configured = [r for r in results if r.get("result") != "no_key"]  # an unconfigured pilot is not a source
+    if configured and all(r.get("result") == "failed" for r in configured):
         alert.insert(0, "every source failed in this attempt")
     report = {"checked_at": now.isoformat(), "stale_after_h": SOURCE_STALE_HOURS, "sources": sources, "alert": alert}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,7 +249,7 @@ def cmd_tournament(data_dir: Path, out: Path, now: datetime, weather_dir: Path |
                     "min_days": tournament.MIN_DAYS, "horizons_h": list(tournament.HORIZONS), "variants": {},
                     "sources": {}}
     loaders = {"icon_openmeteo": (weather_points.available_runs(wdir), lambda r: weather_points.load_run(wdir, r))}
-    for src in ("gfs", "ecmwf"):
+    for src in ("gfs", "ecmwf", "visualcrossing"):
         loaders[src] = (weather_sources.available_runs(wdir, src),
                         lambda r, s=src: weather_sources.load_run(wdir, s, r))
     variants = {"gse_only": None}
@@ -269,7 +289,7 @@ def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "sources", "tournament",
-                                    "seed", "publish", "verify", "check-private"])
+                                    "seed", "publish", "verify", "check-private", "vc-reserve"])
     ap.add_argument("--data-dir", type=Path)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--public-dir", type=Path, help="public forecast-data checkout (archive commands, weather)")
@@ -291,6 +311,14 @@ def main(argv: list[str] | None = None) -> int:
             ap.error("--public-dir is required")
         result = getattr(archive, a.cmd)(a.out_dir, a.public_dir)
         print(json.dumps(result, default=str))
+        return 0
+    if a.cmd == "vc-reserve":
+        import os
+
+        from forecasting import visualcrossing as vc
+
+        print(json.dumps(vc.reserve(a.out_dir, os.environ.get("VISUAL_CROSSING_API_KEY"), now,
+                                    os.environ.get("GITHUB_RUN_ID", "local"))))
         return 0
     if a.cmd == "sources":
         result = cmd_sources(a.out_dir, now)

@@ -208,7 +208,7 @@ def _variant_label(v: str, lang: str) -> str:
     """'gse_only' or '<source>_<predictor set>' -> readable label (source names stay as in the data)."""
     if f"fc_v_{v}" in T:
         return tr(f"fc_v_{v}", lang)
-    for src in ("icon_openmeteo", "gfs", "ecmwf"):
+    for src in ("icon_openmeteo", "gfs", "ecmwf", "visualcrossing"):
         if v.startswith(src + "_") and f"fc_v_{v[len(src) + 1:]}" in T:
             return f"{tr(f'fc_srcname_{src}', lang)}: {tr(f'fc_v_{v[len(src) + 1:]}', lang)}"
     return v

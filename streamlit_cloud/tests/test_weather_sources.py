@@ -163,7 +163,8 @@ def test_sources_workflow_is_isolated_keyless_and_unpublished():
     wf = (root / ".github/workflows/weather-sources.yml").read_text(encoding="utf-8")
     assert "group: forecast-data" in wf and "pull_request" not in wf and "secrets." in wf
     assert "push -q origin forecast-data" in wf and "origin data" not in wf
-    assert "API_KEY" not in wf.upper().replace("API KEY", "")  # no key needed for AWS Open Data
+    keys = {w for w in wf.replace("{", " ").replace("}", " ").split() if w.endswith("API_KEY")}
+    assert keys <= {"VISUAL_CROSSING_API_KEY:", "secrets.VISUAL_CROSSING_API_KEY"}  # GFS/IFS need no key
     import mwmodel
     assert mwmodel.PUBLISH_FORECAST is False
 
@@ -325,5 +326,5 @@ def test_tournament_reads_every_weather_source_from_the_public_dir(tmp_path, mon
         "status": {}, "scores": [], "notes": [], "excluded": [], "weather_features": [],
         "predictions": __import__("pandas").DataFrame()})
     frun.cmd_tournament(tmp_path, arc, RUN, pub)
-    assert seen and all(d == pub for _, d in seen) and {s for s, _ in seen} == {"icon", "gfs", "ecmwf"}
+    assert seen and all(d == pub for _, d in seen) and {"icon", "gfs", "ecmwf"} <= {s for s, _ in seen}
     assert (arc / "evaluation" / "tournament.json").exists() and not (pub / "evaluation").exists()
