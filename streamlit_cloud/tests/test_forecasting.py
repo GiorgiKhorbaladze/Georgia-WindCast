@@ -189,7 +189,8 @@ def test_air_density_units_and_west_ablation_defined():
     assert features.air_density(1013.25, 15.0, 80) < features.air_density(1013.25, 15.0)
     assert set(features.ABLATIONS) == {"local_wind", "local_weather", "local_plus_west"}
     assert "west" in features.ABLATIONS["local_plus_west"]["regions"]
-    assert "not active" in features.request_plan()["status"]
+    plan = features.request_plan()
+    assert plan["http_requests_per_day"] == 12 and plan["weighted_calls_per_day_estimate"] < 200  # far below 10k
 
 
 def test_monthly_outlook_quantiles_and_partial_first_year():
@@ -208,6 +209,6 @@ def test_workflow_reads_data_branch_only_and_keeps_publication_off():
     wf = (root / ".github/workflows/forecast.yml").read_text(encoding="utf-8")
     assert "workflow_run" in wf and "pull_request" not in wf
     assert "push -q origin forecast-data" in wf and "push -q origin data" not in wf
-    assert "open-meteo" not in wf.lower() and "gse.com.ge" not in wf
+    assert "gse.com.ge" not in wf and "|| true" in wf  # weather failure never blocks forecasting
     import mwmodel
     assert mwmodel.PUBLISH_FORECAST is False

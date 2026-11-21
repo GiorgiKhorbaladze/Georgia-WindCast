@@ -1,8 +1,9 @@
 name: Issue and score experimental wind forecasts
 
-# Issue #57 stage I. Runs right after each GSE collection (no request to GSE or any weather
-# provider: it only reads the `data` branch) and writes to its own `forecast-data` branch, so it
-# can never interfere with the collector's pushes. Nothing here publishes a forecast on the
+# Issue #57. Runs right after each GSE collection and writes to its own `forecast-data` branch, so
+# it can never interfere with the collector's pushes. It never contacts GSE. Weather: at most one
+# batched Open-Meteo request per NEW ICON run (owner-approved 20.11.2026), detected from the
+# collector's own metadata, so roughly 4 data requests a day. Nothing here publishes a forecast on the
 # website; streamlit_cloud/mwmodel.py PUBLISH_FORECAST stays False.
 on:
   workflow_run:
@@ -50,7 +51,7 @@ jobs:
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           git init -q data && git -C data remote add origin "https://github.com/$REPO.git"
           git -C data -c http.extraheader="$auth" fetch -q --depth 1 origin data
-          git -C data checkout -q FETCH_HEAD -- gse
+          git -C data checkout -q FETCH_HEAD -- gse weather/forecast_meta.json
           git init -q out && cd out
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -64,6 +65,9 @@ jobs:
               "Written only by .github/workflows/forecast.yml (Issue #57). Append-only ledger," \
               "rolling-origin backtest and scores. Not published on the website." > README.md
           fi
+      - name: Multi-point weather (only for a new ICON run; a failure never blocks forecasting)
+        working-directory: code/streamlit_cloud
+        run: ../../venv/bin/python -m forecasting.run weather --data-dir ../../data --out-dir ../../out || true
       - name: Issue, backtest (incremental) and evaluate (at most hourly)
         env:
           FORCE: ${{ github.event.inputs.force_evaluate == 'true' && '--force' || '' }}
