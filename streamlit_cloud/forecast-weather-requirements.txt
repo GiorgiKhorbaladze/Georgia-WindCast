@@ -1,0 +1,10 @@
+# Independent NWP sources (forecasting/weather_sources.py, .github/workflows/weather-sources.yml).
+# ecCodes with its bundled library; resolved with --exclude-newer 2026-11-06 (>= two weeks old).
+-r forecast-requirements.txt
+attrs==26.1.0
+cffi==2.1.1
+eccodes==2.50.0
+eccodeslib==2.50.0.34
+eckitlib==2.5.0.34
+findlibs==0.1.5
+pycparser==3.12

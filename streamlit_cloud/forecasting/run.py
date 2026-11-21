@@ -12,6 +12,10 @@
 ``python -m forecasting.run weather --data-dir DATA --out-dir OUT``
     One batched multi-point weather request, only when the collector saw a new ICON run.
 
+``python -m forecasting.run sources --data-dir DATA --out-dir OUT``
+    Independent NWP sources (GFS, ECMWF IFS from AWS Open Data): store each newly published run
+    once, at the seven forecasting points (forecasting/weather_sources.py).
+
 ``python -m forecasting.run evaluate --data-dir DATA --out-dir OUT``
     Scores both ledgers against the GSE observations and writes OUT/evaluation/*.
 
@@ -143,6 +147,25 @@ def cmd_evaluate(data_dir: Path, out: Path, now: datetime, force: bool = False) 
     return {"result": "evaluated", "live_cases": report["live"]["coverage"], "backtest": report["backtest"]["coverage"]}
 
 
+def cmd_sources(out: Path, now: datetime) -> dict:
+    """Each source independently: a failure of one never blocks the other."""
+    import httpx
+
+    from forecasting import weather_sources as ws
+
+    results = []
+    with httpx.Client(timeout=httpx.Timeout(60.0), follow_redirects=False) as client:
+        def get(url: str, headers: dict) -> tuple[int, bytes, dict]:
+            r = client.get(url, headers=headers)
+            return r.status_code, r.content, {k.lower(): v for k, v in r.headers.items()}
+        for source in ("gfs", "ecmwf"):
+            try:
+                results.append(ws.collect(out, source, ws.Http(get), now))
+            except Exception as exc:  # reported, never fatal for the other source
+                results.append({"source": source, "result": "failed", "error": f"{type(exc).__name__}: {exc}"[:300]})
+    return {"result": "sources", "sources": results}
+
+
 def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
     import os
 
@@ -162,13 +185,15 @@ def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather"])
+    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "sources"])
     ap.add_argument("--data-dir", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--force", action="store_true", help="evaluate even if the last run is recent")
     a = ap.parse_args(argv)
     now = datetime.now(UTC).replace(microsecond=0)
-    if a.cmd == "weather":
+    if a.cmd == "sources":
+        result = cmd_sources(a.out_dir, now)
+    elif a.cmd == "weather":
         result = cmd_weather(a.data_dir, a.out_dir, now)
     elif a.cmd == "evaluate":
         result = cmd_evaluate(a.data_dir, a.out_dir, now, a.force)
