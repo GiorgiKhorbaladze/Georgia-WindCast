@@ -116,6 +116,13 @@ not a third-party timestamping service.
    Nothing runs yet: the old `forecast.yml` on `main` does not read these.
 2. **Pre-merge check (no write)**: in the private repository, Settings → General, confirm the
    visibility is *Private*. On the public repository, open the PR's CI.
+2a. **Rehearsal with the real archive, before the merge (no push)**: Actions → "Issue and score
+   experimental wind forecasts" → Run workflow → branch `claude/private-forecast-archive`, tick
+   **rehearsal**. The run performs the real SSH clone, the privacy proof with the real token, seed,
+   verify, issue, covered, publish and the leak scan, and pushes **nothing** (both push steps are
+   skipped). The run summary lists the files the archive and the public branch would receive and
+   the commitments. A failure at any step blocks the merge. This is the independent evidence the
+   QA asked for. The owner approves the dispatch.
 3. **Backup point**: note the current `forecast-data` head SHA. The branch history is not rewritten,
    so every pre-migration file stays reachable at that SHA, which makes a full rollback possible.
 4. **Merge PR #69** (owner decision). The next `forecast.yml` run, about 15 minutes later after a

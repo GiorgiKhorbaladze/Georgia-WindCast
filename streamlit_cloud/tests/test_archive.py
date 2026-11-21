@@ -360,3 +360,15 @@ def test_workflows_check_privacy_seed_before_every_run_and_record_the_archive_co
         wf = (root / name).read_text(encoding="utf-8")
         assert wf.index("check-private") < wf.index("run seed") < wf.index("run verify") < wf.index("run publish")
         assert 'ARCHIVE_COMMIT=$(git rev-parse HEAD)' in wf
+
+
+def test_rehearsal_runs_every_step_but_pushes_nothing():
+    from pathlib import Path
+    wf = (Path(__file__).resolve().parents[2] / ".github/workflows/forecast.yml").read_text(encoding="utf-8")
+    for step in ("Push the private archive first", "Push the public projection"):
+        block = wf[wf.index(step):].split("\n      - name:")[0]
+        assert "if: github.event.inputs.rehearsal != 'true'" in block
+    for step in ("check-private", "run seed", "run verify", "run issue", "run publish"):
+        block = wf[:wf.index(step)].rsplit("\n      - name:", 1)[1]
+        assert "rehearsal" not in block  # the checks themselves always run
+    assert "github.event_name == 'workflow_dispatch' && github.sha" in wf  # rehearsal runs the PR's code
