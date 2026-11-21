@@ -1,6 +1,7 @@
 name: Independent weather sources (GFS, ECMWF IFS)
 
 # Issue #57 (owner decision 21.11.2026): forecasts from NOAA GFS and ECMWF IFS open data on AWS
+# Open Data, plus a Visual Crossing free-tier pilot (repository secret, 7 requests a day). GFS/IFS from AWS
 # Open Data (no API key, no cost), at the seven forecasting points, so forecasting does not depend
 # on a single provider and the sources can be compared. Hourly wake; each newly published run is
 # stored once (about 4 runs a day per source; roughly 150-250 MB of GRIB downloaded per new run,
@@ -49,6 +50,8 @@ jobs:
           git checkout -q -b forecast-data FETCH_HEAD
       - name: Collect new runs (each source independently)
         working-directory: code/streamlit_cloud
+        env:
+          VISUAL_CROSSING_API_KEY: ${{ secrets.VISUAL_CROSSING_API_KEY }}  # pilot; once a day, free tier
         run: ../../venv/bin/python -m forecasting.run sources --data-dir ../../out --out-dir ../../out
       - name: Commit and push (only when something changed)
         env:

@@ -522,6 +522,7 @@ T: dict[str, dict[str, str]] = {
     "fc_srcname_icon_openmeteo": {"ka": "ICON (Open-Meteo)", "en": "ICON (Open-Meteo)"},
     "fc_srcname_gfs": {"ka": "NOAA GFS", "en": "NOAA GFS"},
     "fc_srcname_ecmwf": {"ka": "ECMWF IFS", "en": "ECMWF IFS"},
+    "fc_srcname_visualcrossing": {"ka": "Visual Crossing", "en": "Visual Crossing"},
     "fc_tour_variant": {"ka": "პრედიქტორები", "en": "Predictors"},
     "fc_v_gse_only": {"ka": "მხოლოდ ფაქტობრივი გენერაცია", "en": "Actual generation only"},
     "fc_v_local_weather": {"ka": "+ აღმოსავლეთის ამინდი", "en": "+ eastern weather"},

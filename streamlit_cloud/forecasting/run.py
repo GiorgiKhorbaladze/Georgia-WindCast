@@ -166,6 +166,15 @@ def cmd_sources(out: Path, now: datetime) -> dict:
                 results.append(ws.collect(out, source, ws.Http(get), now))
             except Exception as exc:  # reported, never fatal for the other source
                 results.append({"source": source, "result": "failed", "error": f"{type(exc).__name__}: {exc}"[:300]})
+        import os
+
+        from forecasting import visualcrossing as vc
+
+        try:  # the key comes from the environment only and is never printed or stored
+            results.append(vc.collect(out, os.environ.get("VISUAL_CROSSING_API_KEY"),
+                                      lambda u: (lambda r: (r.status_code, r.content))(client.get(u)), now))
+        except Exception as exc:
+            results.append({"source": "visualcrossing", "result": "failed", "error": type(exc).__name__})
     return {"result": "sources", "sources": results}
 def cmd_tournament(data_dir: Path, out: Path, now: datetime) -> dict:
     """GSE-only, then for every weather source with stored runs: local and local + west predictors.
@@ -180,7 +189,7 @@ def cmd_tournament(data_dir: Path, out: Path, now: datetime) -> dict:
                     "min_days": tournament.MIN_DAYS, "horizons_h": list(tournament.HORIZONS), "variants": {},
                     "sources": {}}
     loaders = {"icon_openmeteo": (weather_points.available_runs(out), lambda r: weather_points.load_run(out, r))}
-    for src in ("gfs", "ecmwf"):
+    for src in ("gfs", "ecmwf", "visualcrossing"):
         loaders[src] = (weather_sources.available_runs(out, src),
                         lambda r, s=src: weather_sources.load_run(out, s, r))
     variants = {"gse_only": None}
