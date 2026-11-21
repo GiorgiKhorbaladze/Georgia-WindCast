@@ -16,10 +16,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = obey the 20-day gate; force_check = check now; approve = approve pending values"
+        description: "check = obey the 20-day gate; force_check = check now; approve_keys = approve listed records; approve = approve up to a revision"
         type: choice
-        options: [check, force_check, approve]
+        options: [check, force_check, approve_keys, approve]
         default: check
+      approve_keys:
+        description: "approve_keys: station:YYYY-MM@revision, comma separated (e.g. kartli-gori:2026-08@242)"
+        default: ""
       approve_through:
         description: "approve: highest revision id to approve (see history/wind_monthly.csv)"
         default: ""
@@ -71,12 +74,17 @@ jobs:
         env:
           MODE: ${{ github.event.inputs.mode || 'check' }}
           THROUGH: ${{ github.event.inputs.approve_through }}
+          KEYS: ${{ github.event.inputs.approve_keys }}
           REASON: ${{ github.event.inputs.reason }}
         run: |
           set +e
           case "$MODE" in
             check) venv/bin/python code/streamlit_cloud/history_monitor.py check --data-dir data ;;
             force_check) venv/bin/python code/streamlit_cloud/history_monitor.py check --data-dir data --force ;;
+            approve_keys)
+              [ -n "$KEYS" ] && [ -n "$REASON" ] || { echo "approve_keys and reason are required"; exit 1; }
+              venv/bin/python code/streamlit_cloud/history_monitor.py approve-keys --data-dir data \
+                --keys "$KEYS" --reason "$REASON" ;;
             approve)
               case "$THROUGH" in ''|*[!0-9]*) echo "approve_through must be an integer"; exit 1;; esac
               [ -n "$REASON" ] || { echo "reason is required"; exit 1; }
