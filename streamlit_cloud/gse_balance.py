@@ -42,7 +42,7 @@ ALLOWED_HOSTS = ("admin.gse.com.ge",)
 FIRST_YEAR = 2016  # first year with a wind farm in the balance (Kartli, October 2016)
 MIN_INTERVAL = timedelta(days=20)  # monthly balances appear with a lag of weeks
 MAX_PDF_BYTES = 5_000_000
-PARSER_VERSION = "gse-balance-pdf/1"
+PARSER_VERSION = "gse-balance-pdf/2"  # /2: printed precision stored; forces one re-parse
 MONTH_TOKENS = ("ianvari", "Tebervali", "marti", "aprili", "maisi", "ivnisi", "ivlisi", "agvisto",
                 "seqtemberi", "oqtomberi", "noemberi", "dekemberi", "sul")
 

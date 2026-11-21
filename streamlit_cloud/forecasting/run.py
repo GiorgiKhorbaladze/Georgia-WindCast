@@ -22,6 +22,11 @@
 ``python -m forecasting.run evaluate --data-dir DATA --out-dir OUT``
     Scores both ledgers against the GSE observations and writes OUT/evaluation/*.
 
+``python -m forecasting.run seed|publish|verify --out-dir ARCHIVE --public-dir PUBLIC``
+    Private archive (forecasting/archive.py): OUT is the private archive checkout that holds every
+    MW forecast; PUBLIC is the public ``forecast-data`` checkout, which receives only aggregated
+    scores and hash commitments, never a forecast value.
+
 No publication switch is touched here: ``mwmodel.PUBLISH_FORECAST`` stays False.
 """
 
@@ -223,7 +228,7 @@ def source_health(out: Path, results: list[dict], now: datetime) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=1) + "\n")
     return report
-def cmd_tournament(data_dir: Path, out: Path, now: datetime) -> dict:
+def cmd_tournament(data_dir: Path, out: Path, now: datetime, weather_dir: Path | None = None) -> dict:
     """GSE-only, then for every weather source with stored runs: local and local + west predictors.
 
     Sources: Open-Meteo ICON (forecasting/weather_points.py), NOAA GFS and ECMWF IFS
@@ -231,14 +236,16 @@ def cmd_tournament(data_dir: Path, out: Path, now: datetime) -> dict:
     x model combinations are compared on identical independent days."""
     from forecasting import tournament, weather_points, weather_sources
 
+    wdir = weather_dir or out  # weather inputs live on the public branch; predictions go to the archive
+
     obs = load_obs(data_dir, now.date(), EVAL_DAYS)
     report: dict = {"generated_at": now.isoformat(), "independence_unit": "local day",
                     "min_days": tournament.MIN_DAYS, "horizons_h": list(tournament.HORIZONS), "variants": {},
                     "sources": {}}
-    loaders = {"icon_openmeteo": (weather_points.available_runs(out), lambda r: weather_points.load_run(out, r))}
+    loaders = {"icon_openmeteo": (weather_points.available_runs(wdir), lambda r: weather_points.load_run(wdir, r))}
     for src in ("gfs", "ecmwf", "visualcrossing"):
-        loaders[src] = (weather_sources.available_runs(out, src),
-                        lambda r, s=src: weather_sources.load_run(out, s, r))
+        loaders[src] = (weather_sources.available_runs(wdir, src),
+                        lambda r, s=src: weather_sources.load_run(wdir, s, r))
     variants = {"gse_only": None}
     for src, (runs, load) in loaders.items():
         report["sources"][src] = {"runs": len(runs)}
@@ -275,16 +282,36 @@ def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "sources", "tournament"])
-    ap.add_argument("--data-dir", type=Path, required=True)
+    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "sources", "tournament",
+                                    "seed", "publish", "verify", "check-private"])
+    ap.add_argument("--data-dir", type=Path)
     ap.add_argument("--out-dir", type=Path, required=True)
+    ap.add_argument("--public-dir", type=Path, help="public forecast-data checkout (archive commands, weather)")
     ap.add_argument("--force", action="store_true", help="evaluate even if the last run is recent")
     a = ap.parse_args(argv)
     now = datetime.now(UTC).replace(microsecond=0)
+    if a.cmd == "check-private":
+        import os
+
+        from forecasting import archive
+
+        print(json.dumps(archive.check_private(os.environ["ARCHIVE_REPO"], os.environ["GITHUB_REPOSITORY"],
+                                               os.environ.get("ARCHIVE_METADATA_TOKEN"))))
+        return 0
+    if a.cmd in ("seed", "publish", "verify"):
+        from forecasting import archive
+
+        if a.public_dir is None:
+            ap.error("--public-dir is required")
+        result = getattr(archive, a.cmd)(a.out_dir, a.public_dir)
+        print(json.dumps(result, default=str))
+        return 0
     if a.cmd == "sources":
         result = cmd_sources(a.out_dir, now)
+    elif a.data_dir is None:
+        ap.error("--data-dir is required")
     elif a.cmd == "tournament":
-        result = cmd_tournament(a.data_dir, a.out_dir, now)
+        result = cmd_tournament(a.data_dir, a.out_dir, now, a.public_dir)
     elif a.cmd == "weather":
         result = cmd_weather(a.data_dir, a.out_dir, now)
     elif a.cmd == "evaluate":

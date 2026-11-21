@@ -5,6 +5,12 @@ name: Issue and score experimental wind forecasts
 # batched Open-Meteo request per NEW ICON run (owner-approved 20.11.2026), detected from the
 # collector's own metadata, so roughly 4 data requests a day. Nothing here publishes a forecast on the
 # website; streamlit_cloud/mwmodel.py PUBLISH_FORECAST stays False.
+#
+# Owner decision 21.11.2026: numeric MW forecasts are stored ONLY in a private archive repository
+# (repository variable FORECAST_ARCHIVE_REPO = owner/name, secret FORECAST_ARCHIVE_SSH_KEY = a deploy
+# key with write access to that repository). The public forecast-data branch receives aggregated
+# scores and hash commitments only (streamlit_cloud/forecasting/archive.py). Without the archive
+# configured the job stops before issuing anything: it never falls back to writing values publicly.
 on:
   workflow_run:
     workflows: ["Collect GSE wind data"]
@@ -25,7 +31,10 @@ concurrency:
 
 jobs:
   forecast:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: vars.FORECAST_PAUSED != 'true' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    # Archive secrets live only in this environment, whose deployment branch rule allows main only:
+    # no PR, feature branch or dispatched non-main ref can ever receive them.
+    environment: forecast-archive
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -43,50 +52,104 @@ jobs:
         run: |
           uv venv -p 3.12 venv
           uv pip install -p venv -r code/streamlit_cloud/forecast-requirements.txt
-      - name: Check out data (read only) and forecast-data (created empty on first run)
+      - name: Require the private archive (never fall back to public storage)
+        env:
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          HAS_KEY: ${{ secrets.FORECAST_ARCHIVE_SSH_KEY != '' }}
+          HAS_META: ${{ secrets.FORECAST_ARCHIVE_METADATA_TOKEN != '' }}
+        run: |
+          if [ -z "$ARCHIVE_REPO" ] || [ "$HAS_KEY" != "true" ] || [ "$HAS_META" != "true" ]; then
+            echo "::error::private forecast archive not configured (FORECAST_ARCHIVE_REPO / FORECAST_ARCHIVE_SSH_KEY / FORECAST_ARCHIVE_METADATA_TOKEN); nothing issued"
+            exit 1
+          fi
+      - name: Check out data (read only), public forecast-data and the private archive
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          ARCHIVE_KEY: ${{ secrets.FORECAST_ARCHIVE_SSH_KEY }}
         run: |
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           git init -q data && git -C data remote add origin "https://github.com/$REPO.git"
           git -C data -c http.extraheader="$auth" fetch -q --depth 1 origin data
           git -C data checkout -q FETCH_HEAD -- gse weather/forecast_meta.json
-          git init -q out && cd out
+          git init -q pub && cd pub
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add origin "https://github.com/$REPO.git"
-          if git -c http.extraheader="$auth" ls-remote --exit-code --heads origin forecast-data >/dev/null; then
-            git -c http.extraheader="$auth" fetch -q --depth 1 origin forecast-data
-            git checkout -q -b forecast-data FETCH_HEAD
+          git -c http.extraheader="$auth" fetch -q --depth 1 origin forecast-data
+          git checkout -q -b forecast-data FETCH_HEAD
+          cd ..
+          # Deploy key in a private temp file; GitHub's published ed25519 host key pinned (no TOFU).
+          umask 077
+          printf '%s\n' "$ARCHIVE_KEY" > "$RUNNER_TEMP/archive_key"
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
+          echo "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/archive_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/archive_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes"
+          git init -q archive && cd archive
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "git@github.com:$ARCHIVE_REPO.git"
+          # The repository must exist and be reachable with the deploy key; otherwise stop (no orphan fallback).
+          git ls-remote origin >/dev/null || { echo "::error::archive repository unreachable"; exit 1; }
+          if git ls-remote --exit-code --heads origin main >/dev/null; then
+            git fetch -q origin main && git checkout -q -b main FETCH_HEAD
           else
-            git checkout -q --orphan forecast-data
-            printf '%s\n' "# Georgia WindCast experimental forecasts" "" \
-              "Written only by .github/workflows/forecast.yml (Issue #57). Append-only ledger," \
-              "rolling-origin backtest and scores. Not published on the website." > README.md
+            git checkout -q --orphan main
           fi
-      - name: Multi-point weather (only for a new ICON run; a failure never blocks forecasting)
+      - name: Confirm the archive repository is private (fail closed)
+        env:
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          ARCHIVE_METADATA_TOKEN: ${{ secrets.FORECAST_ARCHIVE_METADATA_TOKEN }}
         working-directory: code/streamlit_cloud
-        run: ../../venv/bin/python -m forecasting.run weather --data-dir ../../data --out-dir ../../out || true
-      - name: Issue, backtest (incremental) and evaluate (at most hourly)
+        run: ../../venv/bin/python -m forecasting.run check-private --out-dir ../../archive
+      - name: Verify the archive against the public commitments, then seed it once from the old public ledger
+        working-directory: code/streamlit_cloud
+        run: |
+          ../../venv/bin/python -m forecasting.run seed --out-dir ../../archive --public-dir ../../pub
+          ../../venv/bin/python -m forecasting.run verify --out-dir ../../archive --public-dir ../../pub
+      - name: Multi-point weather (public inputs; a failure never blocks forecasting)
+        working-directory: code/streamlit_cloud
+        run: ../../venv/bin/python -m forecasting.run weather --data-dir ../../data --out-dir ../../pub || true
+      - name: Issue, backtest (incremental) and evaluate (at most hourly), all into the private archive
         env:
           FORCE: ${{ github.event.inputs.force_evaluate == 'true' && '--force' || '' }}
         working-directory: code/streamlit_cloud
         run: |
-          ../../venv/bin/python -m forecasting.run issue --data-dir ../../data --out-dir ../../out
-          ../../venv/bin/python -m forecasting.run backtest --data-dir ../../data --out-dir ../../out
-          ../../venv/bin/python -m forecasting.run evaluate --data-dir ../../data --out-dir ../../out $FORCE
-      - name: Commit and push (only when something changed)
+          ../../venv/bin/python -m forecasting.run issue --data-dir ../../data --out-dir ../../archive
+          ../../venv/bin/python -m forecasting.run backtest --data-dir ../../data --out-dir ../../archive
+          ../../venv/bin/python -m forecasting.run evaluate --data-dir ../../data --out-dir ../../archive $FORCE
+      - name: Push the private archive first (the public side is updated only after this succeeds)
+        run: |
+          cd archive
+          git add -A
+          if git diff --cached --quiet; then
+            echo "archive unchanged"; echo "ARCHIVE_COMMIT=$(git rev-parse HEAD 2>/dev/null)" >> "$GITHUB_ENV"; exit 0
+          fi
+          git commit -q -m "forecasts $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3 4; do
+            if git push -q origin main; then echo "ARCHIVE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"; exit 0; fi
+            sleep $((i * 5))
+          done
+          exit 1
+      - name: Public projection (aggregates and commitments only) with a leak scan
+        working-directory: code/streamlit_cloud
+        run: ../../venv/bin/python -m forecasting.run publish --out-dir ../../archive --public-dir ../../pub
+      - name: Push the public projection
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd out
+          rm -f "$RUNNER_TEMP/archive_key"
+          cd pub
           git add -A
           if git diff --cached --quiet; then echo "no changes"; exit 0; fi
-          git commit -q -m "forecasts $(date -u +%Y-%m-%dT%H:%MZ)"
+          git commit -q -m "forecast scores $(date -u +%Y-%m-%dT%H:%MZ)"
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           for i in 1 2 3 4; do
             git -c http.extraheader="$auth" push -q origin forecast-data && exit 0
             sleep $((i * 5))
           done
           exit 1
+      - name: Remove the deploy key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/archive_key"

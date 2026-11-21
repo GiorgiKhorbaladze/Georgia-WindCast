@@ -4,6 +4,10 @@
     Runs one check against ``DATA/history`` (a checkout of the ``data`` branch). Exits 0 without
     contacting GSE when the previous attempt is younger than 20 days.
 
+``python history_monitor.py approve-keys --data-dir DATA --keys "ruisi:2026-09@245,..." --reason TEXT``
+    Owner approval of exactly the listed records, each at the revision the owner reviewed. All or
+    nothing: refused if any record changed after that revision.
+
 ``python history_monitor.py approve --data-dir DATA --through REVISION --reason TEXT``
     Owner approval: every pending official-document value with a revision id up to REVISION
     becomes ``gse_document_approved``. Logged in the revision ledger.
@@ -24,6 +28,7 @@ from pathlib import Path
 
 import httpx
 
+from wind_history import ApprovalError, approve_keys, parse_keys
 from gse_balance import DOWNLOAD_FAILED, INVALID, UNSUPPORTED, Fetched, check, load_archive, save_archive
 
 HERE = Path(__file__).resolve().parent
@@ -48,9 +53,23 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--data-dir", type=Path, required=True)
     a.add_argument("--through", type=int, required=True)
     a.add_argument("--reason", required=True)
+    k = sub.add_parser("approve-keys", help="approve exactly these records at the reviewed revisions")
+    k.add_argument("--data-dir", type=Path, required=True)
+    k.add_argument("--keys", required=True, help="station:YYYY-MM@revision, comma separated")
+    k.add_argument("--reason", required=True)
     args = ap.parse_args(argv)
     directory = args.data_dir / "history"
     now = datetime.now(UTC)
+    if args.cmd == "approve-keys":
+        archive, _seeded = load_archive(directory, SEED)
+        try:
+            done = approve_keys(archive, now, parse_keys(args.keys), args.reason)
+        except ApprovalError as exc:
+            print(json.dumps({"approved": 0, "refused": str(exc)}))
+            return 1
+        save_archive(directory, archive)
+        print(json.dumps({"approved": [f"{s}:{y}-{m:02d}" for s, y, m in done]}))
+        return 0
     if args.cmd == "approve":
         archive, _seeded = load_archive(directory, SEED)
         done = archive.approve(now, args.through, args.reason)

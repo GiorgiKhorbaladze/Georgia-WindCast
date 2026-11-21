@@ -309,3 +309,21 @@ def test_sources_workflow_commits_partial_results_then_fails_on_alert():
 def test_scheduled_collection_is_off_until_the_owner_enables_it():
     wf = (Path(__file__).resolve().parents[2] / ".github/workflows/weather-sources.yml").read_text(encoding="utf-8")
     assert "if: github.event_name == 'workflow_dispatch' || vars.WEATHER_SOURCES_ENABLED == 'true'" in wf
+
+
+def test_tournament_reads_every_weather_source_from_the_public_dir(tmp_path, monkeypatch):
+    """After #69: weather (ICON, GFS, ECMWF) lives on the public branch, predictions in the archive."""
+    from forecasting import run as frun
+    from forecasting import tournament, weather_points
+
+    pub, arc = tmp_path / "pub", tmp_path / "arc"
+    seen = []
+    monkeypatch.setattr(weather_points, "available_runs", lambda d: seen.append(("icon", d)) or [])
+    monkeypatch.setattr(ws, "available_runs", lambda d, s: seen.append((s, d)) or [])
+    monkeypatch.setattr(frun, "load_obs", lambda *a, **k: __import__("pandas").Series(dtype=float))
+    monkeypatch.setattr(tournament, "run", lambda obs, weather=None: {
+        "status": {}, "scores": [], "notes": [], "excluded": [], "weather_features": [],
+        "predictions": __import__("pandas").DataFrame()})
+    frun.cmd_tournament(tmp_path, arc, RUN, pub)
+    assert seen and all(d == pub for _, d in seen) and {"icon", "gfs", "ecmwf"} <= {s for s, _ in seen}
+    assert (arc / "evaluation" / "tournament.json").exists() and not (pub / "evaluation").exists()

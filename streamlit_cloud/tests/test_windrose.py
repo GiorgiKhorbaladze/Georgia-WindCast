@@ -59,4 +59,4 @@ def test_analytics_page_shows_the_rose_from_one_source(lang, monkeypatch):
     text = page_text(at)
     assert tr("rose_note", lang) in text
     assert tr("rose_src_era5", lang) in text and ("10 მ" if lang == "ka" else "10 m") in text
-    assert "(wind rose)" in tr("rose_title", "ka")
+    assert tr("rose_title", "ka") == "ქარის ვარდი"  # editorial audit 21.11.2026: no English gloss
