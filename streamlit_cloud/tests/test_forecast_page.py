@@ -49,7 +49,7 @@ def test_page_shows_scores_but_never_forecast_values(lang):
     assert tr("fc_withheld", lang) in text
     assert "evaluation/latest.csv" not in calls  # forecast values are not even downloaded
     assert any(w.value == tr("fc_insufficient", lang, days=14, cases=200) for w in at.warning)
-    assert len(at.dataframe) == 1 and len(at.get("download_button")) == 1
+    assert len(at.dataframe) == 2 and len(at.get("download_button")) == 1
     assert not any(w.value == tr("fc_load_error", lang) for w in at.warning)  # empty CSVs are fine
 
 
@@ -69,3 +69,12 @@ def test_navigation_and_texts():
     for k, v in T.items():
         if k.startswith("fc_"):
             assert "GSE" not in v["ka"] and "—" not in v["ka"] + v["en"], k
+
+
+def test_tournament_table_counts_independent_days():
+    at, _ = run("en")
+    assert tr("fc_tour", "en") in [s.value for s in at.subheader]
+    assert len(at.dataframe) == 2  # stage I comparison + tournament
+    cols = list(at.dataframe[1].value.columns)
+    assert tr("fc_col_indep", "en") in cols
+    assert any(tr("fc_tour_noweather", "en") == c.value for c in at.caption)

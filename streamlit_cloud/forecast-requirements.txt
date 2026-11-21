@@ -1,6 +1,6 @@
 # Forecast issuing/evaluation job only (GitHub Actions, .github/workflows/forecast.yml).
 # Same pins as requirements.txt / collector-requirements.txt; update in a reviewed PR.
-numpy==2.5.5
+numpy==2.5.4  # >= two weeks old (2.5.5 was released 2026-11-15)
 pandas==2.3.3
 httpx==0.28.1
 defusedxml==0.7.1
