@@ -1,0 +1,120 @@
+name: Forecast archive migration rehearsal (no push)
+
+# PR #69. Runs the migration exactly as forecast.yml would (real SSH clone of the private archive,
+# privacy proof with the real metadata token, seed, verify, issue, backtest, evaluate, covered,
+# publish, leak scan) and pushes NOTHING: there is no push step, and GITHUB_TOKEN is read-only.
+# Separate from forecast.yml on purpose: it is independent of FORECAST_PAUSED and of whether the
+# production workflow is disabled, and it runs the PR's own code before any merge.
+# Trigger: the repository owner adds the label "archive-rehearsal" to a same-repository PR.
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forecast-archive-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearsal:
+    if: >-
+      github.event.label.name == 'archive-rehearsal' &&
+      github.event.sender.login == github.repository_owner &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: code
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.11.32"
+      - name: Install dependencies (pinned)
+        run: |
+          uv venv -p 3.12 venv
+          uv pip install -p venv -r code/streamlit_cloud/forecast-requirements.txt
+      - name: Require the private archive (never fall back to public storage)
+        env:
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          HAS_KEY: ${{ secrets.FORECAST_ARCHIVE_SSH_KEY != '' }}
+          HAS_META: ${{ secrets.FORECAST_ARCHIVE_METADATA_TOKEN != '' }}
+        run: |
+          if [ -z "$ARCHIVE_REPO" ] || [ "$HAS_KEY" != "true" ] || [ "$HAS_META" != "true" ]; then
+            echo "::error::private forecast archive not configured (FORECAST_ARCHIVE_REPO / FORECAST_ARCHIVE_SSH_KEY / FORECAST_ARCHIVE_METADATA_TOKEN); nothing issued"
+            exit 1
+          fi
+      - name: Check out data (read only), public forecast-data and the private archive
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          ARCHIVE_KEY: ${{ secrets.FORECAST_ARCHIVE_SSH_KEY }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git init -q data && git -C data remote add origin "https://github.com/$REPO.git"
+          git -C data -c http.extraheader="$auth" fetch -q --depth 1 origin data
+          git -C data checkout -q FETCH_HEAD -- gse weather/forecast_meta.json
+          git init -q pub && cd pub
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://github.com/$REPO.git"
+          git -c http.extraheader="$auth" fetch -q --depth 1 origin forecast-data
+          git checkout -q -b forecast-data FETCH_HEAD
+          cd ..
+          # Deploy key in a private temp file; GitHub's published ed25519 host key pinned (no TOFU).
+          umask 077
+          printf '%s\n' "$ARCHIVE_KEY" > "$RUNNER_TEMP/archive_key"
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
+          echo "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/archive_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/archive_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes"
+          git init -q archive && cd archive
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "git@github.com:$ARCHIVE_REPO.git"
+          # The repository must exist and be reachable with the deploy key; otherwise stop (no orphan fallback).
+          git ls-remote origin >/dev/null || { echo "::error::archive repository unreachable"; exit 1; }
+          if git ls-remote --exit-code --heads origin main >/dev/null; then
+            git fetch -q origin main && git checkout -q -b main FETCH_HEAD
+          else
+            git checkout -q --orphan main
+          fi
+      - name: Confirm the archive repository is private (fail closed)
+        env:
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          ARCHIVE_METADATA_TOKEN: ${{ secrets.FORECAST_ARCHIVE_METADATA_TOKEN }}
+        working-directory: code/streamlit_cloud
+        run: ../../venv/bin/python -m forecasting.run check-private --out-dir ../../archive
+      - name: Verify the archive against the public commitments, then seed it once from the old public ledger
+        working-directory: code/streamlit_cloud
+        run: |
+          ../../venv/bin/python -m forecasting.run seed --out-dir ../../archive --public-dir ../../pub
+          ../../venv/bin/python -m forecasting.run verify --out-dir ../../archive --public-dir ../../pub
+      - name: Issue, backtest (incremental) and evaluate (at most hourly), all into the private archive
+        env:
+          FORCE: --force
+        working-directory: code/streamlit_cloud
+        run: |
+          ../../venv/bin/python -m forecasting.run issue --data-dir ../../data --out-dir ../../archive
+          ../../venv/bin/python -m forecasting.run backtest --data-dir ../../data --out-dir ../../archive
+          ../../venv/bin/python -m forecasting.run evaluate --data-dir ../../data --out-dir ../../archive $FORCE
+      - name: Public projection (aggregates and commitments only) with a leak scan
+        working-directory: code/streamlit_cloud
+        run: ../../venv/bin/python -m forecasting.run publish --out-dir ../../archive --public-dir ../../pub
+      - name: Rehearsal evidence (nothing was pushed)
+        run: |
+          echo "## Migration rehearsal (no push)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Archive files that would be committed:" >> "$GITHUB_STEP_SUMMARY"
+          (cd archive && git add -A && git diff --cached --stat | tail -1) >> "$GITHUB_STEP_SUMMARY"
+          echo "Public changes that would be committed:" >> "$GITHUB_STEP_SUMMARY"
+          (cd pub && git add -A && git diff --cached --name-status | sed 's/^/    /') >> "$GITHUB_STEP_SUMMARY"
+          cat pub/commitments/ledger.json | head -c 2000 >> "$GITHUB_STEP_SUMMARY"
+      - name: Remove the deploy key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/archive_key"

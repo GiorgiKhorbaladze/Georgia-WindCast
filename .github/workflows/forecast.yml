@@ -21,10 +21,6 @@ on:
         description: "Re-score now even if the last evaluation is recent"
         type: boolean
         default: false
-      rehearsal:
-        description: "Migration rehearsal: run every step against the real archive and secrets, push NOTHING"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -44,7 +40,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.repository.default_branch }}  # a dispatch (e.g. rehearsal) runs the dispatched branch's code
+          ref: ${{ github.event.repository.default_branch }}
           path: code
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -121,7 +117,6 @@ jobs:
           ../../venv/bin/python -m forecasting.run backtest --data-dir ../../data --out-dir ../../archive
           ../../venv/bin/python -m forecasting.run evaluate --data-dir ../../data --out-dir ../../archive $FORCE
       - name: Push the private archive first (the public side is updated only after this succeeds)
-        if: github.event.inputs.rehearsal != 'true'
         run: |
           cd archive
           git add -A
@@ -138,7 +133,6 @@ jobs:
         working-directory: code/streamlit_cloud
         run: ../../venv/bin/python -m forecasting.run publish --out-dir ../../archive --public-dir ../../pub
       - name: Push the public projection
-        if: github.event.inputs.rehearsal != 'true'
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -153,15 +147,6 @@ jobs:
             sleep $((i * 5))
           done
           exit 1
-      - name: Rehearsal evidence (nothing was pushed)
-        if: github.event.inputs.rehearsal == 'true'
-        run: |
-          echo "## Migration rehearsal (no push)" >> "$GITHUB_STEP_SUMMARY"
-          echo "Archive files that would be committed:" >> "$GITHUB_STEP_SUMMARY"
-          (cd archive && git add -A && git diff --cached --stat | tail -1) >> "$GITHUB_STEP_SUMMARY"
-          echo "Public changes that would be committed:" >> "$GITHUB_STEP_SUMMARY"
-          (cd pub && git add -A && git diff --cached --name-status | sed 's/^/    /') >> "$GITHUB_STEP_SUMMARY"
-          cat pub/commitments/ledger.json | head -c 2000 >> "$GITHUB_STEP_SUMMARY"
       - name: Remove the deploy key
         if: always()
         run: rm -f "$RUNNER_TEMP/archive_key"

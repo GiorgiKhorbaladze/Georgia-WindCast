@@ -362,13 +362,34 @@ def test_workflows_check_privacy_seed_before_every_run_and_record_the_archive_co
         assert 'ARCHIVE_COMMIT=$(git rev-parse HEAD)' in wf
 
 
-def test_rehearsal_runs_every_step_but_pushes_nothing():
+def _wf(name):
     from pathlib import Path
-    wf = (Path(__file__).resolve().parents[2] / ".github/workflows/forecast.yml").read_text(encoding="utf-8")
-    for step in ("Push the private archive first", "Push the public projection"):
-        block = wf[wf.index(step):].split("\n      - name:")[0]
-        assert "if: github.event.inputs.rehearsal != 'true'" in block
-    for step in ("check-private", "run seed", "run verify", "run issue", "run publish"):
-        block = wf[:wf.index(step)].rsplit("\n      - name:", 1)[1]
-        assert "rehearsal" not in block  # the checks themselves always run
-    assert "github.event_name == 'workflow_dispatch' && github.sha" in wf  # rehearsal runs the PR's code
+    return (Path(__file__).resolve().parents[2] / ".github/workflows" / name).read_text(encoding="utf-8")
+
+
+def _py_steps(wf):
+    import re
+    return [m for m in re.findall(r"forecasting\.run (\S+)", wf) if m != "weather"]
+
+
+def test_rehearsal_is_a_separate_no_push_workflow_running_the_same_steps():
+    reh, prod = _wf("forecast-archive-rehearsal.yml"), _wf("forecast.yml")
+    assert "git push" not in reh and "push -q" not in reh
+    assert "contents: read" in reh and "contents: write" not in reh
+    assert _py_steps(reh) == _py_steps(prod)  # same checks, same order: no drift from production
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in reh  # the PR's own code, before any merge
+    assert "rehearsal" not in prod  # production has no rehearsal branch to get wrong
+
+
+def test_pause_stops_production_writers_but_never_the_owner_rehearsal():
+    """FORECAST_PAUSED gates both production jobs; the rehearsal ignores it (it cannot write) and
+    runs only for the repository owner's label on a same-repository PR."""
+    for name in ("forecast.yml", "forecast-tournament.yml"):
+        assert "vars.FORECAST_PAUSED != 'true'" in _wf(name).split("steps:")[0]
+    reh = _wf("forecast-archive-rehearsal.yml").split("jobs:")[1].split("steps:")[0]
+    assert "FORECAST_PAUSED" not in reh  # not in the job condition
+    assert "github.event.label.name == 'archive-rehearsal'" in reh
+    assert "github.event.sender.login == github.repository_owner" in reh
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in reh
+    trig = _wf("forecast-archive-rehearsal.yml").split("jobs:")[0]
+    assert "types: [labeled]" in trig and "workflow_dispatch" not in trig and "schedule" not in trig

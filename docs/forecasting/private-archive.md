@@ -116,16 +116,26 @@ not a third-party timestamping service.
    Nothing runs yet: the old `forecast.yml` on `main` does not read these.
 2. **Pre-merge check (no write)**: in the private repository, Settings → General, confirm the
    visibility is *Private*. On the public repository, open the PR's CI.
-2a. **Rehearsal with the real archive, before the merge (no push)**: Actions → "Issue and score
-   experimental wind forecasts" → Run workflow → branch `claude/private-forecast-archive`, tick
-   **rehearsal**. The run performs the real SSH clone, the privacy proof with the real token, seed,
-   verify, issue, covered, publish and the leak scan, and pushes **nothing** (both push steps are
-   skipped). The run summary lists the files the archive and the public branch would receive and
-   the commitments. A failure at any step blocks the merge. This is the independent evidence the
-   QA asked for. The owner approves the dispatch.
+2a. **Stop the current public writers before anything else (owner action).** The variable
+   `FORECAST_PAUSED` is honoured only by the workflows in this PR. The `forecast.yml` and
+   `forecast-tournament.yml` now on `main` ignore it and keep writing forecast values (ledger,
+   `latest.csv`, tournament predictions) to `forecast-data` after every GSE collection. Until the
+   merge, the only way to stop them is to disable both workflows in Actions (workflow → ⋯ →
+   Disable workflow). GSE collection is a separate workflow and keeps running. A disabled
+   workflow cannot be dispatched at all, on any branch. That is why the rehearsal below is a
+   separate workflow file.
+2b. **Rehearsal with the real archive, before the merge (no push)**: add the label
+   `archive-rehearsal` to PR #69. Only a label added by the repository owner, on a PR from this
+   repository, starts `forecast-archive-rehearsal.yml`. It runs the PR's own code: the real SSH
+   clone, the privacy proof with the real token, seed, verify, issue, backtest, evaluate, covered,
+   publish and the leak scan. It contains **no push step**, and its token is read-only. It
+   works whether the production workflows are paused or disabled. The run summary lists the files
+   the archive and the public branch would receive, and the commitments. A failure at any step
+   blocks the merge. To run it again, remove the label and add it again.
 3. **Backup point**: note the current `forecast-data` head SHA. The branch history is not rewritten,
    so every pre-migration file stays reachable at that SHA, which makes a full rollback possible.
-4. **Merge PR #69** (owner decision). The next `forecast.yml` run, about 15 minutes later after a
+4. **Merge PR #69** (owner decision), then **re-enable** `forecast.yml` and `forecast-tournament.yml`
+   (now the new versions, gated by `FORECAST_PAUSED`). The next `forecast.yml` run, about 15 minutes later after a
    GSE collection, does the following:
    check-private → seed (21 files today) → verify → issue → push archive → covered → publish
    (removes `ledger/`, `backtest/`, `state.json`, `latest.csv` and `day_ahead_*.csv` from the
