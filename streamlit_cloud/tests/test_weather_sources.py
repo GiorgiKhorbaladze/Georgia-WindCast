@@ -310,4 +310,3 @@ def test_sources_workflow_commits_partial_results_then_fails_on_alert():
 def test_scheduled_collection_is_off_until_the_owner_enables_it():
     wf = (Path(__file__).resolve().parents[2] / ".github/workflows/weather-sources.yml").read_text(encoding="utf-8")
     assert "if: github.event_name == 'workflow_dispatch' || vars.WEATHER_SOURCES_ENABLED == 'true'" in wf
-
