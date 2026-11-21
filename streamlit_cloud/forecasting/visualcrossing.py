@@ -80,30 +80,70 @@ def _write(root: Path, manifest: dict) -> None:
     (root / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
 
 
+def _check(manifest: dict, now: datetime) -> dict | None:
+    runs, attempts = manifest.get("runs", []), manifest.get("attempts", [])
+    last = max([datetime.fromisoformat(x["started"]) for x in attempts] +
+               [datetime.fromisoformat(r["retrieved"]) for r in runs[-1:]], default=None)
+    if last is not None and now - last < MIN_INTERVAL:
+        return {"source": "visualcrossing", "result": "not_due", "next_after": (last + MIN_INTERVAL).isoformat()}
+    used_24h = sum(x.get("requests_used", x.get("reserved", 0)) for x in attempts
+                   if now - datetime.fromisoformat(x["started"]) < timedelta(hours=24))
+    if used_24h + len(POINTS) > DAILY_REQUESTS:
+        return {"source": "visualcrossing", "result": "budget_exhausted", "requests_used_24h": used_24h}
+    return None
+
+
+def reserve(out: Path, key: str | None, now: datetime, run_id: str) -> dict:
+    """Phase 1 (workflow): write the 7-request reservation for this Actions run. The workflow pushes
+    it to forecast-data and only then lets phase 2 (collect) make any request, so a crash, a
+    cancelled job or a failed push can never leave requests unaccounted for."""
+    if not key:
+        return {"source": "visualcrossing", "result": "no_key"}
+    root = out / ROOT
+    manifest = _load(root / "manifest.json")
+    manifest.setdefault("source", "visualcrossing")
+    manifest.setdefault("runs", [])
+    attempts = manifest.setdefault("attempts", [])
+    blocked = _check(manifest, now)
+    if blocked:
+        return blocked
+    attempts.append({"started": now.isoformat(), "reserved": len(POINTS), "requests_used": len(POINTS),
+                     "result": "reserved", "run_id": str(run_id)})
+    del attempts[:-KEEP_ATTEMPTS]
+    _write(root, manifest)
+    return {"source": "visualcrossing", "result": "reserved"}
+
+
 def collect(out: Path, key: str | None, get: Callable[[str], tuple[int, bytes]], now: datetime,
-            clock: Callable[[], datetime] | None = None) -> dict:
-    """Quota-safe daily collection. The attempt (with its 7-request reservation) is written to the
-    public manifest BEFORE the first request and updated with the requests actually made, whatever
-    happens; the workflow commits it even when the run fails. The next attempt is allowed only 23 h
-    after the previous ATTEMPT (not the previous success), and only if fewer than DAILY_REQUESTS
-    requests were used in the last 24 h. A 429 or partial failure therefore never retries hourly."""
+            clock: Callable[[], datetime] | None = None, run_id: str | None = None) -> dict:
+    """Quota-safe daily collection.
+
+    Workflow mode (run_id given): requests are made only against a reservation for THIS run that
+    phase 1 already pushed (the reservation counts all 7 requests up front). Local mode (no run_id):
+    the attempt is reserved here, written before the first request and updated in a finally block.
+    Either way the next attempt waits 23 h after the previous ATTEMPT and at most DAILY_REQUESTS
+    requests fall in any rolling 24 h, so a 429 or partial failure never retries hourly."""
     if not key:
         return {"source": "visualcrossing", "result": "no_key"}
     root = out / ROOT
     manifest = _load(root / "manifest.json")
     manifest.setdefault("source", "visualcrossing")
     runs, attempts = manifest.setdefault("runs", []), manifest.setdefault("attempts", [])
-    last = max([datetime.fromisoformat(x["started"]) for x in attempts] +
-               [datetime.fromisoformat(r["retrieved"]) for r in runs[-1:]], default=None)
-    if last is not None and now - last < MIN_INTERVAL:
-        return {"source": "visualcrossing", "result": "not_due", "next_after": (last + MIN_INTERVAL).isoformat()}
-    used_24h = sum(x.get("requests_used", 0) for x in attempts
-                   if now - datetime.fromisoformat(x["started"]) < timedelta(hours=24))
-    if used_24h + len(POINTS) > DAILY_REQUESTS:
-        return {"source": "visualcrossing", "result": "budget_exhausted", "requests_used_24h": used_24h}
-    attempt = {"started": now.isoformat(), "reserved": len(POINTS), "requests_used": 0, "result": "in_progress"}
-    attempts.append(attempt)
-    del attempts[:-KEEP_ATTEMPTS]
+    if run_id is not None:
+        mine = [x for x in attempts if x.get("run_id") == str(run_id) and x.get("result") == "reserved"]
+        if not mine:
+            return {"source": "visualcrossing", "result": "not_reserved"}
+        attempt = mine[-1]
+        attempt["result"] = "in_progress"
+        attempt["requests_used"] = 0
+        attempt["reserved_requests"] = attempt["reserved"]
+    else:
+        blocked = _check(manifest, now)
+        if blocked:
+            return blocked
+        attempt = {"started": now.isoformat(), "reserved": len(POINTS), "requests_used": 0, "result": "in_progress"}
+        attempts.append(attempt)
+        del attempts[:-KEEP_ATTEMPTS]
     _write(root, manifest)  # reservation is durable before any outbound request
     rows = []
     try:

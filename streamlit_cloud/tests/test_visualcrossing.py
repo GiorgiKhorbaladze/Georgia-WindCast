@@ -103,3 +103,55 @@ def test_QA_budget_guard_blocks_even_if_the_interval_were_bypassed(tmp_path):
 def test_budget_is_within_free_tier():
     records_per_day = len(POINTS) * 48
     assert records_per_day * 31 < 30_000
+
+
+# --- QA residual: the reservation must be durable remotely BEFORE any request (two-phase) ---
+
+def test_two_phase_reserve_then_collect_for_the_same_run(tmp_path):
+    assert vc.reserve(tmp_path, KEY, NOW, "101")["result"] == "reserved"
+    m = json.loads((tmp_path / vc.ROOT / "manifest.json").read_text())
+    assert m["attempts"][-1]["requests_used"] == 7  # counted in full before any request
+    get, calls = _counting()
+    assert vc.collect(tmp_path, KEY, get, NOW, clock=lambda: NOW, run_id="101")["result"] == "stored"
+    assert len(calls) == 7
+
+
+def test_no_request_without_this_runs_pushed_reservation(tmp_path):
+    get, calls = _counting()
+    assert vc.collect(tmp_path, KEY, get, NOW, run_id="101")["result"] == "not_reserved"
+    vc.reserve(tmp_path, KEY, NOW, "101")
+    assert vc.collect(tmp_path, KEY, get, NOW, run_id="202")["result"] == "not_reserved"  # another run
+    assert vc.collect(tmp_path, KEY, get, NOW, run_id="unpushed")["result"] == "not_reserved"
+    assert calls == []
+
+
+def test_crash_after_reservation_still_blocks_further_requests_for_a_day(tmp_path):
+    """Runner dies after the reservation was pushed (no collect): the pushed state alone keeps
+    the next 22 hourly runs from reserving or requesting again."""
+    vc.reserve(tmp_path, KEY, NOW, "101")
+    for h in range(1, 23):
+        assert vc.reserve(tmp_path, KEY, NOW + timedelta(hours=h), str(200 + h))["result"] == "not_due"
+    assert vc.reserve(tmp_path, KEY, NOW + timedelta(hours=24), "300")["result"] == "reserved"
+
+
+def test_sources_skips_visual_crossing_when_the_reservation_was_not_pushed(tmp_path, monkeypatch):
+    from forecasting import run as frun
+    monkeypatch.setenv("GITHUB_RUN_ID", "101")
+    monkeypatch.delenv("VC_RESERVATION_PUSHED", raising=False)
+    monkeypatch.setenv("VISUAL_CROSSING_API_KEY", KEY)
+    vc.reserve(tmp_path, KEY, NOW, "101")
+    monkeypatch.setattr(ws, "collect", lambda *a, **k: {"source": a[1], "result": "unchanged"})
+    seen = []
+    orig = vc.collect
+    monkeypatch.setattr(vc, "collect", lambda *a, **k: seen.append(k.get("run_id")) or orig(*a, **k))
+    res = frun.cmd_sources(tmp_path, NOW)
+    assert seen == ["unpushed"]
+    assert next(r for r in res["sources"] if r["source"] == "visualcrossing")["result"] == "not_reserved"
+
+
+def test_workflow_pushes_the_reservation_before_collecting():
+    from pathlib import Path
+    wf = (Path(__file__).resolve().parents[2] / ".github/workflows/weather-sources.yml").read_text(encoding="utf-8")
+    assert wf.index("run vc-reserve") < wf.index("run sources")
+    block = wf[wf.index("Reserve the Visual Crossing quota"):wf.index("Collect new runs")]
+    assert block.index("push -q origin forecast-data") < block.index('VC_RESERVATION_PUSHED=true')

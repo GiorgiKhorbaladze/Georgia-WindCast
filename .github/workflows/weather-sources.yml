@@ -52,6 +52,28 @@ jobs:
           git remote add origin "https://github.com/$REPO.git"
           git -c http.extraheader="$auth" fetch -q --depth 1 origin forecast-data
           git checkout -q -b forecast-data FETCH_HEAD
+      - name: Reserve the Visual Crossing quota and push it BEFORE any API call
+        env:
+          VISUAL_CROSSING_API_KEY: ${{ secrets.VISUAL_CROSSING_API_KEY }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: code/streamlit_cloud
+        # A crash, a cancelled job or a failed push after this point cannot lose the reservation:
+        # if this push does not succeed, the collect step makes no Visual Crossing request at all.
+        run: |
+          res=$(../../venv/bin/python -m forecasting.run vc-reserve --out-dir ../../out)
+          echo "$res"
+          case "$res" in *'"result": "reserved"'*) ;; *) exit 0 ;; esac
+          cd ../../out
+          git add -A weather/sources/visualcrossing
+          git commit -q -m "visual crossing quota reservation $(date -u +%Y-%m-%dT%H:%MZ)"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          for i in 1 2 3 4; do
+            if git -c http.extraheader="$auth" push -q origin forecast-data; then
+              echo "VC_RESERVATION_PUSHED=true" >> "$GITHUB_ENV"; exit 0
+            fi
+            sleep $((i * 5))
+          done
+          echo "::warning::reservation push failed; Visual Crossing skipped this run"
       - name: Collect new runs (each source independently)
         id: collect
         working-directory: code/streamlit_cloud

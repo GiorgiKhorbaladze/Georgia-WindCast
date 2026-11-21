@@ -176,9 +176,15 @@ def cmd_sources(out: Path, now: datetime) -> dict:
 
         from forecasting import visualcrossing as vc
 
+        # In Actions, requests are made only against this run's reservation, and only if the
+        # workflow pushed it first (VC_RESERVATION_PUSHED=true); otherwise "not_reserved".
+        run_id = os.environ.get("GITHUB_RUN_ID")
+        if run_id and os.environ.get("VC_RESERVATION_PUSHED") != "true":
+            run_id = "unpushed"  # matches no reservation: no request is made
         try:  # the key comes from the environment only and is never printed or stored
             results.append(vc.collect(out, os.environ.get("VISUAL_CROSSING_API_KEY"),
-                                      lambda u: (lambda r: (r.status_code, r.content))(client.get(u)), now))
+                                      lambda u: (lambda r: (r.status_code, r.content))(client.get(u)), now,
+                                      run_id=run_id))
         except Exception as exc:
             results.append({"source": "visualcrossing", "result": "failed", "error": type(exc).__name__})
     return {"result": "sources", "sources": results, "health": source_health(out, results, now)}
@@ -283,7 +289,7 @@ def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "sources", "tournament",
-                                    "seed", "publish", "verify", "check-private"])
+                                    "seed", "publish", "verify", "check-private", "vc-reserve"])
     ap.add_argument("--data-dir", type=Path)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--public-dir", type=Path, help="public forecast-data checkout (archive commands, weather)")
@@ -305,6 +311,14 @@ def main(argv: list[str] | None = None) -> int:
             ap.error("--public-dir is required")
         result = getattr(archive, a.cmd)(a.out_dir, a.public_dir)
         print(json.dumps(result, default=str))
+        return 0
+    if a.cmd == "vc-reserve":
+        import os
+
+        from forecasting import visualcrossing as vc
+
+        print(json.dumps(vc.reserve(a.out_dir, os.environ.get("VISUAL_CROSSING_API_KEY"), now,
+                                    os.environ.get("GITHUB_RUN_ID", "local"))))
         return 0
     if a.cmd == "sources":
         result = cmd_sources(a.out_dir, now)
