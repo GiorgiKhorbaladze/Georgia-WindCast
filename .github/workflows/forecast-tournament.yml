@@ -20,6 +20,9 @@ concurrency:
 jobs:
   tournament:
     if: vars.FORECAST_PAUSED != 'true'  # rollback switch: pauses forecasting without restoring public writes
+    # Archive secrets live only in this environment, whose deployment branch rule allows main only:
+    # no PR, feature branch or dispatched non-main ref can ever receive them.
+    environment: forecast-archive
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

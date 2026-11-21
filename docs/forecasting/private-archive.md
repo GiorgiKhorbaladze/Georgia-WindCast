@@ -53,10 +53,17 @@ run, because it needs no cryptography and losing a key loses no data.
    * Expiry: up to one year, with a calendar reminder to renew it.
 
    This token cannot read or write content; it can only read the repository's visibility.
-5. In this repository, go to Settings → Secrets and variables → Actions:
-   * Secrets: `FORECAST_ARCHIVE_SSH_KEY` = the content of `windcast_archive` (the private key).
-   * Secrets: `FORECAST_ARCHIVE_METADATA_TOKEN` = the token from step 4.
-   * Variables: `FORECAST_ARCHIVE_REPO` = `GiorgiKhorbaladze/Georgia-WindCast-forecast-archive`.
+5. In this repository, go to Settings → Environments → New environment `forecast-archive`:
+   * Deployment branches and tags: **Selected branches**, and add the rule `main` only.
+   * Environment secrets: `FORECAST_ARCHIVE_SSH_KEY` = the content of `windcast_archive` (the
+     private key), and `FORECAST_ARCHIVE_METADATA_TOKEN` = the token from step 4.
+   * Variable (repository or environment): `FORECAST_ARCHIVE_REPO` =
+     `GiorgiKhorbaladze/Georgia-WindCast-forecast-archive`.
+
+   Do **not** store these as repository-level secrets. As environment secrets restricted to
+   `main`, they reach only jobs that run from `main`, i.e. trusted, reviewed code. A pull
+   request, a feature branch or a manual run on another branch gets no secret, so its code can
+   never see the key (QA security review).
 6. Delete both local key files. A lost key is replaced, not recovered (see Rotation).
 
 Until all three are set, `forecast.yml` and `forecast-tournament.yml` stop before issuing anything,
@@ -124,14 +131,28 @@ not a third-party timestamping service.
    Disable workflow). GSE collection is a separate workflow and keeps running. A disabled
    workflow cannot be dispatched at all, on any branch. That is why the rehearsal below is a
    separate workflow file.
-2b. **Rehearsal with the real archive, before the merge (no push)**: add the label
-   `archive-rehearsal` to PR #69. Only a label added by the repository owner, on a PR from this
-   repository, starts `forecast-archive-rehearsal.yml`. It runs the PR's own code: the real SSH
-   clone, the privacy proof with the real token, seed, verify, issue, backtest, evaluate, covered,
-   publish and the leak scan. It contains **no push step**, and its token is read-only. It
-   works whether the production workflows are paused or disabled. The run summary lists the files
-   the archive and the public branch would receive, and the commitments. A failure at any step
-   blocks the merge. To run it again, remove the label and add it again.
+2b. **Rehearsal: two separate parts, so that unreviewed code never runs next to the key.**
+   * *Code path, without credentials (automatic, every PR push):* `tests/test_migration_rehearsal.py`
+     runs the whole migration against real git remotes (local bare repositories) with synthetic data:
+     seed, verify, write, archive push first, covered, publish, scan, public push. It includes an
+     archive push that fails, a public push that fails, a tournament-like run, recovery from fresh
+     clones, and a check that the public history is not rewritten.
+   * *Connectivity and privacy, with trusted code (the owner, on their own computer, before the
+     merge).* These are plain `git`/`curl` commands and run no code from this repository:
+     ```
+     GIT_SSH_COMMAND="ssh -i windcast_archive -o IdentitiesOnly=yes" \
+       git ls-remote git@github.com:GiorgiKhorbaladze/Georgia-WindCast-forecast-archive.git   # must succeed (empty output is fine)
+     curl -s -H "Authorization: Bearer <metadata token>" \
+       https://api.github.com/repos/GiorgiKhorbaladze/Georgia-WindCast-forecast-archive | grep -E '"(private|visibility|full_name)"'
+     # must show "private": true, "visibility": "private" and the right full_name
+     ```
+     Run them before step 6 of the setup, while the key files still exist.
+   * *First credentialed run:* only after the merge, by the trusted `main` workflow, under the
+     fail-closed checks (privacy proof, seed, verify, covered, scan). Check it at step 5 below.
+
+   There is no pre-merge credentialed CI rehearsal on purpose. It would execute the PR's own code
+   in a runner holding the key. A read-only token or the absence of `git push` does not prevent
+   exfiltration or misuse of a write-capable deploy key.
 3. **Backup point**: note the current `forecast-data` head SHA. The branch history is not rewritten,
    so every pre-migration file stays reachable at that SHA, which makes a full rollback possible.
 4. **Merge PR #69** (owner decision), then **re-enable** `forecast.yml` and `forecast-tournament.yml`

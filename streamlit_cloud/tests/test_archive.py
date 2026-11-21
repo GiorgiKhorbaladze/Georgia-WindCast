@@ -372,24 +372,22 @@ def _py_steps(wf):
     return [m for m in re.findall(r"forecasting\.run (\S+)", wf) if m != "weather"]
 
 
-def test_rehearsal_is_a_separate_no_push_workflow_running_the_same_steps():
-    reh, prod = _wf("forecast-archive-rehearsal.yml"), _wf("forecast.yml")
-    assert "git push" not in reh and "push -q" not in reh
-    assert "contents: read" in reh and "contents: write" not in reh
-    assert _py_steps(reh) == _py_steps(prod)  # same checks, same order: no drift from production
-    assert "ref: ${{ github.event.pull_request.head.sha }}" in reh  # the PR's own code, before any merge
-    assert "rehearsal" not in prod  # production has no rehearsal branch to get wrong
+def test_no_workflow_runs_pr_controlled_code_with_archive_credentials():
+    """Security review: archive secrets are only reachable from trusted main-branch runs."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / ".github/workflows"
+    assert not (root / "forecast-archive-rehearsal.yml").exists()
+    for wf_path in root.glob("*.yml"):
+        wf = wf_path.read_text(encoding="utf-8")
+        if "FORECAST_ARCHIVE_" not in wf:
+            continue
+        assert wf_path.name in ("forecast.yml", "forecast-tournament.yml"), wf_path.name
+        trig = wf.split("jobs:")[0]
+        assert "pull_request" not in trig  # never on PR-controlled code
+        assert "environment: forecast-archive" in wf  # secrets live in a main-only environment
 
 
-def test_pause_stops_production_writers_but_never_the_owner_rehearsal():
-    """FORECAST_PAUSED gates both production jobs; the rehearsal ignores it (it cannot write) and
-    runs only for the repository owner's label on a same-repository PR."""
+def test_pause_gates_both_production_writers():
     for name in ("forecast.yml", "forecast-tournament.yml"):
         assert "vars.FORECAST_PAUSED != 'true'" in _wf(name).split("steps:")[0]
-    reh = _wf("forecast-archive-rehearsal.yml").split("jobs:")[1].split("steps:")[0]
-    assert "FORECAST_PAUSED" not in reh  # not in the job condition
-    assert "github.event.label.name == 'archive-rehearsal'" in reh
-    assert "github.event.sender.login == github.repository_owner" in reh
-    assert "github.event.pull_request.head.repo.full_name == github.repository" in reh
-    trig = _wf("forecast-archive-rehearsal.yml").split("jobs:")[0]
-    assert "types: [labeled]" in trig and "workflow_dispatch" not in trig and "schedule" not in trig
+    assert "ref: ${{ github.event.repository.default_branch }}" in _wf("forecast.yml")

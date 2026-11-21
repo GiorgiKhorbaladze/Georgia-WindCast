@@ -32,6 +32,9 @@ concurrency:
 jobs:
   forecast:
     if: vars.FORECAST_PAUSED != 'true' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    # Archive secrets live only in this environment, whose deployment branch rule allows main only:
+    # no PR, feature branch or dispatched non-main ref can ever receive them.
+    environment: forecast-archive
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
