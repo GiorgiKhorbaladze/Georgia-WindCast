@@ -3,8 +3,16 @@ remotes (local bare repositories), with synthetic data and NO credentials. It re
 credentialed PR rehearsal, which would have run PR-controlled code next to the archive secrets.
 
 Per run, as forecast.yml / forecast-tournament.yml do: clone public + archive, seed, verify,
-write, push the archive FIRST, publish (covered + scan), push public. Also: interrupted pushes,
-fresh clones for recovery, and the public history is never rewritten."""
+write, push the archive FIRST, publish (covered + scan), push public.
+
+Two kinds of interruption are covered and must not be conflated:
+* "stopped before push" (fail_at=...): the run ends before a push is attempted;
+* REAL `git push` failures injected into the remote: a pre-receive hook that rejects, a
+  concurrent update that makes the push non-fast-forward, and a remote that disappears
+  (transport loss). In production the push step retries 4 times and then fails the job, so the
+  public step never runs; here a failed push raises and the run stops the same way.
+These are local bare repositories, not the private GitHub archive; authentication and GitHub's
+own behaviour are outside this test."""
 
 from __future__ import annotations
 
@@ -106,3 +114,60 @@ def test_nothing_is_removed_publicly_until_the_archive_push_succeeded(remotes):
     run(tmp, pub_bare, arc_bare, forecast(1), fail_at="archive_push")
     pub = checkout(tmp, pub_bare, "forecast-data", "pub_check")
     assert git(pub, "rev-parse", "HEAD") == pre and archive.ledger_files(pub)
+
+
+def reject_pushes(bare, on=True):
+    hook = bare / "hooks" / "pre-receive"
+    if on:
+        hook.write_text("#!/bin/sh\necho 'remote: rejected by test hook' >&2\nexit 1\n")
+        hook.chmod(0o755)
+    elif hook.exists():
+        hook.unlink()
+
+
+@pytest.mark.parametrize("target", ["archive", "public"])
+def test_real_push_rejection_stops_the_run_and_the_next_run_recovers(remotes, target):
+    tmp, pub_bare, arc_bare, pre = remotes
+    bare = arc_bare if target == "archive" else pub_bare
+    reject_pushes(bare)
+    with pytest.raises(subprocess.CalledProcessError) as err:
+        run(tmp, pub_bare, arc_bare, forecast(1))
+    assert "rejected by test hook" in err.value.stderr
+    pub = checkout(tmp, pub_bare, "forecast-data", "pub_after_reject")
+    assert git(pub, "rev-parse", "HEAD") == pre and archive.ledger_files(pub)  # public untouched
+    reject_pushes(bare, on=False)
+    run(tmp, pub_bare, arc_bare, forecast(2))
+    pub = checkout(tmp, pub_bare, "forecast-data", "pub_ok")
+    arc = checkout(tmp, arc_bare, "main", "arc_ok")
+    assert archive.verify(arc, pub)["result"] == "verified" and not archive.ledger_files(pub)
+
+
+def test_non_fast_forward_archive_push_is_refused_then_recovered(remotes):
+    tmp, pub_bare, arc_bare, pre = remotes
+    run(tmp, pub_bare, arc_bare, forecast(1))  # archive now has history
+    pub = checkout(tmp, pub_bare, "forecast-data", "pub")
+    arc = checkout(tmp, arc_bare, "main", "arc")
+    archive.seed(arc, pub)
+    ledger.append(arc, recs(T0 + timedelta(minutes=30)))
+    other = checkout(tmp, arc_bare, "main", "concurrent")  # someone else pushes in between
+    (other / "note.txt").write_text("concurrent\n")
+    commit_push(other, "main", "concurrent")
+    with pytest.raises(subprocess.CalledProcessError) as err:
+        commit_push(arc, "main", "archive")
+    assert "rejected" in err.value.stderr or "fetch first" in err.value.stderr
+    pub_tip = git(checkout(tmp, pub_bare, "forecast-data", "pub_tip"), "rev-parse", "HEAD")
+    run(tmp, pub_bare, arc_bare, forecast(3))  # the next run starts from the new remote state
+    assert git(checkout(tmp, pub_bare, "forecast-data", "pub_tip2"), "rev-parse", "HEAD") != pub_tip
+    arc = checkout(tmp, arc_bare, "main", "arc_final")
+    assert (arc / "note.txt").exists()  # the concurrent commit was not overwritten
+
+
+def test_transport_loss_before_the_archive_push_leaves_public_untouched(remotes):
+    tmp, pub_bare, arc_bare, pre = remotes
+    pub = checkout(tmp, pub_bare, "forecast-data", "pub")
+    arc = checkout(tmp, arc_bare, "main", "arc")
+    archive.seed(arc, pub)
+    git(arc, "remote", "set-url", "origin", str(tmp / "gone.git"))  # remote unreachable
+    with pytest.raises(subprocess.CalledProcessError):
+        commit_push(arc, "main", "archive")
+    assert git(checkout(tmp, pub_bare, "forecast-data", "pub2"), "rev-parse", "HEAD") == pre

@@ -133,19 +133,40 @@ not a third-party timestamping service.
    separate workflow file.
 2b. **Rehearsal: two separate parts, so that unreviewed code never runs next to the key.**
    * *Code path, without credentials (automatic, every PR push):* `tests/test_migration_rehearsal.py`
-     runs the whole migration against real git remotes (local bare repositories) with synthetic data:
-     seed, verify, write, archive push first, covered, publish, scan, public push. It includes an
-     archive push that fails, a public push that fails, a tournament-like run, recovery from fresh
-     clones, and a check that the public history is not rewritten.
+     runs the whole migration against real git remotes, which are local bare repositories (not the
+     private GitHub archive), with synthetic data: seed, verify, write, archive push first, covered,
+     publish, scan, public push. Two kinds of interruption are tested separately:
+     - runs stopped before a push is attempted;
+     - **real `git push` failures** injected into the remote: rejection by a pre-receive hook (on
+       the archive and on the public side), a non-fast-forward after a concurrent update, and an
+       unreachable remote.
+
+     In every case nothing is removed publicly before the archive push succeeded, and the next run
+     recovers. The tests also cover recovery from fresh clones and confirm that the public history
+     is not rewritten. Authentication and GitHub's own behaviour are not covered by these tests.
+     In production a failed push is retried 4 times, then the job fails and the public step is
+     not run.
    * *Connectivity and privacy, with trusted code (the owner, on their own computer, before the
-     merge).* These are plain `git`/`curl` commands and run no code from this repository:
+     merge).* These are plain `git`, `curl` and `python3` commands and run no code from this
+     repository. The token is typed at a hidden prompt, so it is not stored in shell history and
+     never appears in a process argument list. Do not paste it anywhere else, and never into a PR
+     or comment.
      ```
+     ARCHIVE=GiorgiKhorbaladze/Georgia-WindCast-forecast-archive
      GIT_SSH_COMMAND="ssh -i windcast_archive -o IdentitiesOnly=yes" \
-       git ls-remote git@github.com:GiorgiKhorbaladze/Georgia-WindCast-forecast-archive.git   # must succeed (empty output is fine)
-     curl -s -H "Authorization: Bearer <metadata token>" \
-       https://api.github.com/repos/GiorgiKhorbaladze/Georgia-WindCast-forecast-archive | grep -E '"(private|visibility|full_name)"'
-     # must show "private": true, "visibility": "private" and the right full_name
+       git ls-remote "git@github.com:$ARCHIVE.git" && echo "SSH OK (empty output above is fine)"
+     read -rs -p "metadata token: " TOKEN; echo
+     printf 'Authorization: Bearer %s\n' "$TOKEN" \
+       | curl --fail-with-body -sS -H @- -H "Accept: application/vnd.github+json" \
+           "https://api.github.com/repos/$ARCHIVE" \
+       | python3 -c 'import json,sys; d=json.load(sys.stdin); want=sys.argv[1]; \
+ok = d.get("private") is True and d.get("visibility") == "private" and d.get("full_name","").lower() == want.lower(); \
+print("PRIVACY OK" if ok else "NOT PROVEN: " + str({k: d.get(k) for k in ("full_name","private","visibility")})); \
+sys.exit(0 if ok else 1)' "$ARCHIVE"
+     unset TOKEN
      ```
+     `--fail-with-body` makes any non-200 answer fail visibly. The check passes only on
+     `PRIVACY OK`: `private: true`, `visibility: private` and exactly this repository.
      Run them before step 6 of the setup, while the key files still exist.
    * *First credentialed run:* only after the merge, by the trusted `main` workflow, under the
      fail-closed checks (privacy proof, seed, verify, covered, scan). Check it at step 5 below.
