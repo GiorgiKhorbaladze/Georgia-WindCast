@@ -255,3 +255,52 @@ def test_provenance_keeps_every_message_and_parses_publication_dates(tmp_path):
     assert all(m["sha256"] and m["offset"] >= 0 and m["length"] > 0 and m["last_modified"] for m in msgs)
     assert {(m["field"], m["step"]) for m in msgs} >= {("t2", 0), ("tp", 3)}
     assert ws._http_date("Sat, 21 Nov 2026 00:27:03 GMT") > ws._http_date("Fri, 20 Nov 2026 23:59:59 GMT")
+
+
+def _sources_with(monkeypatch, tmp_path, outcome):
+    from forecasting import run as frun
+
+    def fake_collect(out, source, http, now, steps=ws.STEPS, clock=None):
+        if outcome[source] == "fail":
+            raise TimeoutError("read timeout")
+        return {"source": source, "result": outcome[source]}
+    monkeypatch.setattr(ws, "collect", fake_collect)
+    return frun
+
+
+def _manifest(tmp_path, source, run):
+    p = tmp_path / ws.ROOT / source
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "manifest.json").write_text(json.dumps({"source": source, "runs": [{"run": run.isoformat()}]}))
+
+
+def test_one_failing_source_is_recorded_but_does_not_fail_the_job(tmp_path, monkeypatch):
+    now = RUN + timedelta(hours=8)
+    for s in ("gfs", "ecmwf"):
+        _manifest(tmp_path, s, RUN)
+    frun = _sources_with(monkeypatch, tmp_path, {"gfs": "fail", "ecmwf": "unchanged"})
+    monkeypatch.setattr(frun, "datetime", type("D", (datetime,), {"now": classmethod(lambda c, tz=None: now)}))
+    assert frun.main(["sources", "--data-dir", str(tmp_path), "--out-dir", str(tmp_path)]) == 0
+    h = json.loads((tmp_path / ws.ROOT / "health.json").read_text())
+    assert h["sources"]["gfs"]["consecutive_failures"] == 1 and "timeout" in h["sources"]["gfs"]["last_error"]
+    assert h["sources"]["ecmwf"]["consecutive_failures"] == 0 and h["alert"] == []
+
+
+def test_all_sources_failing_or_stale_is_never_green(tmp_path, monkeypatch):
+    now = RUN + timedelta(hours=8)
+    _manifest(tmp_path, "gfs", RUN)
+    _manifest(tmp_path, "ecmwf", RUN - timedelta(hours=24))  # stale: last stored run 32 h old
+    frun = _sources_with(monkeypatch, tmp_path, {"gfs": "fail", "ecmwf": "fail"})
+    monkeypatch.setattr(frun, "datetime", type("D", (datetime,), {"now": classmethod(lambda c, tz=None: now)}))
+    args = ["sources", "--data-dir", str(tmp_path), "--out-dir", str(tmp_path)]
+    assert frun.main(args) == 2
+    h = json.loads((tmp_path / ws.ROOT / "health.json").read_text())
+    assert h["alert"][0] == "every source failed in this attempt" and any("ecmwf" in a for a in h["alert"])
+    assert frun.main(args) == 2
+    assert json.loads((tmp_path / ws.ROOT / "health.json").read_text())["sources"]["gfs"]["consecutive_failures"] == 2
+
+
+def test_sources_workflow_commits_partial_results_then_fails_on_alert():
+    wf = (Path(__file__).resolve().parents[2] / ".github/workflows/weather-sources.yml").read_text(encoding="utf-8")
+    assert 'echo "rc=$rc" >> "$GITHUB_OUTPUT"' in wf
+    assert wf.index("Commit and push") < wf.index("steps.collect.outputs.rc == '2'")

@@ -176,7 +176,53 @@ def cmd_sources(out: Path, now: datetime) -> dict:
                                       lambda u: (lambda r: (r.status_code, r.content))(client.get(u)), now))
         except Exception as exc:
             results.append({"source": "visualcrossing", "result": "failed", "error": type(exc).__name__})
-    return {"result": "sources", "sources": results}
+    return {"result": "sources", "sources": results, "health": source_health(out, results, now)}
+
+
+SOURCE_STALE_HOURS = 18  # 4 runs a day per source plus 4-8 h publication lag: 18 h means >= 2 missed runs
+STALE_HOURS_BY_SOURCE = {"visualcrossing": 30}  # pilot: one request set a day
+
+
+def source_health(out: Path, results: list[dict], now: datetime) -> dict:
+    """Per-source health, kept in weather/sources/health.json. One failing source never stops the
+    others, but the job must not stay green when every source failed in this attempt or when a
+    source has stored no new run for SOURCE_STALE_HOURS: then ``alert`` lists why and main() exits 2."""
+    from forecasting import weather_sources as ws
+
+    path = out / ws.ROOT / "health.json"
+    try:
+        prev = json.loads(path.read_text())
+    except (OSError, ValueError):
+        prev = {}
+    sources, alert = {}, []
+    for r in results:
+        src = r["source"]
+        h = dict(prev.get("sources", {}).get(src, {}))
+        failed = r.get("result") == "failed"
+        h["last_attempt"], h["last_result"] = now.isoformat(), r.get("result")
+        h["consecutive_failures"] = h.get("consecutive_failures", 0) + 1 if failed else 0
+        if failed:
+            h["last_error"] = r.get("error")
+        else:
+            h["last_success"] = now.isoformat()
+        runs = [x["run"] for x in ws._load(out / ws.ROOT / src / "manifest.json").get("runs", [])]
+        h["newest_run"] = max(runs) if runs else None
+        age = (now - datetime.fromisoformat(h["newest_run"])).total_seconds() / 3600 if runs else None
+        h["newest_run_age_h"] = None if age is None else round(age, 1)
+        limit = STALE_HOURS_BY_SOURCE.get(src, SOURCE_STALE_HOURS)
+        h["stale"] = age is None or age > limit
+        if r.get("result") == "no_key":
+            h["stale"] = False  # pilot not configured: reported in the result, not an outage
+        if h["stale"]:
+            alert.append(f"{src}: no stored run newer than {limit} h")
+        sources[src] = h
+    configured = [r for r in results if r.get("result") != "no_key"]  # an unconfigured pilot is not a source
+    if configured and all(r.get("result") == "failed" for r in configured):
+        alert.insert(0, "every source failed in this attempt")
+    report = {"checked_at": now.isoformat(), "stale_after_h": SOURCE_STALE_HOURS, "sources": sources, "alert": alert}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=1) + "\n")
+    return report
 def cmd_tournament(data_dir: Path, out: Path, now: datetime) -> dict:
     """GSE-only, then for every weather source with stored runs: local and local + west predictors.
 
@@ -246,6 +292,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         result = {"issue": cmd_issue, "backtest": cmd_backtest}[a.cmd](a.data_dir, a.out_dir, now)
     print(json.dumps(result, default=str))
+    if a.cmd == "sources" and result["health"]["alert"]:
+        print("ALERT: " + "; ".join(result["health"]["alert"]), file=sys.stderr)
+        return 2  # partial results are still committed by the workflow; the run is then marked failed
     return 0
 
 
