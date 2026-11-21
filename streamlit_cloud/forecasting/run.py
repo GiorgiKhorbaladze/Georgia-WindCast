@@ -15,6 +15,9 @@
 ``python -m forecasting.run sources --data-dir DATA --out-dir OUT``
     Independent NWP sources (GFS, ECMWF IFS from AWS Open Data): store each newly published run
     once, at the seven forecasting points (forecasting/weather_sources.py).
+``python -m forecasting.run tournament --data-dir DATA --out-dir OUT``
+    Daily challenger tournament (forecasting/tournament.py): all available models on the same
+    independent day folds, GSE-only and, once as-of weather runs exist, with weather ablations.
 
 ``python -m forecasting.run evaluate --data-dir DATA --out-dir OUT``
     Scores both ledgers against the GSE observations and writes OUT/evaluation/*.
@@ -164,6 +167,37 @@ def cmd_sources(out: Path, now: datetime) -> dict:
             except Exception as exc:  # reported, never fatal for the other source
                 results.append({"source": source, "result": "failed", "error": f"{type(exc).__name__}: {exc}"[:300]})
     return {"result": "sources", "sources": results}
+def cmd_tournament(data_dir: Path, out: Path, now: datetime) -> dict:
+    """GSE-only, then for every weather source with stored runs: local and local + west predictors.
+
+    Sources: Open-Meteo ICON (forecasting/weather_points.py), NOAA GFS and ECMWF IFS
+    (forecasting/weather_sources.py). Every variant uses the same folds, so source x predictor-set
+    x model combinations are compared on identical independent days."""
+    from forecasting import tournament, weather_points, weather_sources
+
+    obs = load_obs(data_dir, now.date(), EVAL_DAYS)
+    report: dict = {"generated_at": now.isoformat(), "independence_unit": "local day",
+                    "min_days": tournament.MIN_DAYS, "horizons_h": list(tournament.HORIZONS), "variants": {},
+                    "sources": {}}
+    loaders = {"icon_openmeteo": (weather_points.available_runs(out), lambda r: weather_points.load_run(out, r))}
+    for src in ("gfs", "ecmwf"):
+        loaders[src] = (weather_sources.available_runs(out, src),
+                        lambda r, s=src: weather_sources.load_run(out, s, r))
+    variants = {"gse_only": None}
+    for src, (runs, load) in loaders.items():
+        report["sources"][src] = {"runs": len(runs)}
+        if runs:
+            for name, regions in (("local_weather", ("east",)), ("local_plus_west", ("east", "central", "west"))):
+                variants[f"{src}_{name}"] = tournament.weather_features(runs, load, regions)
+    (out / "evaluation").mkdir(parents=True, exist_ok=True)
+    for name, fn in variants.items():
+        res = tournament.run(obs, weather=fn)
+        report["variants"][name] = {"status": res["status"], "scores": res["scores"]}
+        res["predictions"].to_csv(out / "evaluation" / f"tournament_{name}.csv.gz", index=False)
+    if len(variants) == 1:
+        report["weather_ablation"] = "not run: no as-of weather runs stored yet"
+    (out / "evaluation" / "tournament.json").write_text(json.dumps(report, indent=1, default=str) + "\n")
+    return {"result": "tournament", "variants": list(variants), "sources": report["sources"]}
 
 
 def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
@@ -185,7 +219,7 @@ def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "sources"])
+    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "sources", "tournament"])
     ap.add_argument("--data-dir", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--force", action="store_true", help="evaluate even if the last run is recent")
@@ -193,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now(UTC).replace(microsecond=0)
     if a.cmd == "sources":
         result = cmd_sources(a.out_dir, now)
+    elif a.cmd == "tournament":
+        result = cmd_tournament(a.data_dir, a.out_dir, now)
     elif a.cmd == "weather":
         result = cmd_weather(a.data_dir, a.out_dir, now)
     elif a.cmd == "evaluate":

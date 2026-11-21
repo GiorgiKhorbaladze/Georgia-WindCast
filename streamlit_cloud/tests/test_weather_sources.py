@@ -166,3 +166,26 @@ def test_sources_workflow_is_isolated_keyless_and_unpublished():
     assert "API_KEY" not in wf.upper().replace("API KEY", "")  # no key needed for AWS Open Data
     import mwmodel
     assert mwmodel.PUBLISH_FORECAST is False
+
+
+def test_tournament_builds_a_variant_per_source_and_predictor_set(tmp_path, monkeypatch):
+    from forecasting import run as frun
+    from forecasting import tournament
+
+    calls = []
+    monkeypatch.setattr(tournament, "run", lambda obs, weather=None: calls.append(weather) or
+                        {"status": {}, "scores": [], "predictions": __import__("pandas").DataFrame()})
+    monkeypatch.setattr(frun, "load_obs", lambda *a, **k: __import__("pandas").Series(dtype=float))
+    s3 = FakeS3((0, 3, 6))
+    ws.collect(tmp_path, "ecmwf", ws.Http(s3.get, sleep=lambda s: None), RUN + timedelta(hours=8), (0, 3, 6))
+    res = frun.cmd_tournament(tmp_path, tmp_path, RUN + timedelta(days=1))
+    assert res["variants"] == ["gse_only", "ecmwf_local_weather", "ecmwf_local_plus_west"]
+    assert res["sources"]["ecmwf"]["runs"] == 1 and res["sources"]["gfs"]["runs"] == 0
+    report = json.loads((tmp_path / "evaluation" / "tournament.json").read_text())
+    assert "weather_ablation" not in report
+
+
+def test_variant_labels_name_the_source():
+    import forecast_page
+    assert forecast_page._variant_label("gfs_local_plus_west", "en").startswith("NOAA GFS: ")
+    assert forecast_page._variant_label("gse_only", "ka") == "მხოლოდ ფაქტობრივი გენერაცია"

@@ -39,11 +39,13 @@ def fetch(path: str, base: str = BASE) -> str | None:
 
 @st.cache_data(ttl=timedelta(minutes=10), show_spinner=False)
 def load() -> dict:
-    out = {"board": None, "history": None, "day_ahead": None, "error": None}
+    out = {"board": None, "history": None, "day_ahead": None, "tournament": None, "error": None}
     try:
         text = fetch("evaluation/leaderboard.json")
         if text:
             out["board"] = json.loads(text)
+            tour = fetch("evaluation/tournament.json")
+            out["tournament"] = json.loads(tour) if tour else None
             for key, name in (("history", "history_backtest.csv"), ("history_live", "history_live.csv"),
                               ("day_ahead", "day_ahead_live.csv")):
                 body = fetch(f"evaluation/{name}")
@@ -128,6 +130,7 @@ def render(lang: str) -> None:
     if hist is not None and len(hist):
         st.subheader(tr("fc_history", lang))
         ui.chart(_history_chart(hist[hist.cadence == cadence], lang))
+    _tournament(data.get("tournament"), lang)
     ui.note(tr("fc_method", lang))
 
 
@@ -166,3 +169,47 @@ def _day_ahead(df: pd.DataFrame | None, lang: str) -> None:
                                "MAE, MWh": g.apply(lambda e: e.abs().mean()).round(1).values,
                                "Bias, MWh": g.mean().round(1).values, tr("fc_col_days", lang): g.size().values}),
                  hide_index=True, width="stretch")
+
+
+def _tournament(t: dict | None, lang: str) -> None:
+    """Daily challenger tournament: hourly cadence, identical independent day folds for every model."""
+    if not t:
+        return
+    st.subheader(tr("fc_tour", lang))
+    ui.note(tr("fc_tour_note", lang))
+    variants = list((t.get("variants") or {}).keys())
+    if not variants:
+        return
+    name = st.radio(tr("fc_tour_variant", lang), variants, horizontal=True, key="fc_tour_v",
+                    format_func=lambda v: _variant_label(v, lang))
+    v = t["variants"][name]
+    unavailable = [m for m, s in v.get("status", {}).items() if s != "available"]
+    if unavailable:
+        st.caption(tr("fc_tour_unavail", lang, models=", ".join(f"{m} ({v['status'][m]})" for m in unavailable)))
+    rows = v.get("scores") or []
+    if not rows:
+        st.info(tr("fc_no_cases", lang))
+        return
+    df = pd.DataFrame(rows)
+    st.dataframe(pd.DataFrame({
+        tr("fc_col_h", lang): [f"{h} {tr('fc_h', lang)}" for h in df.horizon_h],
+        tr("fc_col_model", lang): [model_name(m, lang) for m in df.model_id],
+        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2), "Bias, MW": df.bias.round(2),
+        tr("fc_col_skill", lang): [tr("fc_reference", lang) if m == "persistence" else "-" if s is None else f"{s:+.3f}"
+                                   for m, s in zip(df.model_id, df.skill, strict=True)],
+        tr("fc_col_ci", lang): ["-" if c is None else f"{c[0]:+.2f} ... {c[1]:+.2f}" for c in df.skill_90ci],
+        tr("fc_col_cases", lang): df.cases, tr("fc_col_indep", lang): df.independent_days,
+        tr("fc_col_evidence", lang): [tr(f"fc_ev_{e}", lang) for e in df.evidence],
+    }), hide_index=True, width="stretch")
+    if t.get("weather_ablation"):
+        st.caption(tr("fc_tour_noweather", lang))
+
+
+def _variant_label(v: str, lang: str) -> str:
+    """'gse_only' or '<source>_<predictor set>' -> readable label (source names stay as in the data)."""
+    if f"fc_v_{v}" in T:
+        return tr(f"fc_v_{v}", lang)
+    for src in ("icon_openmeteo", "gfs", "ecmwf"):
+        if v.startswith(src + "_") and f"fc_v_{v[len(src) + 1:]}" in T:
+            return f"{tr(f'fc_srcname_{src}', lang)}: {tr(f'fc_v_{v[len(src) + 1:]}', lang)}"
+    return v

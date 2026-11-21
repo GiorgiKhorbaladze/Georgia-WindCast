@@ -1,0 +1,72 @@
+name: Challenger tournament (experimental forecasts)
+
+# Issue #57 stage II. Once a day: every available challenger (persistence, ridge, SARIMA/SARIMAX,
+# XGBoost, LightGBM, CatBoost, GRU) on the same independent day folds, GSE-only and with the as-of
+# weather ablations once weather runs exist. Reads the `data` branch and the forecast-data
+# branch; writes only `forecast-data/evaluation/tournament*`. No external request, no publication
+# (streamlit_cloud/mwmodel.py PUBLISH_FORECAST stays False).
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forecast-data  # same group as forecast.yml: the two never push at the same time
+  cancel-in-progress: false
+
+jobs:
+  tournament:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write  # repository-scoped permission; the script writes only the forecast-data branch
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          path: code
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.11.32"
+      - name: Install pinned challenger libraries
+        run: |
+          uv venv -p 3.12 venv
+          uv pip install -p venv -r code/streamlit_cloud/forecast-ml-requirements.txt
+      - name: Install CPU-only torch for the GRU (optional; GRU is reported unavailable if this fails)
+        continue-on-error: true
+        run: uv pip install -p venv --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+      - name: Check out data (read only) and forecast-data
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git init -q data && git -C data remote add origin "https://github.com/$REPO.git"
+          git -C data -c http.extraheader="$auth" fetch -q --depth 1 origin data
+          git -C data checkout -q FETCH_HEAD -- gse
+          git init -q out && cd out
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://github.com/$REPO.git"
+          git -c http.extraheader="$auth" fetch -q --depth 1 origin forecast-data
+          git checkout -q -b forecast-data FETCH_HEAD
+      - name: Tournament
+        working-directory: code/streamlit_cloud
+        run: ../../venv/bin/python -W ignore -m forecasting.run tournament --data-dir ../../data --out-dir ../../out
+      - name: Commit and push (only when something changed)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd out
+          git add -A evaluation
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -q -m "tournament $(date -u +%Y-%m-%d)"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          for i in 1 2 3 4; do
+            git -c http.extraheader="$auth" push -q origin forecast-data && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
