@@ -40,11 +40,64 @@ def test_without_key_nothing_is_requested(tmp_path):
     assert vc.collect(tmp_path, None, lambda u: pytest.fail("no request without key"), NOW)["result"] == "no_key"
 
 
-def test_out_of_range_and_http_errors_store_nothing(tmp_path):
+def test_errors_store_no_run_but_record_the_attempt(tmp_path):
     with pytest.raises(vc.VCError, match="outside"):
         vc.collect(tmp_path, KEY, lambda u: (200, body(temp=90.0)), NOW)
-    assert vc.collect(tmp_path, KEY, lambda u: (429, b""), NOW)["result"] == "failed"
-    assert not (tmp_path / vc.ROOT / "manifest.json").exists()
+    m = json.loads((tmp_path / vc.ROOT / "manifest.json").read_text())
+    assert m["runs"] == [] and m["attempts"][-1]["result"] == "error: VCError"
+    assert m["attempts"][-1]["requests_used"] == 1 and KEY not in json.dumps(m)
+
+
+def _counting(fail_at=None, status=429):
+    calls = []
+
+    def get(u):
+        calls.append(u)
+        return (status, b"") if fail_at is not None and len(calls) == fail_at else (200, body())
+    return get, calls
+
+
+def test_QA_failure_at_point_6_is_not_retried_an_hour_later(tmp_path):
+    get, calls = _counting(fail_at=6)
+    assert vc.collect(tmp_path, KEY, get, NOW)["result"] == "failed" and len(calls) == 6
+    m = json.loads((tmp_path / vc.ROOT / "manifest.json").read_text())
+    assert m["attempts"][-1] == {"started": NOW.isoformat(), "reserved": 7, "requests_used": 6,
+                                 "result": "http 429 at " + POINTS[5].id}
+    for h in range(1, 23):  # every hourly scheduled run for the rest of the day
+        res = vc.collect(tmp_path, KEY, get, NOW + timedelta(hours=h))
+        assert res["result"] == "not_due"
+    assert len(calls) == 6  # no further request that day
+
+
+def test_QA_429_at_first_point_waits_a_day_then_retries_once(tmp_path):
+    get, calls = _counting(fail_at=1)
+    assert vc.collect(tmp_path, KEY, get, NOW)["result"] == "failed" and len(calls) == 1
+    assert vc.collect(tmp_path, KEY, get, NOW + timedelta(hours=1))["result"] == "not_due"
+    ok, ok_calls = _counting()
+    assert vc.collect(tmp_path, KEY, ok, NOW + timedelta(hours=24), clock=lambda: NOW)["result"] == "stored"
+    assert len(ok_calls) == 7
+
+
+def test_QA_never_more_than_the_daily_budget_in_any_24h(tmp_path):
+    """Hourly invocations for three days, mixing failures and successes: rolling 24 h use <= 7."""
+    log = []
+    for h in range(72):
+        t = NOW + timedelta(hours=h)
+        get, calls = _counting(fail_at=3 if h % 2 == 0 else None)
+        vc.collect(tmp_path, KEY, get, t, clock=lambda t=t: t)
+        log += [t] * len(calls)
+    for t in log:
+        assert sum(1 for x in log if t <= x < t + timedelta(hours=24)) <= vc.DAILY_REQUESTS
+
+
+def test_QA_budget_guard_blocks_even_if_the_interval_were_bypassed(tmp_path):
+    m = {"source": "visualcrossing", "runs": [], "attempts": [
+        {"started": (NOW - timedelta(hours=23, minutes=30)).isoformat(), "reserved": 7, "requests_used": 7,
+         "result": "stored"}]}
+    (tmp_path / vc.ROOT).mkdir(parents=True)
+    (tmp_path / vc.ROOT / "manifest.json").write_text(json.dumps(m))
+    res = vc.collect(tmp_path, KEY, lambda u: pytest.fail("over budget"), NOW)
+    assert res["result"] == "budget_exhausted" and res["requests_used_24h"] == 7
 
 
 def test_budget_is_within_free_tier():

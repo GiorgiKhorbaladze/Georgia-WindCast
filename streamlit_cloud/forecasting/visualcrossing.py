@@ -28,7 +28,9 @@ from forecasting.features import POINTS, RANGES, UNITS
 BASE = "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline"
 ROOT = Path("weather") / "sources" / "visualcrossing"
 ELEMENTS = "datetimeEpoch,temp,humidity,precip,pressure,cloudcover,windspeed,winddir,windgust"
-MIN_INTERVAL = timedelta(hours=23)  # one collection a day
+MIN_INTERVAL = timedelta(hours=23)  # one ATTEMPT a day, successful or not
+DAILY_REQUESTS = 7  # one request per point; never more in any rolling 24 h unless the owner changes it
+KEEP_ATTEMPTS = 60
 MAP = {"temp": "temperature_2m", "humidity": "relative_humidity_2m", "precip": "precipitation",
        "pressure": "pressure_msl", "cloudcover": "cloud_cover", "winddir": "wind_direction_10m"}
 
@@ -73,21 +75,51 @@ def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
+def _write(root: Path, manifest: dict) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
+
+
 def collect(out: Path, key: str | None, get: Callable[[str], tuple[int, bytes]], now: datetime,
             clock: Callable[[], datetime] | None = None) -> dict:
+    """Quota-safe daily collection. The attempt (with its 7-request reservation) is written to the
+    public manifest BEFORE the first request and updated with the requests actually made, whatever
+    happens; the workflow commits it even when the run fails. The next attempt is allowed only 23 h
+    after the previous ATTEMPT (not the previous success), and only if fewer than DAILY_REQUESTS
+    requests were used in the last 24 h. A 429 or partial failure therefore never retries hourly."""
     if not key:
         return {"source": "visualcrossing", "result": "no_key"}
     root = out / ROOT
     manifest = _load(root / "manifest.json")
-    runs = manifest.get("runs", [])
-    if runs and now - datetime.fromisoformat(runs[-1]["retrieved"]) < MIN_INTERVAL:
-        return {"source": "visualcrossing", "result": "not_due"}
+    manifest.setdefault("source", "visualcrossing")
+    runs, attempts = manifest.setdefault("runs", []), manifest.setdefault("attempts", [])
+    last = max([datetime.fromisoformat(x["started"]) for x in attempts] +
+               [datetime.fromisoformat(r["retrieved"]) for r in runs[-1:]], default=None)
+    if last is not None and now - last < MIN_INTERVAL:
+        return {"source": "visualcrossing", "result": "not_due", "next_after": (last + MIN_INTERVAL).isoformat()}
+    used_24h = sum(x.get("requests_used", 0) for x in attempts
+                   if now - datetime.fromisoformat(x["started"]) < timedelta(hours=24))
+    if used_24h + len(POINTS) > DAILY_REQUESTS:
+        return {"source": "visualcrossing", "result": "budget_exhausted", "requests_used_24h": used_24h}
+    attempt = {"started": now.isoformat(), "reserved": len(POINTS), "requests_used": 0, "result": "in_progress"}
+    attempts.append(attempt)
+    del attempts[:-KEEP_ATTEMPTS]
+    _write(root, manifest)  # reservation is durable before any outbound request
     rows = []
-    for p in POINTS:
-        status, body = get(url(p.lat, p.lon, key))
-        if status != 200:
-            return {"source": "visualcrossing", "result": "failed", "error": f"http {status} at {p.id}"}
-        rows += parse(p.id, body)
+    try:
+        for p in POINTS:
+            attempt["requests_used"] += 1
+            status, body = get(url(p.lat, p.lon, key))
+            if status != 200:
+                attempt["result"] = f"http {status} at {p.id}"
+                return {"source": "visualcrossing", "result": "failed", "error": attempt["result"],
+                        "requests": attempt["requests_used"]}
+            rows += parse(p.id, body)
+    except Exception as exc:
+        attempt["result"] = f"error: {type(exc).__name__}"
+        raise
+    finally:
+        _write(root, manifest)
     df = pd.DataFrame(rows, columns=["point", "valid_utc", "variable", "value"])
     retrieved = (clock or (lambda: datetime.now(UTC).replace(microsecond=0)))()  # after the last response
     run = now.replace(minute=0, second=0, microsecond=0)
@@ -99,5 +131,6 @@ def collect(out: Path, key: str | None, get: Callable[[str], tuple[int, bytes]],
     runs.append(dict(run=run.isoformat(), started=now.isoformat(), retrieved=retrieved.isoformat(), file=f"runs/{name}",
                      sha256=hashlib.sha256(csv).hexdigest(), values=int(len(df)), requests=len(POINTS),
                      url_template=public_url(0, 0)))
-    (root / "manifest.json").write_text(json.dumps({"source": "visualcrossing", "runs": runs}, indent=1) + "\n")
+    attempt["result"] = "stored"
+    _write(root, manifest)
     return {"source": "visualcrossing", "result": "stored", "values": int(len(df)), "requests": len(POINTS)}
