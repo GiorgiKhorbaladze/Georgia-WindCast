@@ -18,8 +18,8 @@ FIX = Path(__file__).resolve().parent / "fixtures" / "forecast"
 
 def fake_fetch(path, base=None):
     name = path.split("/")[-1]
-    if name == "day_ahead_live.csv":
-        return "\n"  # what the workflow writes before the first complete day
+    if name == "day_ahead_summary_live.json":
+        return '{"models": []}\n'  # what publish writes before the first complete day
     f = FIX / name
     return f.read_text(encoding="utf-8") if f.exists() else None
 
@@ -48,6 +48,7 @@ def test_page_shows_scores_but_never_forecast_values(lang):
     assert tr("page_gen_forecast", lang) in text and tr("fc_experimental", lang) in text
     assert tr("fc_withheld", lang) in text
     assert "evaluation/latest.csv" not in calls  # forecast values are not even downloaded
+    assert not any("ledger" in c or "day_ahead_live" in c or "tournament_" in c for c in calls)
     assert any(w.value == tr("fc_insufficient", lang, days=14, cases=200) for w in at.warning)
     assert len(at.dataframe) == 2 and len(at.get("download_button")) == 1
     assert not any(w.value == tr("fc_load_error", lang) for w in at.warning)  # empty CSVs are fine

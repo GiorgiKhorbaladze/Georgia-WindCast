@@ -38,35 +38,80 @@ jobs:
       - name: Install CPU-only torch for the GRU (optional; GRU is reported unavailable if this fails)
         continue-on-error: true
         run: uv pip install -p venv --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
-      - name: Check out data (read only) and forecast-data
+      - name: Require the private archive (never fall back to public storage)
+        env:
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          HAS_KEY: ${{ secrets.FORECAST_ARCHIVE_SSH_KEY != '' }}
+        run: |
+          if [ -z "$ARCHIVE_REPO" ] || [ "$HAS_KEY" != "true" ]; then
+            echo "::error::private forecast archive not configured (FORECAST_ARCHIVE_REPO / FORECAST_ARCHIVE_SSH_KEY); nothing issued"
+            exit 1
+          fi
+      - name: Check out data (read only), public forecast-data and the private archive
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
+          ARCHIVE_KEY: ${{ secrets.FORECAST_ARCHIVE_SSH_KEY }}
         run: |
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           git init -q data && git -C data remote add origin "https://github.com/$REPO.git"
           git -C data -c http.extraheader="$auth" fetch -q --depth 1 origin data
           git -C data checkout -q FETCH_HEAD -- gse
-          git init -q out && cd out
+          git init -q pub && cd pub
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add origin "https://github.com/$REPO.git"
           git -c http.extraheader="$auth" fetch -q --depth 1 origin forecast-data
           git checkout -q -b forecast-data FETCH_HEAD
-      - name: Tournament
+          cd ..
+          # Deploy key in a private temp file; GitHub's published ed25519 host key pinned (no TOFU).
+          umask 077
+          printf '%s\n' "$ARCHIVE_KEY" > "$RUNNER_TEMP/archive_key"
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
+          echo "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/archive_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes" >> "$GITHUB_ENV"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/archive_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts -o StrictHostKeyChecking=yes"
+          git init -q archive && cd archive
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "git@github.com:$ARCHIVE_REPO.git"
+          if git ls-remote --exit-code --heads origin main >/dev/null; then
+            git fetch -q origin main && git checkout -q -b main FETCH_HEAD
+          else
+            git checkout -q --orphan main
+          fi
+      - name: Verify the archive against the public commitments
         working-directory: code/streamlit_cloud
-        run: ../../venv/bin/python -W ignore -m forecasting.run tournament --data-dir ../../data --out-dir ../../out
-      - name: Commit and push (only when something changed)
+        run: ../../venv/bin/python -m forecasting.run verify --out-dir ../../archive --public-dir ../../pub
+      - name: Tournament (predictions into the private archive; weather read from the public branch)
+        working-directory: code/streamlit_cloud
+        run: ../../venv/bin/python -W ignore -m forecasting.run tournament --data-dir ../../data --out-dir ../../archive --public-dir ../../pub
+      - name: Push the private archive first
+        run: |
+          cd archive
+          git add -A
+          if git diff --cached --quiet; then echo "archive unchanged"; exit 0; fi
+          git commit -q -m "tournament $(date -u +%Y-%m-%d)"
+          for i in 1 2 3 4; do git push -q origin main && exit 0; sleep $((i * 5)); done
+          exit 1
+      - name: Public projection (scores only) with a leak scan
+        working-directory: code/streamlit_cloud
+        run: ../../venv/bin/python -m forecasting.run publish --out-dir ../../archive --public-dir ../../pub
+      - name: Push the public projection
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd out
-          git add -A evaluation
+          rm -f "$RUNNER_TEMP/archive_key"
+          cd pub
+          git add -A
           if git diff --cached --quiet; then echo "no changes"; exit 0; fi
-          git commit -q -m "tournament $(date -u +%Y-%m-%d)"
+          git commit -q -m "tournament scores $(date -u +%Y-%m-%d)"
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           for i in 1 2 3 4; do
             git -c http.extraheader="$auth" push -q origin forecast-data && exit 0
             sleep $((i * 5))
           done
           exit 1
+      - name: Remove the deploy key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/archive_key"
