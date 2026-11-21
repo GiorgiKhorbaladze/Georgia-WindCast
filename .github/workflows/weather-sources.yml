@@ -19,6 +19,10 @@ concurrency:
 
 jobs:
   sources:
+    # Scheduled collection stays OFF after merge until the owner enables it: repository variable
+    # WEATHER_SOURCES_ENABLED=true (Settings -> Secrets and variables -> Actions -> Variables).
+    # A manual workflow_dispatch run is a one-off test and does not need the variable.
+    if: github.event_name == 'workflow_dispatch' || vars.WEATHER_SOURCES_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
