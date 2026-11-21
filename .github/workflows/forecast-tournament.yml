@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   tournament:
+    if: vars.FORECAST_PAUSED != 'true'  # rollback switch: pauses forecasting without restoring public writes
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -42,9 +43,10 @@ jobs:
         env:
           ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
           HAS_KEY: ${{ secrets.FORECAST_ARCHIVE_SSH_KEY != '' }}
+          HAS_META: ${{ secrets.FORECAST_ARCHIVE_METADATA_TOKEN != '' }}
         run: |
-          if [ -z "$ARCHIVE_REPO" ] || [ "$HAS_KEY" != "true" ]; then
-            echo "::error::private forecast archive not configured (FORECAST_ARCHIVE_REPO / FORECAST_ARCHIVE_SSH_KEY); nothing issued"
+          if [ -z "$ARCHIVE_REPO" ] || [ "$HAS_KEY" != "true" ] || [ "$HAS_META" != "true" ]; then
+            echo "::error::private forecast archive not configured (FORECAST_ARCHIVE_REPO / FORECAST_ARCHIVE_SSH_KEY / FORECAST_ARCHIVE_METADATA_TOKEN); nothing issued"
             exit 1
           fi
       - name: Check out data (read only), public forecast-data and the private archive
@@ -75,6 +77,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add origin "git@github.com:$ARCHIVE_REPO.git"
+          # The repository must exist and be reachable with the deploy key; otherwise stop (no orphan fallback).
+          git ls-remote origin >/dev/null || { echo "::error::archive repository unreachable"; exit 1; }
           if git ls-remote --exit-code --heads origin main >/dev/null; then
             git fetch -q origin main && git checkout -q -b main FETCH_HEAD
           else
@@ -83,7 +87,7 @@ jobs:
       - name: Confirm the archive repository is private (fail closed)
         env:
           ARCHIVE_REPO: ${{ vars.FORECAST_ARCHIVE_REPO }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCHIVE_METADATA_TOKEN: ${{ secrets.FORECAST_ARCHIVE_METADATA_TOKEN }}
         working-directory: code/streamlit_cloud
         run: ../../venv/bin/python -m forecasting.run check-private --out-dir ../../archive
       - name: Absorb any ledger still on the public side, then verify against the public commitments

@@ -192,8 +192,8 @@ def publish(archive: Path, public: Path) -> dict:
     ev_src, ev_dst = archive / "evaluation", public / "evaluation"
     ev_dst.mkdir(parents=True, exist_ok=True)
     for rel in AGGREGATE_FILES:
-        if (archive / rel).exists():
-            shutil.copy2(archive / rel, public / rel)
+        if (archive / rel).exists():  # AR2: bias removed at any level (a 1-day row's bias = that day's mean)
+            (public / rel).write_text(json.dumps(_strip(json.loads((archive / rel).read_text())), indent=1) + "\n")
     for name in ("history_backtest.csv", "history_live.csv"):
         src = ev_src / name if (ev_src / name).exists() else ev_dst / name  # old public copy before the first evaluation
         if src.exists():
@@ -220,11 +220,22 @@ CONSTRAINT_COLUMNS = None  # owner-maintained input (curtailment notes), never a
 # In public JSON every number must sit under one of these keys (scores, counts, provenance).
 # Any other numeric leaf, or a string that is a bare number, is treated as a possible forecast value.
 NUMERIC_KEYS = frozenset({
-    "mae", "rmse", "bias", "skill", "skill_90ci", "mae_mwh", "cases", "days", "independent_days",
+    "mae", "rmse", "skill", "skill_90ci", "mae_mwh", "cases", "days", "independent_days",
     "common_cases", "forecasts", "matured", "complete", "incomplete_or_missing", "late_share",
     "horizon_min", "horizon_h", "horizons_h", "model_version", "min_cases", "min_days", "weather_runs",
     "runs", "rows", "bytes", "run_id", "run_attempt", "run_number"})
-BIAS_FILES = ("evaluation/leaderboard.json", "evaluation/tournament.json")  # whole-window bias only
+# A dict with a "model_id" is a score row; it may carry only these keys (structural schema, AR2).
+ROW_KEYS = frozenset({"model_id", "model_version", "cadence", "horizon_min", "horizon_h", "mae", "rmse",
+                      "skill", "skill_90ci", "cases", "days", "independent_days", "common_cases", "evidence",
+                      "mae_mwh", "late_share"})
+
+
+def _strip(o):
+    if isinstance(o, dict):
+        return {k: _strip(v) for k, v in o.items() if k not in FORBIDDEN_COLUMNS}
+    if isinstance(o, list):
+        return [_strip(v) for v in o]
+    return o
 _NUMBER = re.compile(r"^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$")
 
 
@@ -233,8 +244,10 @@ def _json_leaks(obj, rel: str) -> list[str]:
 
     def walk(o, key, path):
         if isinstance(o, dict):
+            if "model_id" in o and set(o) - ROW_KEYS:
+                bad.append(f"{path} score row with keys outside the schema: {sorted(set(o) - ROW_KEYS)}")
             for k, v in o.items():
-                if k in FORBIDDEN_COLUMNS and not (k == "bias" and rel in BIAS_FILES):
+                if k in FORBIDDEN_COLUMNS:
                     bad.append(f"{path}.{k}")
                 walk(v, k, f"{path}.{k}")
         elif isinstance(o, list):
@@ -280,27 +293,26 @@ def scan(public: Path) -> None:
 
 
 def private_status(status: int, body: dict | None, archive_repo: str, public_repo: str) -> str:
-    """Decide from GET /repos/{archive_repo} (made with this public repository's GITHUB_TOKEN)
-    whether the archive is private. 200 with private=false: public, refuse. 404: not visible to a
-    token without access, i.e. private (the SSH clone that ran before proves it exists and the
-    deploy key can reach it). Anything else (rate limit, outage): refuse, fail closed."""
+    """Positive proof only: GET /repos/{archive_repo}, made with a read-only token that HAS access
+    to the archive (FORECAST_ARCHIVE_METADATA_TOKEN), must return 200 with private=true and
+    visibility=private and the same full name. 404, 403, 5xx, a missing token or any other answer
+    proves nothing (typo, deleted repository, token without access, outage) and stops the run."""
     if archive_repo.lower() == public_repo.lower():
         raise LeakError("the archive must be a separate repository, not this public one")
-    if status == 200 and body is not None:
-        if body.get("private") is True and body.get("visibility", "private") != "public":
-            return "private"
-        raise LeakError(f"archive repository {archive_repo} is public; refusing to write forecasts to it")
-    if status == 404:
-        return "private"
-    raise LeakError(f"could not confirm that {archive_repo} is private (HTTP {status}); refusing")
+    if status != 200 or not body:
+        raise LeakError(f"could not prove that {archive_repo} is private (HTTP {status}); refusing")
+    if (body.get("private") is not True or body.get("visibility") != "private"
+            or str(body.get("full_name", "")).lower() != archive_repo.lower()):
+        raise LeakError(f"{archive_repo} is not a private repository (or the answer is for another one); refusing")
+    return "private"
 
 
 def check_private(archive_repo: str, public_repo: str, token: str | None) -> dict:
     import httpx
 
-    headers = {"Accept": "application/vnd.github+json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    if not token:
+        raise LeakError("FORECAST_ARCHIVE_METADATA_TOKEN is not set; privacy cannot be proven; refusing")
+    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
     r = httpx.get(f"https://api.github.com/repos/{archive_repo}", headers=headers, timeout=20)
     body = r.json() if r.status_code == 200 else None
     return {"result": private_status(r.status_code, body, archive_repo, public_repo)}

@@ -117,7 +117,7 @@ def render(lang: str) -> None:
     table = pd.DataFrame({
         tr("fc_col_h", lang): [horizon_label(m, lang) for m in df.horizon_min],
         tr("fc_col_model", lang): [model_name(m, lang) for m in df.model_id],
-        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2), "Bias, MW": df.bias.round(2),
+        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2),
         tr("fc_col_skill", lang): [tr("fc_reference", lang) if m == "persistence" else "-" if s is None else f"{s:+.3f}"
                                    for m, s in zip(df.model_id, df.skill, strict=True)],
         tr("fc_col_ci", lang): ["-" if c is None else f"{c[0]:+.2f} ... {c[1]:+.2f}" for c in df.skill_90ci],
@@ -193,7 +193,7 @@ def _tournament(t: dict | None, lang: str) -> None:
     st.dataframe(pd.DataFrame({
         tr("fc_col_h", lang): [f"{h} {tr('fc_h', lang)}" for h in df.horizon_h],
         tr("fc_col_model", lang): [model_name(m, lang) for m in df.model_id],
-        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2), "Bias, MW": df.bias.round(2),
+        "MAE, MW": df.mae.round(2), "RMSE, MW": df.rmse.round(2),
         tr("fc_col_skill", lang): [tr("fc_reference", lang) if m == "persistence" else "-" if s is None else f"{s:+.3f}"
                                    for m, s in zip(df.model_id, df.skill, strict=True)],
         tr("fc_col_ci", lang): ["-" if c is None else f"{c[0]:+.2f} ... {c[1]:+.2f}" for c in df.skill_90ci],

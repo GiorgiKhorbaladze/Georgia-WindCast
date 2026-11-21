@@ -209,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         from forecasting import archive
 
         print(json.dumps(archive.check_private(os.environ["ARCHIVE_REPO"], os.environ["GITHUB_REPOSITORY"],
-                                               os.environ.get("GITHUB_TOKEN"))))
+                                               os.environ.get("ARCHIVE_METADATA_TOKEN"))))
         return 0
     if a.cmd in ("seed", "publish", "verify"):
         from forecasting import archive

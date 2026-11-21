@@ -273,20 +273,69 @@ def test_AR2_real_leaderboard_and_tournament_shapes_pass_the_scan(tmp_path):
     archive.scan(pub)
 
 
-@pytest.mark.parametrize("status, body, ok", [
-    (404, None, True),                                              # invisible to a token without access
-    (200, {"private": True, "visibility": "private"}, True),
-    (200, {"private": False, "visibility": "public"}, False),       # public repository: refuse
-    (403, None, False), (500, None, False),                         # cannot confirm: fail closed
+PRIV = {"private": True, "visibility": "private", "full_name": "o/archive"}
+
+
+@pytest.mark.parametrize("status, body", [
+    (404, None),                                                    # typo, deleted, or token without access: proves nothing
+    (403, None), (401, None), (500, None),                          # cannot confirm
+    (200, {"private": False, "visibility": "public", "full_name": "o/archive"}),
+    (200, {**PRIV, "visibility": "internal"}),
+    (200, {**PRIV, "full_name": "o/other"}),                        # answer for a different repository
+    (200, {}),
 ])
-def test_archive_repository_must_be_private(status, body, ok):
-    if ok:
-        assert archive.private_status(status, body, "o/archive", "o/Georgia-WindCast") == "private"
-    else:
-        with pytest.raises(archive.LeakError):
-            archive.private_status(status, body, "o/archive", "o/Georgia-WindCast")
+def test_privacy_needs_positive_proof_and_fails_closed(status, body):
+    with pytest.raises(archive.LeakError):
+        archive.private_status(status, body, "o/archive", "o/Georgia-WindCast")
+
+
+def test_privacy_accepts_only_a_200_private_answer_and_never_this_repository():
+    assert archive.private_status(200, PRIV, "o/archive", "o/Georgia-WindCast") == "private"
     with pytest.raises(archive.LeakError, match="separate"):
-        archive.private_status(404, None, "o/Georgia-WindCast", "O/georgia-windcast")
+        archive.private_status(200, {**PRIV, "full_name": "o/Georgia-WindCast"}, "o/Georgia-WindCast",
+                               "O/georgia-windcast")
+    with pytest.raises(archive.LeakError, match="METADATA_TOKEN"):
+        archive.check_private("o/archive", "o/Georgia-WindCast", None)
+
+
+def test_AR2_daily_bias_never_reaches_the_public_reports(tmp_path):
+    """A leaderboard or tournament row covering a single day carries that day's mean error, which
+    with the public actuals gives the day's mean forecast: bias is stripped at every level."""
+    pub, arc = migrate(tmp_path)
+    one_day = {"live": {"leaderboard": [{"model_id": "p", "cadence": "1h", "horizon_min": 60, "days": 1,
+                                          "cases": 24, "mae": 3.0, "rmse": 4.0, "bias": -2.5}]}}
+    (arc / "evaluation" / "leaderboard.json").write_text(json.dumps(one_day))
+    (arc / "evaluation" / "tournament.json").write_text(json.dumps(
+        {"variants": {"g": {"scores": [{"model_id": "p", "horizon_h": 1, "independent_days": 1, "mae": 3.0,
+                                         "bias": 1.5}]}}}))
+    archive.publish(arc, pub)
+    for f in ("leaderboard.json", "tournament.json"):
+        assert "bias" not in (pub / "evaluation" / f).read_text()
+    (pub / "evaluation" / "leaderboard.json").write_text(json.dumps(one_day))  # if it ever came back
+    with pytest.raises(archive.LeakError, match="bias"):
+        archive.scan(pub)
+
+
+def test_AR2_score_rows_have_a_fixed_structure(tmp_path):
+    pub, _ = migrate(tmp_path)
+    row = {"model_id": "p", "horizon_min": 60, "mae": 1.0, "mean_level": 12.0}  # numeric-looking key smuggled into a row
+    (pub / "evaluation" / "leaderboard.json").write_text(json.dumps({"live": {"leaderboard": [row]}}))
+    with pytest.raises(archive.LeakError, match="schema"):
+        archive.scan(pub)
+
+
+def test_AR3_rollback_is_a_pause_switch_not_a_revert():
+    """Reverting this change would restore the old workflow that writes values publicly. Both jobs
+    therefore honour FORECAST_PAUSED, and the documented rollback is: pause, never revert."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    for name in ("forecast.yml", "forecast-tournament.yml"):
+        wf = (root / ".github/workflows" / name).read_text(encoding="utf-8")
+        assert "vars.FORECAST_PAUSED != 'true'" in wf.split("steps:")[0]
+        assert "archive repository unreachable" in wf  # no orphan-branch fallback for a missing repository
+        assert "secrets.FORECAST_ARCHIVE_METADATA_TOKEN" in wf and "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n        working-directory: code/streamlit_cloud\n        run: ../../venv/bin/python -m forecasting.run check-private" not in wf
+    doc = (root / "docs/forecasting/private-archive.md").read_text(encoding="utf-8")
+    assert "FORECAST_PAUSED" in doc and "Do not revert" in doc
 
 
 def test_each_publish_records_the_github_actions_run_as_time_evidence(tmp_path, monkeypatch, capsys):
