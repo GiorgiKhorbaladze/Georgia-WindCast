@@ -12,6 +12,9 @@
 ``python -m forecasting.run weather --data-dir DATA --out-dir OUT``
     One batched multi-point weather request, only when the collector saw a new ICON run.
 
+``python -m forecasting.run sources --data-dir DATA --out-dir OUT``
+    Independent NWP sources (GFS, ECMWF IFS from AWS Open Data): store each newly published run
+    once, at the seven forecasting points (forecasting/weather_sources.py).
 ``python -m forecasting.run tournament --data-dir DATA --out-dir OUT``
     Daily challenger tournament (forecasting/tournament.py): all available models on the same
     independent day folds, GSE-only and, once as-of weather runs exist, with weather ablations.
@@ -147,27 +150,97 @@ def cmd_evaluate(data_dir: Path, out: Path, now: datetime, force: bool = False) 
     return {"result": "evaluated", "live_cases": report["live"]["coverage"], "backtest": report["backtest"]["coverage"]}
 
 
+def cmd_sources(out: Path, now: datetime) -> dict:
+    """Each source independently: a failure of one never blocks the other."""
+    import httpx
+
+    from forecasting import weather_sources as ws
+
+    results = []
+    with httpx.Client(timeout=httpx.Timeout(60.0), follow_redirects=False) as client:
+        def get(url: str, headers: dict) -> tuple[int, bytes, dict]:
+            r = client.get(url, headers=headers)
+            return r.status_code, r.content, {k.lower(): v for k, v in r.headers.items()}
+        for source in ("gfs", "ecmwf"):
+            try:
+                results.append(ws.collect(out, source, ws.Http(get), datetime.now(UTC).replace(microsecond=0),
+                                          clock=lambda: datetime.now(UTC).replace(microsecond=0)))
+            except Exception as exc:  # reported, never fatal for the other source
+                results.append({"source": source, "result": "failed", "error": f"{type(exc).__name__}: {exc}"[:300]})
+    return {"result": "sources", "sources": results, "health": source_health(out, results, now)}
+
+
+SOURCE_STALE_HOURS = 18  # 4 runs a day per source plus 4-8 h publication lag: 18 h means >= 2 missed runs
+
+
+def source_health(out: Path, results: list[dict], now: datetime) -> dict:
+    """Per-source health, kept in weather/sources/health.json. One failing source never stops the
+    others, but the job must not stay green when every source failed in this attempt or when a
+    source has stored no new run for SOURCE_STALE_HOURS: then ``alert`` lists why and main() exits 2."""
+    from forecasting import weather_sources as ws
+
+    path = out / ws.ROOT / "health.json"
+    try:
+        prev = json.loads(path.read_text())
+    except (OSError, ValueError):
+        prev = {}
+    sources, alert = {}, []
+    for r in results:
+        src = r["source"]
+        h = dict(prev.get("sources", {}).get(src, {}))
+        failed = r.get("result") == "failed"
+        h["last_attempt"], h["last_result"] = now.isoformat(), r.get("result")
+        h["consecutive_failures"] = h.get("consecutive_failures", 0) + 1 if failed else 0
+        if failed:
+            h["last_error"] = r.get("error")
+        else:
+            h["last_success"] = now.isoformat()
+        runs = [x["run"] for x in ws._load(out / ws.ROOT / src / "manifest.json").get("runs", [])]
+        h["newest_run"] = max(runs) if runs else None
+        age = (now - datetime.fromisoformat(h["newest_run"])).total_seconds() / 3600 if runs else None
+        h["newest_run_age_h"] = None if age is None else round(age, 1)
+        h["stale"] = age is None or age > SOURCE_STALE_HOURS
+        if h["stale"]:
+            alert.append(f"{src}: no stored run newer than {SOURCE_STALE_HOURS} h")
+        sources[src] = h
+    if results and all(r.get("result") == "failed" for r in results):
+        alert.insert(0, "every source failed in this attempt")
+    report = {"checked_at": now.isoformat(), "stale_after_h": SOURCE_STALE_HOURS, "sources": sources, "alert": alert}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=1) + "\n")
+    return report
 def cmd_tournament(data_dir: Path, out: Path, now: datetime) -> dict:
-    from forecasting import tournament, weather_points
+    """GSE-only, then for every weather source with stored runs: local and local + west predictors.
+
+    Sources: Open-Meteo ICON (forecasting/weather_points.py), NOAA GFS and ECMWF IFS
+    (forecasting/weather_sources.py). Every variant uses the same folds, so source x predictor-set
+    x model combinations are compared on identical independent days."""
+    from forecasting import tournament, weather_points, weather_sources
 
     obs = load_obs(data_dir, now.date(), EVAL_DAYS)
     report: dict = {"generated_at": now.isoformat(), "independence_unit": "local day",
-                    "min_days": tournament.MIN_DAYS, "horizons_h": list(tournament.HORIZONS), "variants": {}}
-    runs = weather_points.available_runs(out)
+                    "min_days": tournament.MIN_DAYS, "horizons_h": list(tournament.HORIZONS), "variants": {},
+                    "sources": {}}
+    loaders = {"icon_openmeteo": (weather_points.available_runs(out), lambda r: weather_points.load_run(out, r))}
+    for src in ("gfs", "ecmwf"):
+        loaders[src] = (weather_sources.available_runs(out, src),
+                        lambda r, s=src: weather_sources.load_run(out, s, r))
     variants = {"gse_only": None}
-    if runs:
-        for name, regions in (("local_weather", ("east",)), ("local_plus_west", ("east", "central", "west"))):
-            variants[name] = tournament.weather_features(runs, lambda r: weather_points.load_run(out, r), regions)
+    for src, (runs, load) in loaders.items():
+        report["sources"][src] = {"runs": len(runs)}
+        if runs:
+            for name, regions in (("local_weather", ("east",)), ("local_plus_west", ("east", "central", "west"))):
+                variants[f"{src}_{name}"] = tournament.weather_features(runs, load, regions)
     (out / "evaluation").mkdir(parents=True, exist_ok=True)
     for name, fn in variants.items():
         res = tournament.run(obs, weather=fn)
         report["variants"][name] = {"status": res["status"], "scores": res["scores"], "notes": res["notes"],
                                     "excluded": res["excluded"], "weather_features": res["weather_features"]}
         res["predictions"].to_csv(out / "evaluation" / f"tournament_{name}.csv.gz", index=False)
-    if not runs:
+    if len(variants) == 1:
         report["weather_ablation"] = "not run: no as-of weather runs stored yet"
     (out / "evaluation" / "tournament.json").write_text(json.dumps(report, indent=1, default=str) + "\n")
-    return {"result": "tournament", "variants": list(variants), "weather_runs": len(runs)}
+    return {"result": "tournament", "variants": list(variants), "sources": report["sources"]}
 
 
 def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
@@ -189,13 +262,15 @@ def cmd_weather(data_dir: Path, out: Path, now: datetime) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "tournament"])
+    ap.add_argument("cmd", choices=["issue", "backtest", "evaluate", "weather", "sources", "tournament"])
     ap.add_argument("--data-dir", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--force", action="store_true", help="evaluate even if the last run is recent")
     a = ap.parse_args(argv)
     now = datetime.now(UTC).replace(microsecond=0)
-    if a.cmd == "tournament":
+    if a.cmd == "sources":
+        result = cmd_sources(a.out_dir, now)
+    elif a.cmd == "tournament":
         result = cmd_tournament(a.data_dir, a.out_dir, now)
     elif a.cmd == "weather":
         result = cmd_weather(a.data_dir, a.out_dir, now)
@@ -204,6 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         result = {"issue": cmd_issue, "backtest": cmd_backtest}[a.cmd](a.data_dir, a.out_dir, now)
     print(json.dumps(result, default=str))
+    if a.cmd == "sources" and result["health"]["alert"]:
+        print("ALERT: " + "; ".join(result["health"]["alert"]), file=sys.stderr)
+        return 2  # partial results are still committed by the workflow; the run is then marked failed
     return 0
 
 

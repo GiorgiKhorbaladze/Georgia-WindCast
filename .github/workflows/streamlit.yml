@@ -26,7 +26,7 @@ jobs:
       - name: Install the exact Community Cloud and collector requirements
         run: |
           uv venv -p 3.12 .venv-st
-          uv pip install -p .venv-st -r streamlit_cloud/requirements.txt -r streamlit_cloud/collector-requirements.txt pytest==8.4.2
+          uv pip install -p .venv-st -r streamlit_cloud/requirements.txt -r streamlit_cloud/collector-requirements.txt -r streamlit_cloud/forecast-weather-requirements.txt pytest==8.4.2
       - name: Tests (recorded payloads; no upstream or data-branch request)
         run: .venv-st/bin/python -m pytest -q streamlit_cloud/tests
       - name: Collector runs with only its own requirements
