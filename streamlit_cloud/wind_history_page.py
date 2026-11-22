@@ -23,7 +23,7 @@ MONTHS = {
     "ka": ["იან", "თებ", "მარ", "აპრ", "მაი", "ივნ", "ივლ", "აგვ", "სექ", "ოქტ", "ნოე", "დეკ"],
     "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
 }
-TTL = timedelta(hours=6)  # the monitor checks GSE every 72 h; a few hours of cache is ample
+TTL = timedelta(hours=6)  # the monitor checks GSE at most every 20 days (owner decision 20.11.2026); a few hours of cache is ample
 
 
 @st.cache_data(ttl=TTL, show_spinner=False)
