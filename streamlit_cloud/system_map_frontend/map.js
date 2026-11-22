@@ -24,7 +24,7 @@ const words = {
   ka: {
     title: "ქარის გენერაცია", consumption: "მოხმარება", generation: "ჯამური გენერაცია", import: "იმპორტი",
     export: "ექსპორტი", hydro: "ჰიდრო", thermal: "თბო", wind: "ქარი", solar: "მზე",
-    expand: "⛶ სრულ ეკრანზე", exit: "⛶ გამოსვლა", latest: "უახლესი", play: "გაშვება", pause: "პაუზა",
+    expand: "⛶ სრულ ეკრანზე", exit: "⛶ გამოსვლა", latest: "ბოლო პერიოდი", play: "დაკვრა", pause: "პაუზა",
     historical: "ისტორიული ჩანაწერები", recent: "ბოლო პერიოდი", unconfirmed: "ხარისხი დაუდასტურებელია",
     stale: "მოძველებული", unavailable: "მიუწვდომელია", trend: "ქარი · 24 სთ", source: "GSE-ის წყაროს დრო",
     retrieved: "მიღების დრო", balance: "ეროვნული ბალანსი", closure: "გამოქვეყნებული მაჩვენებლების შეუსაბამობა",
@@ -35,9 +35,9 @@ const words = {
     zoomIn: "გადიდება", zoomOut: "შემცირება", reset: "რუკის აღდგენა", map: "საქართველოს საცნობარო რუკა",
     position: "საორიენტაციო მდებარეობა", uncertainty: "ცდომილება", period: "ჩანაწერის პერიოდი", speed: "დაკვრის სიჩქარე",
     failure: "შენახული მონაცემების განახლება ვერ მოხერხდა.", close: "ადგილის ინფორმაციის დახურვა",
-    previous: "წინა 3 წთ-თან შედარებით", windUnconfirmed: "ქარის მონაცემის ხარისხი დაუდასტურებელია",
-    mix: "გენერაციის სტრუქტურა, იგივე პერიოდი", keys: "რუკა: + და − მასშტაბი, ისრები გადაადგილება, 0 აღდგენა.",
-    lineData: "ბლოკების ჩანაწერები (კონტრაქტი v1)", persistent: "უცვლელი მნიშვნელობა", listed: "GSE-ის სიაშია, ცალკე ჩანაწერი არ აქვს",
+    previous: "წინა 3-წუთიან პერიოდთან შედარებით", windUnconfirmed: "ქარის მონაცემის ხარისხი დაუდასტურებელია",
+    mix: "გენერაციის სტრუქტურა, იგივე პერიოდი", keys: "რუკის მართვა: + / − - მასშტაბის შეცვლა; ისრები - გადაადგილება; 0 - საწყისი ხედის აღდგენა.",
+    lineData: "ბლოკების მონაცემები", persistent: "უცვლელი მნიშვნელობა", listed: "GSE-ის სიაშია, ცალკე ჩანაწერი არ აქვს",
     testOnly: "მხოლოდ ტესტი: ეს რეალური მონაცემები არ არის და საიტზე არ ჩანს.", noFlows: "ამ მიმართულებით ნაკადი არ არის",
     block: "GSE-ის ბლოკი", zero: "0 MW",
   },
@@ -61,9 +61,9 @@ function msg(type, extra = {}) {
 }
 function text(id, value) { el(id).textContent = value; }
 function t(key) { return words[data.lang][key]; }
-function mw(number) { return Number.isFinite(number) ? numbers.format(number) : "—"; }
-function fmt(number) { return Number.isFinite(number) ? mw(number) + " MW" : "—"; }
-function localTime(label) { return label ? label + " (UTC+4)" : "—"; }
+function mw(number) { return Number.isFinite(number) ? numbers.format(number) : "-"; }
+function fmt(number) { return Number.isFinite(number) ? mw(number) + " MW" : "-"; }
+function localTime(label) { return label ? label + " (UTC+4)" : "-"; }
 function svg(tag, attrs, label) {
   const node = document.createElementNS(ns, tag);
   for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
@@ -163,7 +163,7 @@ function flowRow(label, record, extra) {
   row.dataset.sid = record?.source_id ?? label;
   const name = node("span", "flow-name", label);
   if (extra) name.append(node("small", "", " · " + extra));
-  const value = node("b", "", record ? fmt(Math.abs(record.mw)) : "—");
+  const value = node("b", "", record ? fmt(Math.abs(record.mw)) : "-");
   row.append(name, value);
   return row;
 }
