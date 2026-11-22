@@ -122,13 +122,22 @@ def folds(X: pd.DataFrame, min_train_days: int = MIN_TRAIN_DAYS) -> list[Fold]:
     return out
 
 
+BASE_FEATURES = {f"lag{lag}" for lag in LAGS} | {"mean6", "diff1", "hour_sin", "hour_cos"}
+WEATHER_MIN_TRAIN_COVERAGE = 0.8  # a weather column is used only if known for >= 80 % of training rows
+MIN_MODEL_COVERAGE = 0.5  # a model enters the common cohort only with predictions for >= 50 % of cases
+
+
 def run(obs: pd.Series, specs: list[ModelSpec] | None = None, weather: pd.DataFrame | None = None,
         horizons: tuple[int, ...] = HORIZONS, log: Callable[[str], None] = lambda m: None) -> dict:
+    """Failure isolation: an exception, a non-finite prediction or missing training weather of one
+    model never stops the others or the report; each is recorded in ``status``/``notes``."""
     specs = specs if specs is not None else registry()
     y = hourly(obs)
     status = {s.model_id: s.status() for s in specs}
+    notes: dict[str, list[str]] = {}
     available = [s for s in specs if status[s.model_id] == "available"]
     preds = []
+    weather_used: dict[int, list[str]] = {}
     for h in horizons:
         X = design(y, h, weather)
         feats = [c for c in X.columns if c not in ("y", "target_start")]
@@ -137,35 +146,64 @@ def run(obs: pd.Series, specs: list[ModelSpec] | None = None, weather: pd.DataFr
             test = fold.test.dropna(subset=["y", "lag1"])
             if len(train) < 48 or test.empty:
                 continue
+            # Weather columns only when the TRAINING rows actually had them (never filled with zeros
+            # or with statistics of later rows); columns without coverage are dropped for this fold.
+            fold_feats = [c for c in feats if c in BASE_FEATURES
+                          or train[c].notna().mean() >= WEATHER_MIN_TRAIN_COVERAGE]
+            weather_used.setdefault(h, sorted(c for c in fold_feats if c not in BASE_FEATURES))
             for spec in available:
                 try:
-                    p = spec.fit_predict(train, test, feats, h, y)
+                    p = np.asarray(spec.fit_predict(train, test, fold_feats, h, y), dtype=float)
                 except Exception as exc:  # a failing challenger is reported, the others continue
                     status[spec.model_id] = f"error: {type(exc).__name__}"
                     log(f"{spec.model_id} h={h} {fold.day}: {exc}")
                     continue
-                for issue, target_start, actual, pred in zip(test.index, test["target_start"], test["y"], p, strict=True):
-                    preds.append((spec.model_id, h, fold.day, issue, target_start, float(actual), float(pred)))
+                bad = ~np.isfinite(p)
+                if bad.any():
+                    notes.setdefault(spec.model_id, []).append(f"h={h} {fold.day}: {int(bad.sum())} non-finite predictions dropped")
+                for issue, target_start, actual, pred, b in zip(test.index, test["target_start"], test["y"], p, bad, strict=True):
+                    if not b:
+                        preds.append((spec.model_id, h, fold.day, issue, target_start, float(actual), float(pred)))
     df = pd.DataFrame(preds, columns=["model_id", "horizon_h", "day", "issue", "target_start", "actual", "pred"])
-    return {"status": status, "predictions": df, "scores": score(df)}
+    scores, excluded = score(df, models=[s.model_id for s in available], with_excluded=True)
+    return {"status": status, "notes": notes, "excluded": excluded, "weather_features": weather_used,
+            "predictions": df, "scores": scores}
 
 
-def score(df: pd.DataFrame, reference: str = "persistence", seed: int = 57) -> list[dict]:
+def score(df: pd.DataFrame, reference: str = "persistence", seed: int = 57, models: list[str] | None = None,
+          with_excluded: bool = False):
+    """Common-cohort scores. A model is eligible for a horizon if it predicted >= MIN_MODEL_COVERAGE of
+    that horizon's cases; ineligible or absent models are listed in ``excluded`` instead of dropping
+    the cohort (or raising). Eligible models are compared on exactly the same cases."""
+    out: list[dict] = []
+    excluded: list[dict] = []
     if df.empty:
-        return []
+        if models:
+            excluded = [dict(model_id=m, reason="no predictions") for m in models]
+        return (out, excluded) if with_excluded else out
     rng = np.random.default_rng(seed)
-    out = []
     for h, g in df.groupby("horizon_h"):
-        models = sorted(g["model_id"].unique())
-        wide = g.pivot_table(index=["issue", "day"], columns="model_id", values="pred").dropna()  # common cases
-        actual = g.drop_duplicates(["issue"]).set_index("issue")["actual"]
-        if wide.empty:
+        cases = g.drop_duplicates(["issue"]).set_index("issue")
+        n_cases = len(cases)
+        counts = g.groupby("model_id")["issue"].nunique()
+        candidates = sorted(set(models or []) | set(counts.index))
+        eligible = [m for m in candidates if counts.get(m, 0) >= MIN_MODEL_COVERAGE * n_cases]
+        for m in candidates:
+            if m not in eligible:
+                excluded.append(dict(horizon_h=int(h), model_id=m, predicted=int(counts.get(m, 0)), cases=n_cases,
+                                     reason="insufficient prediction coverage"))
+        if not eligible:
             continue
-        a = actual.reindex(wide.index.get_level_values("issue")).to_numpy()
+        wide = g[g["model_id"].isin(eligible)].pivot_table(index=["issue", "day"], columns="model_id", values="pred")
+        wide = wide.reindex(columns=eligible).dropna()  # common cases of the eligible models only
+        if wide.empty:
+            excluded.extend(dict(horizon_h=int(h), model_id=m, reason="no common cases") for m in eligible)
+            continue
+        a = cases["actual"].reindex(wide.index.get_level_values("issue")).to_numpy()
         days = wide.index.get_level_values("day")
         n_days = len(set(days))
-        err = {m: wide[m].to_numpy() - a for m in models}
-        for m in models:
+        err = {m: wide[m].to_numpy() - a for m in eligible}
+        for m in eligible:
             e = err[m]
             row = dict(horizon_h=int(h), model_id=m, cases=int(len(e)), independent_days=n_days,
                        mae=float(np.abs(e).mean()), rmse=float(math.sqrt((e**2).mean())), bias=float(e.mean()))
@@ -177,7 +215,8 @@ def score(df: pd.DataFrame, reference: str = "persistence", seed: int = 57) -> l
                 row["skill"], row["skill_90ci"] = None, None
             row["evidence"] = "sufficient" if n_days >= MIN_DAYS else "insufficient_evidence"
             out.append(row)
-    return sorted(out, key=lambda r: (r["horizon_h"], r["mae"]))
+    out = sorted(out, key=lambda r: (r["horizon_h"], r["mae"]))
+    return (out, excluded) if with_excluded else out
 
 
 def _day_bootstrap(abs_e: np.ndarray, abs_ref: np.ndarray, days: np.ndarray, rng) -> list[float] | None:
