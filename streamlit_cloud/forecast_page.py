@@ -18,8 +18,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import forecast_display as fd
 import mwmodel
 import ui
+from forecasting import gate as fgate
 from i18n import T, tr
 
 BASE = os.environ.get("WINDCAST_FORECAST_BASE_URL",
@@ -74,12 +76,14 @@ def horizon_label(minutes: int, lang: str) -> str:
     return f"{minutes} {tr('fc_min', lang)}" if minutes < 60 else f"{minutes // 60} {tr('fc_h', lang)}"
 
 
-def render(lang: str) -> None:
+def render(lang: str, reader=None, now=None) -> None:
     ui.hero(tr("page_gen_forecast", lang), tr("fc_subtitle", lang),
             ui.badge(tr("fc_experimental", lang), "unverified"))
     ui.note(tr("fc_withheld", lang) if not mwmodel.PUBLISH_FORECAST else tr("fc_published", lang))
     data = load()
     board = data["board"]
+    if mwmodel.PUBLISH_FORECAST:  # release switch: off until the owner approves publication
+        _mw_forecast(lang, board, reader, now)
     if data["error"]:
         st.warning(tr("fc_load_error", lang))
     if not board:
@@ -203,3 +207,90 @@ def _tournament(t: dict | None, lang: str) -> None:
     }), hide_index=True, width="stretch")
     if t.get("weather_ablation"):
         st.caption(tr("fc_tour_noweather", lang))
+
+
+@st.cache_data(ttl=timedelta(minutes=5), show_spinner=False)
+def load_latest() -> str | None:
+    """Fetched only while the release switch is on."""
+    try:
+        return fetch("evaluation/latest.csv")
+    except httpx.HTTPError:
+        return None
+
+
+def _mw_forecast(lang: str, board: dict | None, reader, now) -> None:
+    """Website MW forecast: newest issue per model, Georgia time, experimental label, no invented values."""
+    now = now or pd.Timestamp.now(tz="UTC").to_pydatetime()
+    st.subheader(tr("fcd_title", lang))
+    ui.note(tr("fcd_label", lang))
+    latest = fd.parse(load_latest())
+    if latest.rows.empty:
+        st.info(tr("fcd_unavailable", lang))
+        return
+    if latest.dropped:
+        st.caption(tr("fcd_dropped", lang, n=latest.dropped))
+    if fd.is_stale(latest.rows, now):
+        st.warning(tr("fcd_stale", lang, t=fd.local(latest.rows["cutoff"].max())))
+        return
+    gate = fgate.evaluate(board)
+    models = sorted(set(latest.rows.model_id))
+    default = fd.default_model(latest.rows, gate)
+    c1, c2 = st.columns(2)
+    model = c1.selectbox(tr("fc_col_model", lang), models, index=models.index(default), key="fcd_model",
+                         format_func=lambda m: model_name(m, lang))
+    cadence = c2.radio(tr("fc_cadence", lang), fd.CADENCES, index=1, horizontal=True, key="fcd_cad",
+                       format_func=lambda c: tr(f"fc_c_{c}", lang))
+    s = fd.series(latest.rows, model, cadence)
+    if s.empty:
+        st.info(tr("fcd_unavailable", lang))
+        return
+    first = s.iloc[0]
+    ui.cards([ui.card(tr("fcd_issued", lang), fd.local(first.issued), ""),
+              ui.card(tr("fcd_cutoff", lang), fd.local(first.cutoff), ""),
+              ui.card(tr("fc_col_model", lang), model_name(model, lang), "")])
+    actual = _actuals(reader, now)
+    if actual is None:  # actuals are context only; the forecast is still shown
+        st.caption(tr("fcd_no_actual", lang))
+        actual = pd.DataFrame(columns=["t", "mw"])
+    ui.chart(_mw_chart(s, actual, lang))
+    band = fd.has_band(s)
+    table = pd.DataFrame({
+        tr("fc_col_h", lang): [horizon_label(int(h), lang) for h in s.horizon_min],
+        tr("fcd_valid", lang): [f"{fd.local(a)} - {fd.local(b)[-5:]}" for a, b in zip(s.valid_from, s.valid_to, strict=True)],
+        "MW": s.mw.round(1),
+        tr("fcd_gate", lang): [tr("fcd_gate_yes", lang) if fgate.passes(gate, model, cadence, int(h))
+                               else tr("fcd_gate_no", lang) for h in s.horizon_min],
+    })
+    if band:
+        table["q10-q90, MW"] = [f"{a:.1f} - {b:.1f}" for a, b in zip(s.q10, s.q90, strict=True)]
+    st.dataframe(table, hide_index=True, width="stretch")
+    if not band:
+        st.caption(tr("fcd_no_band", lang))
+    ui.note(tr("fcd_gate_note", lang, days=fgate.MIN_DAYS, cases=fgate.MIN_CASES))
+
+
+def _actuals(reader, now) -> pd.DataFrame | None:
+    """Official GSE 3-minute values of the last 24 h from the collector archive (None if unavailable)."""
+    if reader is None:
+        return None
+    try:
+        return fd.actual_frame(reader.records(now - timedelta(hours=24), now, now))
+    except Exception:
+        return None
+
+
+def _mw_chart(s: pd.DataFrame, actual: pd.DataFrame, lang: str) -> go.Figure:
+    fig = go.Figure()
+    if not actual.empty:
+        t = actual["t"].dt.tz_convert(fd.TZ)
+        fig.add_scatter(x=t, y=actual["mw"], mode="lines", name=tr("fcd_actual", lang), line=dict(color="#22d3ee"))
+    x = list(s.valid_from.dt.tz_convert(fd.TZ)) + [s.valid_to.iloc[-1].tz_convert(fd.TZ)]
+    y = list(s.mw) + [s.mw.iloc[-1]]
+    if fd.has_band(s):
+        fig.add_scatter(x=x, y=list(s.q90) + [s.q90.iloc[-1]], mode="lines", line=dict(width=0, shape="hv"),
+                        showlegend=False, hoverinfo="skip")
+        fig.add_scatter(x=x, y=list(s.q10) + [s.q10.iloc[-1]], mode="lines", line=dict(width=0, shape="hv"),
+                        fill="tonexty", fillcolor="rgba(167,139,250,0.2)", name="q10-q90")
+    fig.add_scatter(x=x, y=y, mode="lines", name=tr("fcd_forecast", lang),
+                    line=dict(color="#a78bfa", dash="dash", shape="hv"))
+    return ui.style(fig, 340, "MW")
