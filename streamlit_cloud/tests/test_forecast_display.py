@@ -59,7 +59,34 @@ def test_missing_or_malformed_file_yields_nothing(text):
 
 def test_stale_forecast_is_not_current():
     lat = fd.parse(latest_csv(cut=NOW - timedelta(hours=3)))
-    assert fd.is_stale(lat.rows, NOW)
+    assert fd.status(lat.rows, NOW) == "stale"
+
+
+def test_freshness_is_checked_on_the_selected_series_and_future_times_are_rejected():
+    fresh = latest_csv().splitlines()[1:]
+    old = latest_csv(cut=NOW - timedelta(hours=3)).splitlines()[1:]
+    old = [r.replace("damped_trend", "ridge") for r in old]
+    rows = fd.parse(latest_csv(rows=fresh + old)).rows
+    assert fd.status(fd.series(rows, "damped_trend", "1h"), NOW) == "ok"
+    assert fd.status(fd.series(rows, "ridge", "1h"), NOW) == "stale"  # another fresh model does not save it
+    future = fd.parse(latest_csv(cut=NOW + timedelta(hours=1))).rows
+    assert fd.status(fd.series(future, "damped_trend", "1h"), NOW) == "future"
+
+
+def test_bounds_follow_the_fleet_nameplate_not_an_arbitrary_cap():
+    assert fd.MW_MIN == -1.0 and fd.MW_MAX == round(1.05 * 245.7, 1)
+
+
+def test_only_gate_approved_keys_are_publishable_and_persistence_never():
+    g = {"passing": [{"model_id": "damped_trend", "cadence": "1h", "horizon_min": 60},
+                     {"model_id": "persistence", "cadence": "1h", "horizon_min": 60}]}
+    keys = fd.eligible(g)
+    assert keys == {("damped_trend", "1h"): {60}}
+    s = fd.series(fd.parse(latest_csv()).rows, "damped_trend", "1h")
+    pub = fd.publishable(s, keys, "damped_trend", "1h")
+    assert list(pub.horizon_min) == [60] and list(pub.mw) == [10.0]
+    assert fd.publishable(s, keys, "damped_trend", "15m").empty  # cadence mismatch: nothing
+    assert fd.default_model(fd.parse(latest_csv()).rows, {"passing": g["passing"][1:]}) is None
 
 
 def test_one_issue_per_curve_and_no_band_without_genuine_quantiles():
@@ -107,13 +134,28 @@ def fake_records(self, start, end, now):
 FIX = Path(__file__).resolve().parent / "fixtures" / "forecast"
 
 
-def run_page(lang, publish, latest):
+def board_json(passing=(("damped_trend", "1h", 60),)):
+    import json
+    rows = [dict(model_id=m, cadence=c, horizon_min=h, days=30, cases=800, skill_90ci=[0.05, 0.2], bias=0.5, mae=10.0,
+                 rmse=12.0, skill=0.1, evidence="sufficient") for m, c, h in passing]
+    rows += [dict(model_id="damped_trend", cadence="1h", horizon_min=h, days=2, cases=50, skill_90ci=[-0.1, 0.2],
+                  bias=0.5, mae=10.0, rmse=12.0, skill=0.0, evidence="insufficient_evidence") for h in (120, 180, 360)]
+    return json.dumps({"generated_at": NOW.isoformat(), "latest_observation": NOW.isoformat(), "min_days": 14,
+                       "min_cases": 200, "live": {"coverage": {"forecasts": 1000, "matured": 1000, "complete": 990,
+                                                               "late_share": 0.02}, "leaderboard": rows},
+                       "backtest": {"coverage": {}, "leaderboard": []}})
+
+
+def run_page(lang, publish, latest, board=None):
     import streamlit as st
+    board = board_json() if board is None else board
 
     def fetch(path, base=None):
         if path.endswith("latest.csv"):
             calls.append(path)
             return latest
+        if path.endswith("leaderboard.json"):
+            return board
         f = FIX / path.split("/")[-1]
         return f.read_text(encoding="utf-8") if f.exists() else None
     calls: list[str] = []
@@ -140,6 +182,21 @@ def test_page_with_switch_on_shows_a_labelled_fresh_forecast(lang):
     text = page_text(at)
     assert calls and tr("fcd_title", lang) in [s.value for s in at.subheader]
     assert tr("fcd_label", lang) in text and tr("fcd_no_band", lang) in [c.value for c in at.caption]
+    shown = list(at.dataframe[0].value["MW"])
+    assert shown == [10.0]  # only the gate-approved 1 h horizon; 20/30/60 MW rows are withheld
+
+
+def test_page_fails_closed_when_no_key_passed_the_gate():
+    at, calls = run_page("en", True, latest_csv(), board=board_json(passing=()))
+    assert any(i.value == tr("fcd_gate_none", "en") for i in at.info) and calls == []
+    assert not at.get("plotly_chart") or all("Forecast (model)" not in c.proto.spec for c in at.get("plotly_chart"))
+
+
+def test_page_persistence_alone_or_a_cadence_mismatch_shows_no_values():
+    at, _ = run_page("en", True, latest_csv(), board=board_json(passing=(("persistence", "1h", 60),)))
+    assert any(i.value == tr("fcd_gate_none", "en") for i in at.info)
+    at, _ = run_page("en", True, latest_csv(), board=board_json(passing=(("damped_trend", "15m", 60),)))
+    assert any(i.value == tr("fcd_unavailable", "en") for i in at.info)
 
 
 def test_page_with_switch_on_hides_stale_and_missing():

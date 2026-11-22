@@ -24,7 +24,14 @@ import pandas as pd
 
 TZ = "Asia/Tbilisi"
 STALE_AFTER = timedelta(minutes=60)
-MW_MIN, MW_MAX = -1.0, 600.0  # physical bounds for Georgia's wind fleet (MW); outside = invalid row
+CLOCK_SKEW = timedelta(minutes=5)  # issue/cutoff later than now + skew: invalid, not shown
+# Plausibility bounds (MW), not a clamp: rows outside are dropped, never truncated.
+# Floor: GSE net 3-minute values (and persistence forecasts of them) are slightly negative in calm
+# (station auxiliary load; -0.11 MW seen in the ledger); below -1 MW is invalid.
+# Ceiling: 105 % of the nameplate figures in forecasting/capacity.py (Kartli 20.7 + Zemo 18.75 +
+# Ruisi 206.25 MW, unverified figures included as an upper bound only). Raise with new capacity.
+MW_MIN = -1.0
+MW_MAX = round(1.05 * (20.7 + 18.75 + 206.25), 1)
 REQUIRED = ("model_id", "cadence", "issued", "cutoff", "valid_from", "valid_to", "mw")
 CADENCES = ("15m", "1h")
 
@@ -63,8 +70,35 @@ def parse(text: str | None) -> Latest:
                   [] if n == len(df) else [f"{n - len(df)} invalid rows dropped"])
 
 
+def status(s: pd.DataFrame, now: datetime) -> str:
+    """For ONE selected series: 'ok', 'empty', 'future' (issue or cutoff after now + skew) or 'stale'."""
+    if s.empty:
+        return "empty"
+    now = pd.Timestamp(now)
+    if (s["cutoff"].max() > now + CLOCK_SKEW) or (s["issued"].max() > now + CLOCK_SKEW):
+        return "future"
+    if now - s["cutoff"].max() > STALE_AFTER:
+        return "stale"
+    return "ok"
+
+
 def is_stale(df: pd.DataFrame, now: datetime) -> bool:
-    return df.empty or pd.Timestamp(now) - df["cutoff"].max() > STALE_AFTER
+    return status(df, now) != "ok"
+
+
+def eligible(gate: dict | None) -> dict[tuple[str, str], set[int]]:
+    """Publication keys from the live gate: {(model, cadence): {horizon_min}}. Persistence never."""
+    out: dict[tuple[str, str], set[int]] = {}
+    for x in (gate or {}).get("passing", []):
+        if x["model_id"] != "persistence":
+            out.setdefault((x["model_id"], x["cadence"]), set()).add(int(x["horizon_min"]))
+    return out
+
+
+def publishable(s: pd.DataFrame, keys: dict, model_id: str, cadence: str) -> pd.DataFrame:
+    """Only rows whose (model, cadence, horizon) passed the gate; everything else is withheld."""
+    allowed = keys.get((model_id, cadence), set())
+    return s[s["horizon_min"].isin(allowed)] if allowed else s.iloc[0:0]
 
 
 def series(df: pd.DataFrame, model_id: str, cadence: str) -> pd.DataFrame:
@@ -80,17 +114,10 @@ def has_band(s: pd.DataFrame) -> bool:
 
 
 def default_model(df: pd.DataFrame, gate: dict | None) -> str | None:
-    models = sorted(set(df.model_id))
-    if not models:
-        return None
-    passing = [x["model_id"] for x in (gate or {}).get("passing", [])]
-    for m in passing:
-        if m in models:
-            return m
-    for m in ("damped_trend", "persistence"):
-        if m in models:
-            return m
-    return models[0]
+    """A model that passed the gate and has rows in the file; never persistence; None if none."""
+    keys = eligible(gate)
+    models = sorted({m for (m, _c) in keys} & set(df.model_id))
+    return models[0] if models else None
 
 
 def local(ts) -> str:

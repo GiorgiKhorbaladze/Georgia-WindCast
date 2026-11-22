@@ -27,9 +27,18 @@ A model passes the gate at a given cadence and horizon only if **all** of these 
 
 Persistence is the reference model and is never published as a forecast.
 
-The table on the page marks each horizon as "met" or "not yet met". The owner's recommended
-release rule is: switch on only when at least one horizon passes, and show only the horizons
-that pass.
+**Enforcement (fail closed).** Even when `PUBLISH_FORECAST` is on, the page shows **only** the
+(model, cadence, horizon) keys that pass the gate. These keys are evaluated on the live leaderboard
+before the chart and table are built.
+- If no key passes, no MW value is shown and the page explains why.
+- Rows of other horizons or models are withheld. They are not merely labelled.
+- Persistence is never offered.
+- Freshness is checked on the selected series: a data cutoff older than 60 min is stale.
+- An issue time or cutoff in the future (beyond 5 min clock skew) is rejected.
+- Plausibility bounds: −1 MW to 105 % of the nameplate figures in `capacity.py`. Rows outside are
+  dropped, never clamped.
+
+Showing unvalidated numbers would be a different, explicit owner decision.
 
 ## Current evidence (leaderboard 22.11.2026 07:16 UTC)
 

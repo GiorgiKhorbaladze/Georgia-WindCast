@@ -219,28 +219,38 @@ def load_latest() -> str | None:
 
 
 def _mw_forecast(lang: str, board: dict | None, reader, now) -> None:
-    """Website MW forecast: newest issue per model, Georgia time, experimental label, no invented values."""
+    """Website MW forecast. Fail closed: only (model, cadence, horizon) keys that passed the live
+    publication gate are shown; nothing at all when none passed. The switch alone never exposes
+    values that did not pass."""
     now = now or pd.Timestamp.now(tz="UTC").to_pydatetime()
     st.subheader(tr("fcd_title", lang))
     ui.note(tr("fcd_label", lang))
-    latest = fd.parse(load_latest())
-    if latest.rows.empty:
-        st.info(tr("fcd_unavailable", lang))
+    keys = fd.eligible(fgate.evaluate(board))
+    if not keys:
+        st.info(tr("fcd_gate_none", lang))
+        ui.note(tr("fcd_gate_note", lang, days=fgate.MIN_DAYS, cases=fgate.MIN_CASES))
         return
+    latest = fd.parse(load_latest())
     if latest.dropped:
         st.caption(tr("fcd_dropped", lang, n=latest.dropped))
-    if fd.is_stale(latest.rows, now):
-        st.warning(tr("fcd_stale", lang, t=fd.local(latest.rows["cutoff"].max())))
+    models = sorted({m for (m, _c) in keys} & set(latest.rows.model_id))
+    if not models:
+        st.info(tr("fcd_unavailable", lang))
         return
-    gate = fgate.evaluate(board)
-    models = sorted(set(latest.rows.model_id))
-    default = fd.default_model(latest.rows, gate)
     c1, c2 = st.columns(2)
-    model = c1.selectbox(tr("fc_col_model", lang), models, index=models.index(default), key="fcd_model",
-                         format_func=lambda m: model_name(m, lang))
-    cadence = c2.radio(tr("fc_cadence", lang), fd.CADENCES, index=1, horizontal=True, key="fcd_cad",
+    model = c1.selectbox(tr("fc_col_model", lang), models, key="fcd_model", format_func=lambda m: model_name(m, lang))
+    cadences = [c for c in fd.CADENCES if (model, c) in keys]
+    cadence = c2.radio(tr("fc_cadence", lang), cadences, index=len(cadences) - 1, horizontal=True, key="fcd_cad",
                        format_func=lambda c: tr(f"fc_c_{c}", lang))
     s = fd.series(latest.rows, model, cadence)
+    state = fd.status(s, now)
+    if state == "stale":
+        st.warning(tr("fcd_stale", lang, t=fd.local(s["cutoff"].max())))
+        return
+    if state != "ok":
+        st.info(tr("fcd_unavailable", lang))
+        return
+    s = fd.publishable(s, keys, model, cadence)
     if s.empty:
         st.info(tr("fcd_unavailable", lang))
         return
@@ -258,8 +268,6 @@ def _mw_forecast(lang: str, board: dict | None, reader, now) -> None:
         tr("fc_col_h", lang): [horizon_label(int(h), lang) for h in s.horizon_min],
         tr("fcd_valid", lang): [f"{fd.local(a)} - {fd.local(b)[-5:]}" for a, b in zip(s.valid_from, s.valid_to, strict=True)],
         "MW": s.mw.round(1),
-        tr("fcd_gate", lang): [tr("fcd_gate_yes", lang) if fgate.passes(gate, model, cadence, int(h))
-                               else tr("fcd_gate_no", lang) for h in s.horizon_min],
     })
     if band:
         table["q10-q90, MW"] = [f"{a:.1f} - {b:.1f}" for a, b in zip(s.q10, s.q90, strict=True)]
