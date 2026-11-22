@@ -10,7 +10,8 @@ model). Nothing is interpolated, padded or invented:
 * an uncertainty band is drawn only if the file carries genuine q10/q90 values for the rows.
 
 All times are shown in Georgia time (Asia/Tbilisi, UTC+4); horizons are measured from the data
-cutoff, as in the evaluation (``horizon = valid_to - cutoff``).
+cutoff in two ways: the evaluation horizon (cadence-aligned interval ordinal, the gate key, computed
+by the same function as the evaluator) and the actual lead time ``valid_to - cutoff`` shown to users.
 """
 
 from __future__ import annotations
@@ -21,6 +22,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import pandas as pd
+
+from forecasting.contract import CADENCES as CONTRACT_CADENCES
+from forecasting.evaluate import horizon_min as evaluation_horizon
 
 TZ = "Asia/Tbilisi"
 STALE_AFTER = timedelta(minutes=60)
@@ -48,14 +52,14 @@ class Latest:
 
 def parse(text: str | None) -> Latest:
     if not text or not text.strip():
-        return Latest(pd.DataFrame(columns=[*REQUIRED, "horizon_min"]), 0, ["missing"])
+        return Latest(pd.DataFrame(columns=[*REQUIRED, "horizon_min", "lead_min"]), 0, ["missing"])
     try:
         df = pd.read_csv(io.StringIO(text))
     except (pd.errors.ParserError, pd.errors.EmptyDataError):
-        return Latest(pd.DataFrame(columns=[*REQUIRED, "horizon_min"]), 0, ["unreadable"])
+        return Latest(pd.DataFrame(columns=[*REQUIRED, "horizon_min", "lead_min"]), 0, ["unreadable"])
     missing = [c for c in REQUIRED if c not in df.columns]
     if missing:
-        return Latest(pd.DataFrame(columns=[*REQUIRED, "horizon_min"]), len(df), [f"columns missing: {missing}"])
+        return Latest(pd.DataFrame(columns=[*REQUIRED, "horizon_min", "lead_min"]), len(df), [f"columns missing: {missing}"])
     n = len(df)
     for c in ("issued", "cutoff", "valid_from", "valid_to"):
         df[c] = pd.to_datetime(df[c], utc=True, errors="coerce")
@@ -67,8 +71,13 @@ def parse(text: str | None) -> Latest:
           & df["mw"].map(lambda v: isinstance(v, float) and math.isfinite(v))
           & df["mw"].between(MW_MIN, MW_MAX)
           & (df["valid_to"] > df["valid_from"]) & (df["issued"] >= df["cutoff"]))
+    ok &= df["cadence"].isin(list(CONTRACT_CADENCES))
     df = df[ok].copy()
-    df["horizon_min"] = ((df["valid_to"] - df["cutoff"]).dt.total_seconds() // 60).astype(int)
+    # Gate key: the evaluator's cadence-aligned interval ordinal (shared function, identical keys).
+    df["horizon_min"] = [evaluation_horizon(c, f.to_pydatetime(), cad)
+                         for c, f, cad in zip(df["cutoff"], df["valid_from"], df["cadence"], strict=True)]
+    # Truthful timing for people: lead time from the data cutoff to the end of the interval.
+    df["lead_min"] = ((df["valid_to"] - df["cutoff"]).dt.total_seconds() // 60).astype(int)
     return Latest(df.sort_values(["model_id", "cadence", "valid_from"]).reset_index(drop=True), n - len(df),
                   [] if n == len(df) else [f"{n - len(df)} invalid rows dropped"])
 

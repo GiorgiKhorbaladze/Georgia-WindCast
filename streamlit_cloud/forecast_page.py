@@ -266,15 +266,22 @@ def _mw_forecast(lang: str, board: dict | None, reader, now) -> None:
     band = fd.has_band(s)
     table = pd.DataFrame({
         tr("fc_col_h", lang): [horizon_label(int(h), lang) for h in s.horizon_min],
+        tr("fcd_lead", lang): [_lead(int(m), lang) for m in s.lead_min],
         tr("fcd_valid", lang): [f"{fd.local(a)} - {fd.local(b)[-5:]}" for a, b in zip(s.valid_from, s.valid_to, strict=True)],
         "MW": s.mw.round(1),
     })
     if band:
         table["q10-q90, MW"] = [f"{a:.1f} - {b:.1f}" for a, b in zip(s.q10, s.q90, strict=True)]
     st.dataframe(table, hide_index=True, width="stretch")
+    st.caption(tr("fcd_horizon_note", lang))
     if not band:
         st.caption(tr("fcd_no_band", lang))
     ui.note(tr("fcd_gate_note", lang, days=fgate.MIN_DAYS, cases=fgate.MIN_CASES))
+
+
+def _lead(minutes: int, lang: str) -> str:
+    h, m = divmod(minutes, 60)
+    return f"{h} {tr('fc_h', lang)} {m:02d} {tr('fc_min', lang)}" if h else f"{m} {tr('fc_min', lang)}"
 
 
 def _actuals(reader, now) -> pd.DataFrame | None:

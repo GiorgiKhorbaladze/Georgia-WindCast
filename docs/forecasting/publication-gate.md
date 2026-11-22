@@ -44,6 +44,15 @@ before the chart and table are built.
 - Only the 15-minute and 1-hour views exist. Gate keys for other cadences (3 min, 1 day) are not
   offered, so no empty choice can appear.
 
+**Horizon convention.** Gate keys use the evaluator's cadence-aligned interval ordinal,
+`forecasting.evaluate.horizon_min`, which is the same function the leaderboard uses. With a 1 h cadence
+and a cutoff of 07:12, 08:00-09:00 is "1 h" (key 60). The page also shows the true lead time
+(`valid_to - cutoff`, here 1 h 48 min) and explains the difference.
+
+On real `latest.csv` data from 22.11, the display keys equal the live leaderboard keys:
+- 15 m: 15-360;
+- 1 h: 60-1440. The 2880 key is not scored yet because the 48 h forecasts have not matured.
+
 Showing unvalidated numbers would be a different, explicit owner decision.
 
 ## Current evidence (leaderboard 22.11.2026 07:16 UTC)

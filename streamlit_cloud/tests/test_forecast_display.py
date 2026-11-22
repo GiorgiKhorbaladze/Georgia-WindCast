@@ -16,21 +16,53 @@ from forecasting import gate
 from i18n import T, tr
 
 NOW = datetime(2026, 11, 22, 10, 0, tzinfo=UTC)
-CUT = NOW - timedelta(minutes=15)
+CUT = NOW - timedelta(minutes=18)  # 09:42, on the 3-minute grid like the real producer
 
 
 def latest_csv(cut=CUT, rows=None):
+    """Real producer format: 1 h intervals aligned to the clock after the cutoff (k-th full hour)."""
     head = "model_id,cadence,issued,cutoff,valid_from,valid_to,mw"
+    first = (cut + timedelta(minutes=59)).replace(minute=0, second=0, microsecond=0)
     rows = rows or [f"damped_trend,1h,{(cut + timedelta(minutes=3)).isoformat()},{cut.isoformat()},"
-                    f"{(cut + timedelta(hours=h - 1)).isoformat()},{(cut + timedelta(hours=h)).isoformat()},{10.0 * h}"
-                    for h in (1, 2, 3, 6)]
+                    f"{(first + timedelta(hours=k - 1)).isoformat()},{(first + timedelta(hours=k)).isoformat()},{10.0 * k}"
+                    for k in (1, 2, 3, 6)]
     return head + "\n" + "\n".join(rows) + "\n"
 
 
-def test_parse_keeps_units_and_measures_horizon_from_the_cutoff():
+def test_parse_keeps_units_and_uses_the_evaluator_horizon_plus_true_lead_time():
     lat = fd.parse(latest_csv())
     assert list(lat.rows.horizon_min) == [60, 120, 180, 360] and list(lat.rows.mw) == [10.0, 20.0, 30.0, 60.0]
+    assert list(lat.rows.lead_min) == [78, 138, 198, 378]  # 10:00-11:00 after a 09:42 cutoff = 78 min lead
     assert lat.dropped == 0 and not fd.is_stale(lat.rows, NOW)
+
+
+def test_QA_real_format_keys_match_the_leaderboard_convention():
+    """Real latest.csv, 22.11: cutoff 07:12Z; 1h 08:00-09:00 is gate key 60 (lead 108 min);
+    15m 07:15-07:30 is gate key 15 (lead 18 min). Same function as forecasting/evaluate.py."""
+    from forecasting.evaluate import horizon_min
+    text = ("model_id,cadence,issued,cutoff,valid_from,valid_to,mw\n"
+            "damped_trend,1h,2026-11-22T07:15:54+00:00,2026-11-22T07:12:00+00:00,2026-11-22T08:00:00+00:00,2026-11-22T09:00:00+00:00,131.2\n"
+            "damped_trend,1h,2026-11-22T07:15:54+00:00,2026-11-22T07:12:00+00:00,2026-11-22T09:00:00+00:00,2026-11-22T10:00:00+00:00,131.7\n"
+            "damped_trend,1h,2026-11-22T07:15:54+00:00,2026-11-22T07:12:00+00:00,2026-11-24T07:00:00+00:00,2026-11-24T08:00:00+00:00,131.8\n"
+            "damped_trend,15m,2026-11-22T07:15:54+00:00,2026-11-22T07:12:00+00:00,2026-11-22T07:15:00+00:00,2026-11-22T07:30:00+00:00,130.0\n")
+    rows = fd.parse(text).rows
+    one_h = rows[rows.cadence == "1h"]
+    assert list(one_h.horizon_min) == [60, 120, 2880] and list(one_h.lead_min) == [108, 168, 2928]
+    q = rows[rows.cadence == "15m"]
+    assert list(q.horizon_min) == [15] and list(q.lead_min) == [18]
+    for r in rows.itertuples():
+        assert r.horizon_min == horizon_min(r.cutoff.to_pydatetime(), r.valid_from.to_pydatetime(), r.cadence)
+    keys = fd.eligible({"passing": [{"model_id": "damped_trend", "cadence": "1h", "horizon_min": 60},
+                                    {"model_id": "damped_trend", "cadence": "15m", "horizon_min": 15}]})
+    pub1 = fd.publishable(fd.series(rows, "damped_trend", "1h"), keys, "damped_trend", "1h")
+    assert list(pub1.mw) == [131.2]  # 2 h and 48 h withheld
+    pub15 = fd.publishable(fd.series(rows, "damped_trend", "15m"), keys, "damped_trend", "15m")
+    assert list(pub15.mw) == [130.0]
+
+
+def test_unknown_cadence_rows_are_dropped():
+    text = latest_csv().replace("damped_trend,1h,", "damped_trend,2h,", 1)
+    assert fd.parse(text).dropped == 1
 
 
 def test_times_are_shown_in_georgia_time():
@@ -91,7 +123,8 @@ def test_only_gate_approved_keys_are_publishable_and_persistence_never():
 
 def test_one_issue_per_curve_and_no_band_without_genuine_quantiles():
     rows = latest_csv().splitlines()[1:]
-    older = rows[0].replace(CUT.isoformat(), (CUT - timedelta(minutes=15)).isoformat())
+    older = rows[0].replace(CUT.isoformat(), (CUT - timedelta(minutes=15)).isoformat()).replace(
+        (CUT + timedelta(minutes=3)).isoformat(), (CUT - timedelta(minutes=12)).isoformat())
     s = fd.series(fd.parse(latest_csv(rows=rows + [older])).rows, "damped_trend", "1h")
     assert s.issued.nunique() == 1 and not fd.has_band(s)
 
