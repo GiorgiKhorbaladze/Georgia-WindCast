@@ -106,3 +106,51 @@ def test_tournament_workflow_is_daily_isolated_and_unpublished():
     assert "push -q origin forecast-data" in wf and "origin data\n" not in wf.split("push")[-1]
     import mwmodel
     assert mwmodel.PUBLISH_FORECAST is False
+
+
+# --- QA T1 (#63 audit, 21.11.2026): failure isolation with missing weather / NaN output -------
+def test_weather_without_training_coverage_is_not_used_and_ridge_stays_finite():
+    def weather(issues, targets):  # only the last day has weather: no training coverage
+        last = issues.max() - pd.Timedelta(hours=20)
+        return pd.DataFrame({"gfs:wind": np.where(issues > last, 7.0, np.nan)}, index=issues)
+    res = tournament.run(obs(10, noise=2), specs=[mlmodels.Persistence(), mlmodels.RidgeLags()],
+                         weather=weather, horizons=(1,))
+    assert res["weather_features"][1] == []  # dropped: < 80 % of training rows had it
+    assert {r["model_id"] for r in res["scores"]} == {"persistence", "ridge"}
+    assert all(np.isfinite(r["mae"]) for r in res["scores"])
+
+
+def test_all_nan_challenger_is_excluded_not_fatal():
+    class NaNModel(mlmodels.ModelSpec):
+        def __init__(self):
+            super().__init__("nanmodel", None)
+
+        def fit_predict(self, train, test, feats, horizon, y):
+            return np.full(len(test), np.nan)
+    res = tournament.run(obs(8), specs=[mlmodels.Persistence(), NaNModel()], horizons=(1,))
+    assert {r["model_id"] for r in res["scores"]} == {"persistence"}
+    assert any(e["model_id"] == "nanmodel" for e in res["excluded"]) and res["notes"]["nanmodel"]
+
+
+def test_partially_missing_predictions_keep_identical_cases():
+    class Half(mlmodels.ModelSpec):
+        def __init__(self):
+            super().__init__("half", None)
+
+        def fit_predict(self, train, test, feats, horizon, y):
+            p = test["lag1"].to_numpy(dtype=float).copy()
+            p[::4] = np.nan  # 75 % coverage: eligible, cohort shrinks for everyone
+            return p
+    res = tournament.run(obs(8), specs=[mlmodels.Persistence(), Half()], horizons=(1,))
+    rows = {r["model_id"]: r for r in res["scores"]}
+    assert rows["half"]["cases"] == rows["persistence"]["cases"]
+
+
+def test_score_handles_absent_models_and_empty_input():
+    df = pd.DataFrame([("persistence", 1, "d", pd.Timestamp("2026-11-10", tz="UTC"), None, 5.0, 4.0)],
+                      columns=["model_id", "horizon_h", "day", "issue", "target_start", "actual", "pred"])
+    rows, excluded = tournament.score(df, models=["persistence", "ridge"], with_excluded=True)
+    assert [r["model_id"] for r in rows] == ["persistence"] and excluded[0]["model_id"] == "ridge"
+    assert tournament.score(df.iloc[0:0], models=["ridge"], with_excluded=True) == ([], [{"model_id": "ridge", "reason": "no predictions"}])
+    res = tournament.run(obs(8), specs=[], horizons=(1,))  # no model at all: honest empty report
+    assert res["scores"] == [] and res["excluded"] == []

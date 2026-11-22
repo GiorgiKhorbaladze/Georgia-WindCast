@@ -466,3 +466,133 @@ def test_approve_keys_refuses_stale_or_unknown_revisions_atomically():
 def test_workflow_offers_keyed_approval():
     wf = (HERE.parents[1] / ".github" / "workflows" / "history-monitor.yml").read_text(encoding="utf-8")
     assert "approve_keys" in wf and "history_monitor.py approve-keys" in wf
+
+
+# --- QA A-D, C/H3 (#64 audit, 21.11.2026) ----------------------------------------------------
+def _approved(value, decimals, sha="a"):
+    a = wh.Archive.empty()
+    a.apply(obs(value, sha=sha, decimals=decimals), T0, initial_status=wh.PENDING)
+    a.approve(T0, 1, "ok")
+    return a
+
+
+@pytest.mark.parametrize("mode", ["keys", "through"])
+def test_A_approved_revision_takes_its_own_printed_precision(mode):
+    a = _approved(6.0, 0)  # printed "6"
+    a.apply(obs(7.0, sha="b", decimals=2), T0, initial_status=wh.PENDING)  # printed "7,00"
+    rec = a.records[("kartli-gori", 2025, 1)]
+    if mode == "keys":
+        wh.approve_keys(a, T0, [("kartli-gori", 2025, 1, rec.pending_revision_id)], "ok")
+    else:
+        a.approve(T0, rec.pending_revision_id, "ok")
+    assert a.records[("kartli-gori", 2025, 1)].decimals == 2
+    b = wh.Archive.load(*a.dump())  # CSV round-trip keeps it
+    assert b.apply(obs(7.40, sha="c", decimals=2), T0, initial_status=wh.PENDING) == "revision_pending"
+
+
+def test_A_fine_to_coarse_precision_is_also_promoted():
+    a = _approved(6.123, 3)
+    a.apply(obs(6.2, sha="b", decimals=1), T0, initial_status=wh.PENDING)
+    a.approve(T0, a.records[("kartli-gori", 2025, 1)].pending_revision_id, "ok")
+    assert a.records[("kartli-gori", 2025, 1)].decimals == 1
+
+
+def _legacy(energy, sha, kind="gse_balance_pdf", status_value=wh.VERIFIED, workbook_decimals=None):
+    a = wh.Archive.empty()
+    if kind == "owner_workbook_then_pdf":
+        a.apply(obs(energy, sha="wb", kind="owner_workbook", decimals=workbook_decimals or 2), T0, initial_status=wh.OWNER)
+        a.apply(obs(energy, sha=sha, decimals=2), T0, initial_status=wh.PENDING)  # verified by the document
+    else:
+        a.apply(obs(energy, sha=sha, decimals=2), T0, initial_status=wh.PENDING)
+        a.approve(T0, 1, "ok")
+    records, ledger = a.dump()
+    header, *rows = records.splitlines()
+    legacy = "\n".join([header.rsplit(",", 1)[0]] + [r.rsplit(",", 1)[0] for r in rows]) + "\n"
+    b = wh.Archive.load(legacy, ledger)
+    if workbook_decimals is not None:
+        b.seed_decimals = {("kartli-gori", 2025, 1): workbook_decimals}
+    return b
+
+
+@pytest.mark.parametrize("stored, printed", [(6.0, 6.40), (0.0, 0.40)])
+def test_B_legacy_false_match_is_quarantined_not_grandfathered(stored, printed):
+    b = _legacy(stored, "X")
+    assert b.apply(obs(printed, sha="X", decimals=2), T0, initial_status=wh.PENDING) == "legacy_conflict"
+    rec = b.records[("kartli-gori", 2025, 1)]
+    assert rec.verification_status == wh.CONFLICT and rec.pending_energy == printed and rec.energy == stored
+
+
+def test_B_exact_legacy_match_keeps_revision_id_and_records_document_precision():
+    b = _legacy(6.52, "X")
+    rid = b.records[("kartli-gori", 2025, 1)].revision_id
+    assert b.apply(obs(6.52, sha="X", decimals=2), T0, initial_status=wh.PENDING) == "precision_recorded"
+    rec = b.records[("kartli-gori", 2025, 1)]
+    assert (rec.revision_id, rec.decimals, rec.verification_status) == (rid, 2, wh.APPROVED)  # status unchanged
+
+
+def test_B_legitimate_workbook_rounding_is_supported_with_provable_precision():
+    b = _legacy(1.83, "X", kind="owner_workbook_then_pdf", workbook_decimals=2)
+    assert b.apply(obs(1.83474, sha="X", decimals=5), T0, initial_status=wh.PENDING) == "precision_recorded"
+    assert b.records[("kartli-gori", 2025, 1)].decimals == 2
+    c = _legacy(1.83, "X", kind="owner_workbook_then_pdf")  # precision not provable (no seed cell)
+    c.seed_decimals = {}
+    assert c.apply(obs(1.83474, sha="X", decimals=5), T0, initial_status=wh.PENDING) == "legacy_conflict"
+
+
+def test_D_reverted_source_withdraws_the_stale_proposal():
+    a = _approved(6.52, 2, sha="A")
+    a.apply(obs(6.80, sha="B", decimals=2), T0, initial_status=wh.PENDING)
+    stale = a.records[("kartli-gori", 2025, 1)].pending_revision_id
+    assert a.apply(obs(6.52, sha="C", decimals=2), T0, initial_status=wh.PENDING) == "provenance_refreshed"
+    b = wh.Archive.load(*a.dump())  # also after reload
+    assert b.records[("kartli-gori", 2025, 1)].pending_revision_id is None
+    with pytest.raises(wh.ApprovalError, match="nothing pending"):
+        wh.approve_keys(b, T0, [("kartli-gori", 2025, 1, stale)], "ok")
+    assert b.approve(T0, stale, "ok") == [] and b.records[("kartli-gori", 2025, 1)].energy == 6.52
+    assert any(r.action == "withdraw" for r in b.ledger)
+
+
+def test_D_owner_conflict_reverted_becomes_verified_not_stale_pending():
+    a = wh.Archive.empty()
+    a.apply(obs(6.52, sha="wb", kind="owner_workbook", decimals=2), T0, initial_status=wh.OWNER)
+    a.apply(obs(6.80, sha="B", decimals=2), T0, initial_status=wh.PENDING)  # conflict
+    assert a.apply(obs(6.52, sha="C", decimals=2), T0, initial_status=wh.PENDING) == "verified"
+    rec = a.records[("kartli-gori", 2025, 1)]
+    assert rec.verification_status == wh.VERIFIED and rec.pending_revision_id is None
+
+
+def test_tolerance_is_never_wider_than_rounding_of_two_decimals():
+    a = _approved(6.0, 0)
+    assert a.apply(obs(6.40, sha="b", decimals=0), T0, initial_status=wh.PENDING) == "revision_pending"
+
+
+def test_C_parser_upgrade_fetches_in_full_despite_304(tmp_path):
+    fake = FakeGSE({2020: text(2020)})
+    run(tmp_path, fake, T0)
+    src = tmp_path / "history" / "sources.json"
+    data = json.loads(src.read_text())
+    data["2020"]["parser"] = "gse-balance-pdf/1"  # stored by the previous parser
+    src.write_text(json.dumps(data))
+    fake.calls.clear()
+    report = run(tmp_path, fake, T0 + timedelta(days=20))
+    url = next(u for u, y in fake.urls.items() if y == 2020)
+    assert "If-None-Match" not in dict(fake.calls)[url]  # unconditional: no 304 shortcut
+    assert json.loads(src.read_text())["2020"]["parser"] == gb.PARSER_VERSION
+    assert report["documents"]["2020"] in (gb.UPDATED, gb.NEW, gb.UNCHANGED)
+    fake.calls.clear()
+    run(tmp_path, fake, T0 + timedelta(days=40))  # second run: conditional again, idempotent
+    assert "If-None-Match" in dict(fake.calls)[url]
+
+
+def test_H3_rejected_document_is_rechecked_in_full_and_validators_not_adopted(tmp_path):
+    fake = FakeGSE({2020: text(2020)})
+    run(tmp_path, fake, T0)
+    good = json.loads((tmp_path / "history" / "sources.json").read_text())["2020"]["etag"]
+    fake.texts[2020] = text(2020).replace("ianvari", "January")  # layout change -> rejected
+    assert run(tmp_path, fake, T0 + timedelta(days=20))["documents"]["2020"] == gb.UNSUPPORTED
+    entry = json.loads((tmp_path / "history" / "sources.json").read_text())["2020"]
+    assert entry["etag"] == good  # the rejected document's ETag is not stored
+    fake.calls.clear()
+    assert run(tmp_path, fake, T0 + timedelta(days=40))["documents"]["2020"] == gb.UNSUPPORTED  # still visible
+    url = next(u for u, y in fake.urls.items() if y == 2020)
+    assert "If-None-Match" not in dict(fake.calls)[url]

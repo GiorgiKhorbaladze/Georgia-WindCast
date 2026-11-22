@@ -231,13 +231,17 @@ FILES = ("wind_monthly.csv", "wind_monthly_revisions.csv")
 
 def load_archive(directory: Path, seed: Path) -> tuple[Archive, bool]:
     """Read ``history/`` from the data-branch checkout; bootstrap it from the reviewed seed once."""
+    seed_texts = [(seed / name).read_text(encoding="utf-8") for name in FILES]
+    seed_decimals = {r.key: r.decimals for r in Archive.load(*seed_texts).records.values() if r.decimals is not None}
     if all((directory / name).exists() for name in FILES):
         texts = [(directory / name).read_text(encoding="utf-8") for name in FILES]
-        return Archive.load(*texts), False
-    if any((directory / name).exists() for name in FILES):
+        archive, seeded = Archive.load(*texts), False
+    elif any((directory / name).exists() for name in FILES):
         raise StructureError("history archive is incomplete; refusing to re-seed over it")
-    texts = [(seed / name).read_text(encoding="utf-8") for name in FILES]
-    return Archive.load(*texts), True
+    else:
+        archive, seeded = Archive.load(*seed_texts), True
+    archive.seed_decimals = seed_decimals  # provable precision of the owner workbook cells
+    return archive, seeded
 
 
 def save_archive(directory: Path, archive: Archive) -> None:
@@ -350,7 +354,11 @@ def _write_json(path: Path, data: dict) -> None:
 def _check_document(doc, prior, archive, fetch, now, workdir, to_text, report) -> str:
     stamp = _iso(now)
     headers = {}
-    if prior.get("url") == doc.url:
+    # Conditional requests only when the stored state is an ACCEPTED parse by the current parser.
+    # After a parser upgrade or a rejected/failed document the file is fetched in full, so a 304
+    # can never skip a needed re-parse or hide a rejection (QA C/H3).
+    accepted = prior.get("state") in (UNCHANGED, NEW, UPDATED) and prior.get("parser") == PARSER_VERSION
+    if prior.get("url") == doc.url and accepted:
         if prior.get("etag"):
             headers["If-None-Match"] = prior["etag"]
         if prior.get("last_modified"):
@@ -362,15 +370,15 @@ def _check_document(doc, prior, archive, fetch, now, workdir, to_text, report) -
     except Exception as exc:  # network errors keep the previous state and data
         prior.update(state=DOWNLOAD_FAILED, error=type(exc).__name__)
         return DOWNLOAD_FAILED
-    if got.status == 304 and prior.get("sha256"):
+    if got.status == 304 and prior.get("sha256") and accepted:
         prior.update(state=UNCHANGED)
         return UNCHANGED
     if got.status != 200 or not got.body or len(got.body) > MAX_PDF_BYTES or not got.body.startswith(b"%PDF"):
         prior.update(state=DOWNLOAD_FAILED, error=f"http {got.status}, {len(got.body)} bytes")
         return DOWNLOAD_FAILED
     sha = hashlib.sha256(got.body).hexdigest()
-    prior.update(etag=got.etag, last_modified=got.last_modified, bytes=len(got.body))
-    if sha == prior.get("sha256") and prior.get("parser") == PARSER_VERSION:
+    if sha == prior.get("sha256") and prior.get("parser") == PARSER_VERSION and accepted:
+        prior.update(etag=got.etag, last_modified=got.last_modified)
         prior.update(state=UNCHANGED)
         return UNCHANGED
     kind = UPDATED if prior.get("sha256") else NEW
@@ -388,5 +396,7 @@ def _check_document(doc, prior, archive, fetch, now, workdir, to_text, report) -
         changes[outcome] = changes.get(outcome, 0) + 1
     if prior.get("sha256") and prior["sha256"] != sha:
         prior.setdefault("history", []).append({"sha256": prior["sha256"], "replaced_at": stamp})
-    prior.update(state=kind, sha256=sha, parser=PARSER_VERSION, error="", rejected_sha256="")
+    # Validators of the ACCEPTED document only: a rejected document's ETag is never stored.
+    prior.update(state=kind, sha256=sha, parser=PARSER_VERSION, error="", rejected_sha256="",
+                 etag=got.etag, last_modified=got.last_modified, bytes=len(got.body))
     return kind
