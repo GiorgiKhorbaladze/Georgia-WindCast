@@ -254,7 +254,8 @@ def cmd_tournament(data_dir: Path, out: Path, now: datetime) -> dict:
     (out / "evaluation").mkdir(parents=True, exist_ok=True)
     for name, fn in variants.items():
         res = tournament.run(obs, weather=fn)
-        report["variants"][name] = {"status": res["status"], "scores": res["scores"]}
+        report["variants"][name] = {"status": res["status"], "scores": res["scores"], "notes": res["notes"],
+                                    "excluded": res["excluded"], "weather_features": res["weather_features"]}
         res["predictions"].to_csv(out / "evaluation" / f"tournament_{name}.csv.gz", index=False)
     if len(variants) == 1:
         report["weather_ablation"] = "not run: no as-of weather runs stored yet"
