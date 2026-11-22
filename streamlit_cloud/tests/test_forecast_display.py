@@ -213,3 +213,25 @@ def test_actual_gse_generation_is_overlaid_separately():
     names = [tr("fcd_actual", "en"), tr("fcd_forecast", "en")]
     chart = at.get("plotly_chart")[0].proto.spec
     assert all(n in chart for n in names)
+
+
+def test_unsupported_cadences_never_become_choices():
+    g = {"passing": [{"model_id": "damped_trend", "cadence": "3m", "horizon_min": 3},
+                     {"model_id": "ridge", "cadence": "1d", "horizon_min": 1440}]}
+    assert fd.eligible(g) == {}
+    g["passing"].append({"model_id": "damped_trend", "cadence": "1h", "horizon_min": 60})
+    assert fd.eligible(g) == {("damped_trend", "1h"): {60}}
+
+
+@pytest.mark.parametrize("passing, expect_info", [
+    ((("damped_trend", "3m", 3),), "fcd_gate_none"),                          # 3m only: fail closed, no widget
+    ((("damped_trend", "3m", 3), ("damped_trend", "1h", 60)), None),         # mixture: only the 1 h row
+    ((("ridge", "3m", 3), ("damped_trend", "1h", 60)), None),                # 3m-only model next to a 1h model
+])
+def test_page_handles_3m_gate_keys_without_empty_choices(passing, expect_info):
+    at, _ = run_page("en", True, latest_csv(), board=board_json(passing=passing))
+    if expect_info:
+        assert any(i.value == tr(expect_info, "en") for i in at.info)
+    else:
+        assert list(at.dataframe[0].value["MW"]) == [10.0]
+        assert at.selectbox(key="fcd_model").options == ["Damped trend"]

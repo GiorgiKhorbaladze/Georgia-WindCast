@@ -36,7 +36,13 @@ before the chart and table are built.
 - Freshness is checked on the selected series: a data cutoff older than 60 min is stale.
 - An issue time or cutoff in the future (beyond 5 min clock skew) is rejected.
 - Plausibility bounds: −1 MW to 105 % of the nameplate figures in `capacity.py`. Rows outside are
-  dropped, never clamped.
+  dropped, never clamped. The page counts and reports dropped rows.
+  - The ceiling (about 258 MW) includes the **unverified** Ruisi estimate of 206.25 MW. It is a
+    provisional sanity bound, not an official fleet nameplate, and must be raised with any capacity
+    expansion.
+  - The floor relates to small negative **net** GSE values.
+- Only the 15-minute and 1-hour views exist. Gate keys for other cadences (3 min, 1 day) are not
+  offered, so no empty choice can appear.
 
 Showing unvalidated numbers would be a different, explicit owner decision.
 

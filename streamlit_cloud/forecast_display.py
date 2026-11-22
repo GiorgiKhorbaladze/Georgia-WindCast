@@ -29,7 +29,10 @@ CLOCK_SKEW = timedelta(minutes=5)  # issue/cutoff later than now + skew: invalid
 # Floor: GSE net 3-minute values (and persistence forecasts of them) are slightly negative in calm
 # (station auxiliary load; -0.11 MW seen in the ledger); below -1 MW is invalid.
 # Ceiling: 105 % of the nameplate figures in forecasting/capacity.py (Kartli 20.7 + Zemo 18.75 +
-# Ruisi 206.25 MW, unverified figures included as an upper bound only). Raise with new capacity.
+# Ruisi 206.25 MW, unverified figures included as an upper bound only). This is a provisional
+# sanity bound, NOT an established official fleet nameplate; dropped rows are always counted and
+# reported on the page, so a capacity expansion cannot suppress values silently. Raise it with new
+# capacity. The floor relates to small negative NET GSE values, not to gross generation.
 MW_MIN = -1.0
 MW_MAX = round(1.05 * (20.7 + 18.75 + 206.25), 1)
 REQUIRED = ("model_id", "cadence", "issued", "cutoff", "valid_from", "valid_to", "mw")
@@ -87,10 +90,11 @@ def is_stale(df: pd.DataFrame, now: datetime) -> bool:
 
 
 def eligible(gate: dict | None) -> dict[tuple[str, str], set[int]]:
-    """Publication keys from the live gate: {(model, cadence): {horizon_min}}. Persistence never."""
+    """Publication keys from the live gate: {(model, cadence): {horizon_min}}. Persistence never;
+    only cadences this view supports (CADENCES), so a passing 3m or 1d key cannot leave an empty choice."""
     out: dict[tuple[str, str], set[int]] = {}
     for x in (gate or {}).get("passing", []):
-        if x["model_id"] != "persistence":
+        if x["model_id"] != "persistence" and x.get("cadence") in CADENCES:
             out.setdefault((x["model_id"], x["cadence"]), set()).add(int(x["horizon_min"]))
     return out
 
