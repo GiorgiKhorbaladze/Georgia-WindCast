@@ -31,6 +31,7 @@ ELEMENTS = "datetimeEpoch,temp,humidity,precip,pressure,cloudcover,windspeed,win
 MIN_INTERVAL = timedelta(hours=23)  # one ATTEMPT a day, successful or not
 DAILY_REQUESTS = 7  # one request per point; never more in any rolling 24 h unless the owner changes it
 KEEP_ATTEMPTS = 60
+MIN_FUTURE_HOURS = 36  # each point must cover at least 36 future hours of 10 m wind, or nothing is stored
 MAP = {"temp": "temperature_2m", "humidity": "relative_humidity_2m", "precip": "precipitation",
        "pressure": "pressure_msl", "cloudcover": "cloud_cover", "winddir": "wind_direction_10m"}
 
@@ -154,7 +155,14 @@ def collect(out: Path, key: str | None, get: Callable[[str], tuple[int, bytes]],
                 attempt["result"] = f"http {status} at {p.id}"
                 return {"source": "visualcrossing", "result": "failed", "error": attempt["result"],
                         "requests": attempt["requests_used"]}
-            rows += parse(p.id, body)
+            got = parse(p.id, body)
+            start = pd.Timestamp(now).floor("h")
+            future = {t for (_, t, var, _) in got if var == "wind_speed_10m" and t >= start}
+            if len(future) < MIN_FUTURE_HOURS:  # incomplete response: store nothing, never pad
+                attempt["result"] = f"incomplete at {p.id}: {len(future)} future wind hours"
+                return {"source": "visualcrossing", "result": "failed", "error": attempt["result"],
+                        "requests": attempt["requests_used"]}
+            rows += got
     except Exception as exc:
         attempt["result"] = f"error: {type(exc).__name__}"
         raise

@@ -16,8 +16,8 @@ NOW = datetime(2026, 11, 21, 8, tzinfo=UTC)
 KEY = "secret-test-key-123"
 
 
-def body(wind_kmh=36.0, temp=8.0):
-    t0 = int(NOW.timestamp())
+def body(wind_kmh=36.0, temp=8.0, start=NOW):
+    t0 = int(start.timestamp())
     hours = [{"datetimeEpoch": t0 + 3600 * h, "temp": temp, "humidity": 80.0, "precip": 0.4, "pressure": 1015.0,
               "cloudcover": 90.0, "windspeed": wind_kmh, "winddir": 270.0, "windgust": 54.0} for h in range(48)]
     return json.dumps({"days": [{"hours": hours[:24]}, {"hours": hours[24:]}]}).encode()
@@ -48,12 +48,12 @@ def test_errors_store_no_run_but_record_the_attempt(tmp_path):
     assert m["attempts"][-1]["requests_used"] == 1 and KEY not in json.dumps(m)
 
 
-def _counting(fail_at=None, status=429):
+def _counting(fail_at=None, status=429, start=NOW):
     calls = []
 
     def get(u):
         calls.append(u)
-        return (status, b"") if fail_at is not None and len(calls) == fail_at else (200, body())
+        return (status, b"") if fail_at is not None and len(calls) == fail_at else (200, body(start=start))
     return get, calls
 
 
@@ -73,7 +73,7 @@ def test_QA_429_at_first_point_waits_a_day_then_retries_once(tmp_path):
     get, calls = _counting(fail_at=1)
     assert vc.collect(tmp_path, KEY, get, NOW)["result"] == "failed" and len(calls) == 1
     assert vc.collect(tmp_path, KEY, get, NOW + timedelta(hours=1))["result"] == "not_due"
-    ok, ok_calls = _counting()
+    ok, ok_calls = _counting(start=NOW + timedelta(hours=24))
     assert vc.collect(tmp_path, KEY, ok, NOW + timedelta(hours=24), clock=lambda: NOW)["result"] == "stored"
     assert len(ok_calls) == 7
 
@@ -155,3 +155,17 @@ def test_workflow_pushes_the_reservation_before_collecting():
     assert wf.index("run vc-reserve") < wf.index("run sources")
     block = wf[wf.index("Reserve the Visual Crossing quota"):wf.index("Collect new runs")]
     assert block.index("push -q origin forecast-data") < block.index('VC_RESERVATION_PUSHED=true')
+
+
+def test_incomplete_response_stores_nothing_and_still_counts_the_attempt(tmp_path):
+    t0 = int(NOW.timestamp())
+    short = json.dumps({"days": [{"hours": [{"datetimeEpoch": t0 + 3600 * h, "temp": 8.0, "windspeed": 20.0}
+                                              for h in range(10)]}]}).encode()
+    calls = []
+    res = vc.collect(tmp_path, KEY, lambda u: calls.append(u) or (200, short), NOW)
+    assert res["result"] == "failed" and "incomplete" in res["error"] and len(calls) == 1
+    m = json.loads((tmp_path / vc.ROOT / "manifest.json").read_text())
+    assert m["runs"] == [] and m["attempts"][-1]["requests_used"] == 1
+    assert not (tmp_path / vc.ROOT / "runs").exists()
+    no_wind = json.dumps({"days": [{"hours": [{"datetimeEpoch": t0 + 3600 * h, "temp": 8.0} for h in range(48)]}]})
+    assert vc.collect(tmp_path / "b", KEY, lambda u: (200, no_wind.encode()), NOW)["result"] == "failed"
