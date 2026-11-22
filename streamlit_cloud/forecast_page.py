@@ -185,7 +185,7 @@ def _tournament(t: dict | None, lang: str) -> None:
     if not variants:
         return
     name = st.radio(tr("fc_tour_variant", lang), variants, horizontal=True, key="fc_tour_v",
-                    format_func=lambda v: tr(f"fc_v_{v}", lang) if f"fc_v_{v}" in T else v)
+                    format_func=lambda v: _variant_label(v, lang))
     v = t["variants"][name]
     unavailable = [m for m, s in v.get("status", {}).items() if s != "available"]
     if unavailable:
@@ -294,3 +294,13 @@ def _mw_chart(s: pd.DataFrame, actual: pd.DataFrame, lang: str) -> go.Figure:
     fig.add_scatter(x=x, y=y, mode="lines", name=tr("fcd_forecast", lang),
                     line=dict(color="#a78bfa", dash="dash", shape="hv"))
     return ui.style(fig, 340, "MW")
+
+
+def _variant_label(v: str, lang: str) -> str:
+    """'gse_only' or '<source>_<predictor set>' -> readable label (source names stay as in the data)."""
+    if f"fc_v_{v}" in T:
+        return tr(f"fc_v_{v}", lang)
+    for src in ("icon_openmeteo", "gfs", "ecmwf", "visualcrossing"):
+        if v.startswith(src + "_") and f"fc_v_{v[len(src) + 1:]}" in T:
+            return f"{tr(f'fc_srcname_{src}', lang)}: {tr(f'fc_v_{v[len(src) + 1:]}', lang)}"
+    return v

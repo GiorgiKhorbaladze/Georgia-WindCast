@@ -78,3 +78,13 @@ def test_tournament_table_counts_independent_days():
     cols = list(at.dataframe[1].value.columns)
     assert tr("fc_col_indep", "en") in cols
     assert any(tr("fc_tour_noweather", "en") == c.value for c in at.caption)
+
+
+def test_english_matches_the_corrected_georgian_facts():
+    """Editorial audit 21.11.2026: the factual corrections apply to both languages."""
+    en = {k: v["en"] for k, v in T.items()}
+    assert "instantaneous" not in en["wh_energy_note"] and "average power" in en["wh_energy_note"]
+    assert "does not publish per-plant" not in en["facts_only"] and "combined generation" in en["facts_only"]
+    assert "endorsed" not in en["disclaimer"] and "SCADA" in en["disclaimer"]
+    assert "every 15 minutes" not in en["fc_late_note"].replace("about every 15 minutes", "")
+    assert "Owner" not in en["wh_src_owner"] + en["wh_status_unverified"] + en["wh_origin_seed"]

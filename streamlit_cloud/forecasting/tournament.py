@@ -91,7 +91,8 @@ def weather_features(runs: list, load: Callable, regions: tuple[str, ...]) -> We
                 if v in w.index:
                     rec = w.loc[v]
                     for p in pts:
-                        for var in ("wind_speed_80m", "wind_speed_120m", "temperature_2m", "pressure_msl",
+                        for var in ("wind_speed_10m", "wind_speed_80m", "wind_speed_100m", "wind_speed_120m",
+                                    "temperature_2m", "pressure_msl",
                                     "precipitation", "relative_humidity_2m"):
                             row[f"{p.id}:{var}"] = rec.get((p.id, var), np.nan)
                     if "west" in regions:

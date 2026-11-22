@@ -1,0 +1,107 @@
+name: Independent weather sources (GFS, ECMWF IFS)
+
+# Issue #57 (owner decision 21.11.2026): forecasts from NOAA GFS and ECMWF IFS open data on AWS
+# Open Data, plus a Visual Crossing free-tier pilot (repository secret, 7 requests a day). GFS/IFS from AWS
+# Open Data (no API key, no cost), at the seven forecasting points, so forecasting does not depend
+# on a single provider and the sources can be compared. Hourly wake; each newly published run is
+# stored once (about 4 runs a day per source; roughly 150-250 MB of GRIB downloaded per new run,
+# only the needed fields via HTTP Range). Writes only the forecast-data branch. No publication.
+on:
+  schedule:
+    - cron: "35 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forecast-data  # never pushes at the same time as forecast.yml / the tournament
+  cancel-in-progress: false
+
+jobs:
+  sources:
+    # Scheduled collection stays OFF after merge until the owner enables it: repository variable
+    # WEATHER_SOURCES_ENABLED=true (Settings -> Secrets and variables -> Actions -> Variables).
+    # A manual workflow_dispatch run is a one-off test and does not need the variable.
+    if: github.event_name == 'workflow_dispatch' || vars.WEATHER_SOURCES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write  # repository-scoped permission; the script writes only the forecast-data branch
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          path: code
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: "0.11.32"
+      - name: Install pinned dependencies (ecCodes with its bundled library)
+        run: |
+          uv venv -p 3.12 venv
+          uv pip install -p venv -r code/streamlit_cloud/forecast-weather-requirements.txt
+      - name: Check out forecast-data
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          git init -q out && cd out
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://github.com/$REPO.git"
+          git -c http.extraheader="$auth" fetch -q --depth 1 origin forecast-data
+          git checkout -q -b forecast-data FETCH_HEAD
+      - name: Reserve the Visual Crossing quota and push it BEFORE any API call
+        env:
+          VISUAL_CROSSING_API_KEY: ${{ secrets.VISUAL_CROSSING_API_KEY }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: code/streamlit_cloud
+        # A crash, a cancelled job or a failed push after this point cannot lose the reservation:
+        # if this push does not succeed, the collect step makes no Visual Crossing request at all.
+        run: |
+          res=$(../../venv/bin/python -m forecasting.run vc-reserve --out-dir ../../out)
+          echo "$res"
+          case "$res" in *'"result": "reserved"'*) ;; *) exit 0 ;; esac
+          cd ../../out
+          git add -A weather/sources/visualcrossing
+          git commit -q -m "visual crossing quota reservation $(date -u +%Y-%m-%dT%H:%MZ)"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          for i in 1 2 3 4; do
+            if git -c http.extraheader="$auth" push -q origin forecast-data; then
+              echo "VC_RESERVATION_PUSHED=true" >> "$GITHUB_ENV"; exit 0
+            fi
+            sleep $((i * 5))
+          done
+          echo "::warning::reservation push failed; Visual Crossing skipped this run"
+      - name: Collect new runs (each source independently)
+        id: collect
+        working-directory: code/streamlit_cloud
+        env:
+          VISUAL_CROSSING_API_KEY: ${{ secrets.VISUAL_CROSSING_API_KEY }}  # pilot; once a day, free tier
+        # exit 2 = health alert (every source failed, or one has no run newer than 18 h): what was
+        # collected is still committed below, then the run is marked failed so the owner is notified.
+        run: |
+          rc=0
+          ../../venv/bin/python -m forecasting.run sources --data-dir ../../out --out-dir ../../out || rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then exit "$rc"; fi
+      - name: Commit and push (only when something changed)
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd out
+          git add -A weather
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -q -m "weather sources $(date -u +%Y-%m-%dT%H:%MZ)"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          for i in 1 2 3 4; do
+            git -c http.extraheader="$auth" push -q origin forecast-data && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
+      - name: Fail visibly on a source health alert
+        if: steps.collect.outputs.rc == '2'
+        run: |
+          echo "::error::weather source health alert, see weather/sources/health.json on forecast-data"
+          exit 1
