@@ -143,7 +143,7 @@ def main():
             wind_history_page.render(lang)
             return
         if page == 'gen_forecast':  # experimental forecast evaluation (forecast-data branch)
-            forecast_page.render(lang)
+            forecast_page.render(lang, reader, now)
             return
         cache = source_cache()
         cache.adopt_stored(*reader.weather(now))  # second path when Open-Meteo limits this host

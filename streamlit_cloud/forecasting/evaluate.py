@@ -51,16 +51,23 @@ def parse_constraints(text: str | None) -> list[Constraint]:
     return out
 
 
+def horizon_min(cutoff: datetime, valid_from: datetime, cadence: str) -> int:
+    """Evaluation horizon: the ordinal k of the cadence-aligned interval after the cutoff, times the
+    cadence (1 h cadence, cutoff 07:12: 08:00-09:00 is k=1 -> 60 min). This is the key used by the
+    leaderboard and the publication gate; it is NOT the lead time (valid_to - cutoff = 108 min)."""
+    step = CADENCES[cadence]
+    first = pd.Timestamp(cutoff).ceil(pd.Timedelta(step)).to_pydatetime()
+    k = int((valid_from - first) / step) + 1  # interval number after the cutoff
+    return int(k * step.total_seconds() // 60)
+
+
 def scored_frame(records: list[ForecastRecord], obs: pd.Series, constraints: list[Constraint] = ()) -> pd.DataFrame:
     rows = []
     for r in records:
         actual, n, expected = actual_for(obs, r.valid_from_utc, r.valid_to_utc)
-        step = CADENCES[r.cadence]
-        first = pd.Timestamp(r.data_cutoff_utc).ceil(pd.Timedelta(step)).to_pydatetime()
-        k = int((r.valid_from_utc - first) / step) + 1  # interval number after the cutoff
         rows.append(dict(
             model_id=r.model_id, model_version=r.model_version, cadence=r.cadence,
-            horizon_min=int(k * step.total_seconds() // 60), cutoff=r.data_cutoff_utc,
+            horizon_min=horizon_min(r.data_cutoff_utc, r.valid_from_utc, r.cadence), cutoff=r.data_cutoff_utc,
             valid_from=r.valid_from_utc, issued=r.issued_at_utc, late=r.late, pred=r.prediction_mw,
             actual=actual, n=n, expected=expected, complete=n == expected and actual is not None,
             constrained=any(c.start_utc < r.valid_to_utc and r.valid_from_utc < c.end_utc for c in constraints),
