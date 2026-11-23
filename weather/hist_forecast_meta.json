@@ -1,8 +1,8 @@
 {
-  "retrieved": "2026-11-22T00:00:54.859037+00:00",
-  "url": "https://historical-forecast-api.open-meteo.com/v1/forecast?latitude=42.055596,41.895560,42.022423&longitude=43.985914,44.370612,44.047890&hourly=wind_speed_10m,wind_direction_10m,wind_speed_80m,wind_direction_80m,wind_speed_120m,wind_direction_120m,wind_speed_180m,wind_direction_180m&models=icon_global&start_date=2026-10-22&end_date=2026-11-21&wind_speed_unit=ms&timeformat=unixtime&timezone=GMT",
-  "start": "2026-10-22",
-  "end": "2026-11-21",
-  "sha256": "3351375a0e415bb5d50614a1df582d7b842ec843f63aa599ce8898f251ca2b86",
+  "retrieved": "2026-11-23T00:00:54.478504+00:00",
+  "url": "https://historical-forecast-api.open-meteo.com/v1/forecast?latitude=42.055596,41.895560,42.022423&longitude=43.985914,44.370612,44.047890&hourly=wind_speed_10m,wind_direction_10m,wind_speed_80m,wind_direction_80m,wind_speed_120m,wind_direction_120m,wind_speed_180m,wind_direction_180m&models=icon_global&start_date=2026-10-23&end_date=2026-11-22&wind_speed_unit=ms&timeformat=unixtime&timezone=GMT",
+  "start": "2026-10-23",
+  "end": "2026-11-22",
+  "sha256": "2482859d0c83d4b95cfe622ae4dfa98037498c4802042f19052c3490d2462a2b",
   "content_addressed": true
 }
