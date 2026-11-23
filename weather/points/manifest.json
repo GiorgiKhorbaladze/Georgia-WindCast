@@ -789,6 +789,85 @@
    ],
    "shared_cells": [],
    "values": 9408
+  },
+  {
+   "run": "2026-11-23T12:00:00+00:00",
+   "retrieved": "2026-11-23T17:01:25+00:00",
+   "url": "https://api.open-meteo.com/v1/forecast?latitude=41.640000,42.150000,42.270000,42.020000,42.022423,41.895560,41.720000&longitude=41.630000,41.670000,42.700000,43.550000,44.047890,44.370612,44.790000&hourly=temperature_2m,relative_humidity_2m,precipitation,rain,pressure_msl,surface_pressure,cloud_cover,wind_speed_10m,wind_direction_10m,wind_gusts_10m,wind_speed_80m,wind_direction_80m,wind_speed_120m,wind_direction_120m&models=icon_global&forecast_days=4&wind_speed_unit=ms&timeformat=unixtime&timezone=GMT",
+   "sha256": "928fb780cda33b193397f4ed756a4d80f9584c36eda644ced6afe6c0fbe1d2f7",
+   "file": "runs/20261123T1200Z.json.gz",
+   "model": "icon_global",
+   "points": [
+    "batumi",
+    "poti",
+    "kutaisi",
+    "surami_pass",
+    "kartli_ruisi",
+    "zemo",
+    "tbilisi"
+   ],
+   "variables": [
+    "temperature_2m",
+    "relative_humidity_2m",
+    "precipitation",
+    "rain",
+    "pressure_msl",
+    "surface_pressure",
+    "cloud_cover",
+    "wind_speed_10m",
+    "wind_direction_10m",
+    "wind_gusts_10m",
+    "wind_speed_80m",
+    "wind_direction_80m",
+    "wind_speed_120m",
+    "wind_direction_120m"
+   ],
+   "cells": [
+    {
+     "point": "batumi",
+     "grid_latitude": 41.625,
+     "grid_longitude": 41.75,
+     "elevation_m": 6.0
+    },
+    {
+     "point": "poti",
+     "grid_latitude": 42.125,
+     "grid_longitude": 41.75,
+     "elevation_m": 3.0
+    },
+    {
+     "point": "kutaisi",
+     "grid_latitude": 42.25,
+     "grid_longitude": 42.75,
+     "elevation_m": 148.0
+    },
+    {
+     "point": "surami_pass",
+     "grid_latitude": 42.0,
+     "grid_longitude": 43.5,
+     "elevation_m": 797.0
+    },
+    {
+     "point": "kartli_ruisi",
+     "grid_latitude": 42.0,
+     "grid_longitude": 44.0,
+     "elevation_m": 836.0
+    },
+    {
+     "point": "zemo",
+     "grid_latitude": 41.875,
+     "grid_longitude": 44.375,
+     "elevation_m": 791.0
+    },
+    {
+     "point": "tbilisi",
+     "grid_latitude": 41.75,
+     "grid_longitude": 44.75,
+     "elevation_m": 416.0
+    }
+   ],
+   "shared_cells": [],
+   "values": 9408
   }
  ]
 }
