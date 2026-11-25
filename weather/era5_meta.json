@@ -1,6 +1,6 @@
 {
-  "retrieved": "2026-11-24T00:00:57.078380+00:00",
-  "url": "https://archive-api.open-meteo.com/v1/archive?latitude=42.055596,41.895560,42.022423&longitude=43.985914,44.370612,44.047890&hourly=wind_speed_10m,wind_direction_10m,wind_speed_100m,wind_direction_100m&models=era5&start_date=2026-11-13&end_date=2026-11-19&wind_speed_unit=ms&timeformat=unixtime&timezone=GMT",
-  "sha256": "3894fe6f1cd9dad862e48286266bf6f780906fcfea2078e9bd3d4bc0d08ae1bc",
+  "retrieved": "2026-11-25T00:00:54.562186+00:00",
+  "url": "https://archive-api.open-meteo.com/v1/archive?latitude=42.055596,41.895560,42.022423&longitude=43.985914,44.370612,44.047890&hourly=wind_speed_10m,wind_direction_10m,wind_speed_100m,wind_direction_100m&models=era5&start_date=2026-11-14&end_date=2026-11-20&wind_speed_unit=ms&timeformat=unixtime&timezone=GMT",
+  "sha256": "7ee1f6f6fc9e147903e4995d58a696d8bf8fcd82a00ac9b28cd9290a510a97ce",
   "content_addressed": true
 }
