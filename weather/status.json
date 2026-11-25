@@ -1,6 +1,6 @@
 {
   "era5": "unchanged",
-  "forecast": "failed: timeout",
+  "forecast": "unchanged",
   "hist_forecast": "unchanged",
-  "last_run_at": "2026-11-25T16:30:53.126137+00:00"
+  "last_run_at": "2026-11-25T16:45:35.822935+00:00"
 }
