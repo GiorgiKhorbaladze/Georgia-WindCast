@@ -25,7 +25,7 @@ html, body, [class*="css"], .stMarkdown, .stText, button, input, label, textarea
 [data-testid="stHeader"] {{ background: transparent; }}
 [data-testid="stSidebar"] {{ background: {C['panel']}; border-right: 1px solid {C['border']}; }}
 .block-container {{ padding-top: 1.6rem; max-width: 1320px; }}
-h1, h2, h3 {{ letter-spacing: -0.01em; }}
+h1, h2, h3 {{ letter-spacing: -0.01em; color:{C['text']} !important; }}
 h2 {{ font-size: 1.25rem !important; font-weight: 600 !important; margin-top: 1.4rem !important; }}
 .wc-hero {{ display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;
   padding: 1.1rem 1.3rem; border:1px solid {C['border']}; border-radius:16px;

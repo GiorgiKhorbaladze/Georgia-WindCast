@@ -131,6 +131,10 @@ class CatBoost(ModelSpec):
         return _clip(m.predict(_xy(test, feats)), train)
 
 
+class InsufficientData(ValueError):
+    """Not enough complete history for this model in this fold: a data limit, not a failure."""
+
+
 class Gru(ModelSpec):
     """Small GRU (hidden 16) on the last 48 hourly values, CPU, fixed epochs; torch only."""
 
@@ -158,7 +162,7 @@ class Gru(ModelSpec):
         Xtr, ktr = windows(train.index)
         Xte, kte = windows(test.index)
         if len(Xtr) < 48 or not len(Xte):
-            raise ValueError("not enough complete windows")
+            raise InsufficientData("not enough complete 48-hour windows")
         ytr = (train["y"].to_numpy()[ktr] / scale).astype(np.float32)
 
         class Net(torch.nn.Module):

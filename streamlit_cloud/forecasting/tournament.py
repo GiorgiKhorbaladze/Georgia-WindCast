@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from forecasting.contract import GSE_PERIOD
-from forecasting.mlmodels import ModelSpec, registry
+from forecasting.mlmodels import InsufficientData, ModelSpec, registry
 
 TZ = ZoneInfo("Asia/Tbilisi")
 HORIZONS = (1, 3, 6, 24)
@@ -155,6 +155,9 @@ def run(obs: pd.Series, specs: list[ModelSpec] | None = None, weather: pd.DataFr
             for spec in available:
                 try:
                     p = np.asarray(spec.fit_predict(train, test, fold_feats, h, y), dtype=float)
+                except InsufficientData as exc:  # data limit in this fold: a note, not an error status
+                    notes.setdefault(spec.model_id, []).append(f"h={h} {fold.day}: skipped, {exc}")
+                    continue
                 except Exception as exc:  # a failing challenger is reported, the others continue
                     status[spec.model_id] = f"error: {type(exc).__name__}"
                     log(f"{spec.model_id} h={h} {fold.day}: {exc}")

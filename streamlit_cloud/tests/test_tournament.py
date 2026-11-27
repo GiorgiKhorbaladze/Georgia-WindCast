@@ -154,3 +154,15 @@ def test_score_handles_absent_models_and_empty_input():
     assert tournament.score(df.iloc[0:0], models=["ridge"], with_excluded=True) == ([], [{"model_id": "ridge", "reason": "no predictions"}])
     res = tournament.run(obs(8), specs=[], horizons=(1,))  # no model at all: honest empty report
     assert res["scores"] == [] and res["excluded"] == []
+
+
+def test_insufficient_history_is_a_note_not_an_error():
+    class Short(mlmodels.ModelSpec):
+        def __init__(self):
+            super().__init__("short", None)
+
+        def fit_predict(self, *a):
+            raise mlmodels.InsufficientData("not enough complete 48-hour windows")
+    res = tournament.run(obs(8), specs=[mlmodels.Persistence(), Short()], horizons=(1,))
+    assert res["status"]["short"] == "available"
+    assert any("not enough complete" in n for n in res["notes"]["short"])
