@@ -1,0 +1,84 @@
+{
+ "source": "gfs",
+ "runs": [
+  {
+   "run": "2026-11-27T12:00:00+00:00",
+   "started": "2026-11-27T17:21:51+00:00",
+   "retrieved": "2026-11-27T17:22:57+00:00",
+   "published": "2026-11-27T16:00:31+00:00",
+   "file": "runs/20261127T1200Z.csv.gz",
+   "sha256": "b3a82c8fdc9ac1faad34d756b0c50d80e75c551068b3d6b23cb2b12b2523e679",
+   "evidence": "runs/20261127T1200Z.messages.json.gz",
+   "evidence_sha256": "e10ebeeba847ea9cde292672e9538e0d2f8060487d7f0b3f8d3c17c5c8241c02",
+   "steps": [
+    0,
+    3,
+    6,
+    9,
+    12,
+    15,
+    18,
+    21,
+    24,
+    27,
+    30,
+    33,
+    36,
+    39,
+    42,
+    45,
+    48,
+    51,
+    54,
+    57,
+    60,
+    63,
+    66,
+    69,
+    72
+   ],
+   "cells": [
+    {
+     "point": "batumi",
+     "grid_latitude": 41.75,
+     "grid_longitude": 41.75
+    },
+    {
+     "point": "poti",
+     "grid_latitude": 42.25,
+     "grid_longitude": 41.75
+    },
+    {
+     "point": "kutaisi",
+     "grid_latitude": 42.25,
+     "grid_longitude": 42.75
+    },
+    {
+     "point": "surami_pass",
+     "grid_latitude": 42.0,
+     "grid_longitude": 43.5
+    },
+    {
+     "point": "kartli_ruisi",
+     "grid_latitude": 42.0,
+     "grid_longitude": 44.0
+    },
+    {
+     "point": "zemo",
+     "grid_latitude": 42.0,
+     "grid_longitude": 44.25
+    },
+    {
+     "point": "tbilisi",
+     "grid_latitude": 41.75,
+     "grid_longitude": 44.75
+    }
+   ],
+   "messages": 295,
+   "flags": [],
+   "values": 1918,
+   "bytes": 237591834,
+   "requests": 346
+  }
+ ]
+}
