@@ -25,11 +25,13 @@ class Entry:
 ENTRIES: tuple[Entry, ...] = (
     Entry("kartli-gori", date(2016, 10, 1), 20.7, "unverified", "owner-supplied starting value; official source pending"),
     Entry("zemo-wind", date(2026, 3, 1), 18.75, "unverified", "owner-supplied starting value; first GSE balance month 2026-03"),
-    Entry("ruisi", None, None, "unverified",
-          "secondary sources only: 33 x Goldwind GW171-6.25 MW = 206.25 MW (renews.biz, windtech-international.com); "
-          "press 29.09.2026: launched in test mode (caspianpost.com, news.az); owner recollection: end of "
-          "September or October 2026; first GSE balance value September 2026 (0.31 GWh). No official source for "
-          "commissioning dates or capacity available during testing"),
+    Entry("ruisi", date(2026, 9, 24), None, "unverified",
+          "owner-supplied 27.11.2026: entered the test phase and started generating on 24-27 September 2026; "
+          "per the owner, a qualified enterprise has a 90-day test phase, i.e. until about 23-26 December 2026 "
+          "(output during testing may be irregular). Capacity: secondary sources only, 33 x Goldwind GW171-6.25 MW "
+          "= 206.25 MW (renews.biz, windtech-international.com); press 29.09.2026: launched in test mode "
+          "(caspianpost.com, news.az); first GSE balance value September 2026 (0.31 GWh). No official document yet "
+          "for the commissioning date or the capacity available during testing, so the entry stays unverified"),
 )
 
 
