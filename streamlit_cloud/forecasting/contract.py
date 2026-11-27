@@ -7,7 +7,10 @@ its actual value is the mean of the GSE periods whose label lies in (valid_from,
 Two leads are kept for every forecast, because the collector delivers GSE data in 15-minute
 batches and a 3-minute nowcast is anchored at the last observation, not at the wall clock:
 
-* ``horizon`` = valid_to - data_cutoff (what the model is asked to predict ahead of its data);
+* ``horizon`` = valid_to - data_cutoff: the lead time (what the model is asked to predict ahead of
+  its data). Scores and the publication gate use a different key, the evaluation horizon
+  ``forecasting.evaluate.horizon_min`` (ordinal of the cadence-aligned interval after the cutoff:
+  1 h cadence, cutoff 07:12 -> 08:00-09:00 is "60"); the ledger schema is unchanged;
 * ``effective lead`` = valid_to - issued_at (what a user could actually see in advance).
   A record whose valid_to <= issued_at is a *late* nowcast: archived and scored, but never shown
   as a forecast of the future.
