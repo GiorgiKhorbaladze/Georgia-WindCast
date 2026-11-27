@@ -1,0 +1,13 @@
+{
+ "source": "visualcrossing",
+ "runs": [],
+ "attempts": [
+  {
+   "started": "2026-11-27T18:50:37+00:00",
+   "reserved": 7,
+   "requests_used": 7,
+   "result": "reserved",
+   "run_id": "46052398476"
+  }
+ ]
+}
