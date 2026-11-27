@@ -1,13 +1,25 @@
 {
  "source": "visualcrossing",
- "runs": [],
+ "runs": [
+  {
+   "run": "2026-11-27T18:00:00+00:00",
+   "started": "2026-11-27T18:50:39+00:00",
+   "retrieved": "2026-11-27T18:50:41+00:00",
+   "file": "runs/20261127T1800Z.csv.gz",
+   "sha256": "790fcc1d77e8189a39398815934ef6000299d41aea7d68ae6d6d4385ffc4c2d9",
+   "values": 4032,
+   "requests": 7,
+   "url_template": "https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/0.00000%2C0.00000/next2days?unitGroup=metric&include=hours&elements=datetimeEpoch%2Ctemp%2Chumidity%2Cprecip%2Cpressure%2Ccloudcover%2Cwindspeed%2Cwinddir%2Cwindgust&key=REDACTED&contentType=json"
+  }
+ ],
  "attempts": [
   {
    "started": "2026-11-27T18:50:37+00:00",
    "reserved": 7,
    "requests_used": 7,
-   "result": "reserved",
-   "run_id": "46052398476"
+   "result": "stored",
+   "run_id": "46052398476",
+   "reserved_requests": 7
   }
  ]
 }
