@@ -1,32 +1,32 @@
 {
- "checked_at": "2026-11-27T22:17:33+00:00",
+ "checked_at": "2026-11-28T04:10:28+00:00",
  "stale_after_h": 18,
  "sources": {
   "gfs": {
-   "last_attempt": "2026-11-27T22:17:33+00:00",
+   "last_attempt": "2026-11-28T04:10:28+00:00",
    "last_result": "stored",
    "consecutive_failures": 0,
-   "last_success": "2026-11-27T22:17:33+00:00",
-   "newest_run": "2026-11-27T18:00:00+00:00",
-   "newest_run_age_h": 4.3,
+   "last_success": "2026-11-28T04:10:28+00:00",
+   "newest_run": "2026-11-28T00:00:00+00:00",
+   "newest_run_age_h": 4.2,
    "stale": false
   },
   "ecmwf": {
-   "last_attempt": "2026-11-27T22:17:33+00:00",
+   "last_attempt": "2026-11-28T04:10:28+00:00",
    "last_result": "stored",
    "consecutive_failures": 0,
-   "last_success": "2026-11-27T22:17:33+00:00",
-   "newest_run": "2026-11-27T12:00:00+00:00",
-   "newest_run_age_h": 10.3,
+   "last_success": "2026-11-28T04:10:28+00:00",
+   "newest_run": "2026-11-27T18:00:00+00:00",
+   "newest_run_age_h": 10.2,
    "stale": false
   },
   "visualcrossing": {
-   "last_attempt": "2026-11-27T22:17:33+00:00",
+   "last_attempt": "2026-11-28T04:10:28+00:00",
    "last_result": "not_reserved",
    "consecutive_failures": 0,
-   "last_success": "2026-11-27T22:17:33+00:00",
+   "last_success": "2026-11-28T04:10:28+00:00",
    "newest_run": "2026-11-27T18:00:00+00:00",
-   "newest_run_age_h": 4.3,
+   "newest_run_age_h": 10.2,
    "stale": false
   }
  },
